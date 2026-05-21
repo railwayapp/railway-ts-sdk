@@ -1,0 +1,34 @@
+fragment RailwaySandboxFields on Sandbox {
+  id
+  name
+  status
+  instanceId
+  region
+  projectId
+  environmentId
+  idleTimeoutMinutes
+  createdAt
+  updatedAt
+}
+
+mutation RailwaySandboxCreate($input: SandboxCreateInput!) {
+  sandboxCreate(input: $input) {
+    ...RailwaySandboxFields
+  }
+}
+
+mutation RailwaySandboxExec($id: String!, $command: String!, $timeoutSec: Int) {
+  sandboxExec(id: $id, command: $command, timeoutSec: $timeoutSec) {
+    exitCode
+    stdout
+    stderr
+    truncated
+    timedOut
+  }
+}
+
+mutation RailwaySandboxDestroy($id: String!) {
+  sandboxDestroy(id: $id) {
+    ...RailwaySandboxFields
+  }
+}

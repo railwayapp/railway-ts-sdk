@@ -1,0 +1,54 @@
+[tools]
+node = "22"
+pnpm = "10"
+
+[env]
+NODE_OPTIONS = "--use-system-ca"
+
+[tasks.install]
+description = "Install dependencies"
+run = "pnpm install"
+
+[tasks.build]
+description = "Build the library"
+run = "pnpm run build"
+
+[tasks.dev]
+description = "Watch-build the library"
+run = "pnpm run dev"
+
+[tasks.typecheck]
+description = "Typecheck source, tests, and examples"
+run = "pnpm run typecheck"
+
+[tasks.test]
+description = "Run unit tests"
+run = "pnpm run test"
+
+[tasks.test-watch]
+description = "Run unit tests in watch mode"
+run = "pnpm run test:watch"
+
+[tasks.codegen]
+description = "Regenerate GraphQL types from the configured schema"
+run = "pnpm run codegen"
+
+[tasks.fallow]
+description = "Run Fallow codebase analysis after large changes"
+run = "pnpm exec fallow --format json --fail-on-issues"
+
+[tasks.clean]
+description = "Remove build/test artifacts"
+run = "pnpm run clean"
+
+[tasks.check]
+description = "Run typecheck, tests, and build"
+depends = ["typecheck", "test", "build"]
+
+[tasks.example]
+description = "Run the default manual example using .env credentials"
+depends = ["example:create-exec-delete"]
+
+[tasks."example:create-exec-delete"]
+description = "Create a sandbox, exec a command, then delete it using .env credentials"
+run = "pnpm exec tsx examples/create-exec-delete.ts"
