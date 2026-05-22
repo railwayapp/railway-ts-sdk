@@ -14,8 +14,11 @@ export function sandboxConfigFromEnv(): SandboxConfig {
   };
 }
 
-export function exampleSandboxName(): string {
-  return process.env.RAILWAY_SANDBOX_NAME ?? `sdk-example-${Date.now()}`;
+export function exampleSandboxName(prefix?: string): string {
+  return (
+    process.env.RAILWAY_SANDBOX_NAME ??
+    `${prefix ?? "sdk-example"}-${Date.now()}`
+  );
 }
 
 export async function runExample(example: () => Promise<void>): Promise<void> {
@@ -29,7 +32,8 @@ export async function runExample(example: () => Promise<void>): Promise<void> {
 
 function requiredEnv(name: string): string {
   const value = process.env[name];
-  if (!value) throw new Error(`Missing ${name}. Copy .env.example to .env first.`);
+  if (!value)
+    throw new Error(`Missing ${name}. Copy .env.example to .env first.`);
   return value;
 }
 

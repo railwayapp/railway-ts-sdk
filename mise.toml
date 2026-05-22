@@ -57,3 +57,7 @@ depends = ["example:create-exec-delete"]
 [tasks."example:create-exec-delete"]
 description = "Create a sandbox, exec a command, then delete it using .env credentials"
 run = "pnpm exec tsx examples/sandboxes/create-exec-delete.ts"
+
+[tasks."example:files"]
+description = "Create a sandbox and exercise sandbox file APIs using .env credentials"
+run = "pnpm exec tsx examples/sandboxes/files.ts"

@@ -3,6 +3,7 @@ import type { SandboxSnapshot } from "../src/index.js";
 export interface FetchCall {
   input: string | URL | Request;
   init: RequestInit | undefined;
+  rawBody: BodyInit | null | undefined;
   body: {
     query: string;
     variables?: unknown;
@@ -16,8 +17,9 @@ export function createFetchMock(responses: unknown[]): {
   const calls: FetchCall[] = [];
 
   const fetchMock: typeof fetch = async (input, init) => {
-    const body = JSON.parse(String(init?.body)) as FetchCall["body"];
-    calls.push({ input, init, body });
+    const rawBody = init?.body;
+    const body = parseJsonBody(rawBody);
+    calls.push({ input, init, rawBody, body });
 
     const response = responses.shift();
     if (response instanceof Response) return response;
@@ -51,4 +53,14 @@ export function sandboxSnapshot(
 
 export function header(init: RequestInit | undefined, name: string): string | null {
   return new Headers(init?.headers).get(name);
+}
+
+function parseJsonBody(body: BodyInit | null | undefined): FetchCall["body"] {
+  if (typeof body !== "string") return { query: "" };
+
+  try {
+    return JSON.parse(body) as FetchCall["body"];
+  } catch {
+    return { query: "" };
+  }
 }

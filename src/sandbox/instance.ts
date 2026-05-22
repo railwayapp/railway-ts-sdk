@@ -1,14 +1,18 @@
+import { SandboxFiles } from "./files.js";
+import { readSandboxTree, type SandboxTree } from "./tree.js";
 import type {
   SandboxExecOptions,
   SandboxExecResult,
   SandboxInstanceOperations,
   SandboxSnapshot,
   SandboxStatus,
+  SandboxTreeOptions,
 } from "./types.js";
 
 export class SandboxInstance {
   readonly #operations: SandboxInstanceOperations;
 
+  readonly files: SandboxFiles;
   readonly id: string;
   readonly name: string;
   readonly status: SandboxStatus;
@@ -35,6 +39,7 @@ export class SandboxInstance {
     this.idleTimeoutMinutes = snapshot.idleTimeoutMinutes;
     this.createdAt = snapshot.createdAt;
     this.updatedAt = snapshot.updatedAt;
+    this.files = new SandboxFiles({ sandboxId: this.id, operations });
   }
 
   exec(
@@ -46,6 +51,15 @@ export class SandboxInstance {
 
   delete(): Promise<SandboxInstance> {
     return this.#operations.delete(this.id);
+  }
+
+  tree(options: SandboxTreeOptions = {}): Promise<SandboxTree> {
+    return readSandboxTree({
+      sandboxId: this.id,
+      files: this.files,
+      operations: this.#operations,
+      options,
+    });
   }
 
   toJSON(): SandboxSnapshot {

@@ -12,7 +12,8 @@
   "usedClassMembers": [
     "exec",
     "delete",
-    "toJSON"
+    "toJSON",
+    "toString"
   ],
   "ignorePatterns": [
     "src/generated/graphql.ts"

@@ -28,6 +28,7 @@ import type {
 interface NormalizedSandboxConfig extends NormalizedRailwayClientConfig {
   projectId: string;
   environmentId: string;
+  fileEndpoint: string;
 }
 
 export class Sandbox {
@@ -39,6 +40,7 @@ export class Sandbox {
     this.#operations = {
       exec: (id, command, options) => this.#exec(id, command, options),
       delete: id => this.#delete(id),
+      fileRequest: (id, path, init) => this.#fileRequest(id, path, init),
     };
   }
 
@@ -94,6 +96,23 @@ export class Sandbox {
     return this.#instance(data.sandboxDestroy);
   }
 
+  async #fileRequest(
+    id: string,
+    path: string,
+    init: RequestInit,
+  ): Promise<Response> {
+    const url = new URL(
+      `/api/v1/sandboxes/${encodeURIComponent(id)}/files`,
+      this.#config.fileEndpoint,
+    );
+    url.searchParams.set("path", path);
+
+    const headers = new Headers(init.headers);
+    headers.set("Authorization", `Bearer ${this.#config.token}`);
+
+    return this.#config.fetch(url.toString(), { ...init, headers });
+  }
+
   #instance(snapshot: SandboxSnapshot): SandboxInstance {
     return new SandboxInstance(snapshot, this.#operations);
   }
@@ -105,9 +124,16 @@ function normalizeSandboxConfig(
   assertNonEmpty("projectId", config.projectId);
   assertNonEmpty("environmentId", config.environmentId);
 
+  const railwayConfig = normalizeRailwayClientConfig(config);
+
   return {
-    ...normalizeRailwayClientConfig(config),
+    ...railwayConfig,
     projectId: config.projectId,
     environmentId: config.environmentId,
+    fileEndpoint: deriveSandboxFileEndpoint(railwayConfig.endpoint),
   };
+}
+
+function deriveSandboxFileEndpoint(endpoint: string): string {
+  return new URL(endpoint).origin;
 }

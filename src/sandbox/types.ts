@@ -24,6 +24,44 @@ export interface SandboxExecOptions {
   timeoutSec?: number;
 }
 
+export type SandboxFileType = "FILE" | "DIRECTORY" | "SYMLINK" | "OTHER";
+
+export type SandboxFileData = string | Uint8Array | ArrayBuffer | Blob;
+
+export interface SandboxFileInfo {
+  path: string;
+  size: number;
+  mode: string;
+  modifiedAt: string;
+  type: SandboxFileType;
+}
+
+export interface SandboxFileReadOptions {
+  offset?: number;
+  length?: number;
+}
+
+export interface SandboxFileReadTextOptions extends SandboxFileReadOptions {
+  encoding?: string;
+}
+
+export interface SandboxFileListEntry {
+  name: string;
+  path: string;
+  size: number;
+  modifiedAt: string;
+  type: SandboxFileType;
+}
+
+export interface SandboxTreeOptions {
+  path?: string;
+  depth?: number;
+}
+
+export interface SandboxTreeNode extends SandboxFileListEntry {
+  children: SandboxTreeNode[];
+}
+
 export interface SandboxInstanceOperations {
   exec: (
     id: string,
@@ -31,4 +69,9 @@ export interface SandboxInstanceOperations {
     options: SandboxExecOptions,
   ) => Promise<SandboxExecResult>;
   delete: (id: string) => Promise<import("./instance.js").SandboxInstance>;
+  fileRequest: (
+    id: string,
+    path: string,
+    init: RequestInit,
+  ) => Promise<Response>;
 }
