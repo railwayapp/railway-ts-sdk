@@ -38,6 +38,16 @@
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
       }
+    },
+    "./iac": {
+      "import": {
+        "types": "./dist/iac/index.d.ts",
+        "default": "./dist/iac/index.js"
+      },
+      "require": {
+        "types": "./dist/iac/index.d.cts",
+        "default": "./dist/iac/index.cjs"
+      }
     }
   },
   "files": [

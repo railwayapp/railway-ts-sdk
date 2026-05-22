@@ -16,7 +16,12 @@
     "resolveJsonModule": true,
     "declaration": true,
     "declarationMap": true,
-    "sourceMap": true
+    "sourceMap": true,
+    "baseUrl": ".",
+    "paths": {
+      "railway/iac": ["src/iac/index.ts"],
+      "railway": ["src/index.ts"]
+    }
   },
   "include": ["src", "tests", "examples", "scripts", "codegen.ts", "*.config.ts"],
   "exclude": ["dist", "node_modules"]
