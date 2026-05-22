@@ -1,22 +1,20 @@
 export {
   DEFAULT_RAILWAY_GRAPHQL_ENDPOINT,
-  type RailwaySandboxesConfig,
-} from "./config.js";
+  type RailwayClientConfig,
+} from "./core/config.js";
 export {
-  createRailwaySandboxes,
-  RailwaySandboxes,
-  type SandboxRef,
-} from "./client.js";
-export {
+  RailwayError,
   RailwayGraphQLError,
-  RailwaySandboxError,
   type RailwayGraphQLErrorItem,
-} from "./errors.js";
+} from "./core/errors.js";
 export {
   Sandbox,
-  type CreateSandboxOptions,
-  type ExecOptions,
+  SandboxClient,
+  SandboxInstance,
+  type SandboxClientConfig,
+  type SandboxCreateOptions,
+  type SandboxExecOptions,
   type SandboxExecResult,
   type SandboxSnapshot,
   type SandboxStatus,
-} from "./sandbox.js";
+} from "./sandbox/index.js";

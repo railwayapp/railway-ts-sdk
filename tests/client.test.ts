@@ -3,16 +3,21 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_RAILWAY_GRAPHQL_ENDPOINT,
   RailwayGraphQLError,
-  RailwaySandboxes,
+  Sandbox,
+  SandboxClient,
 } from "../src/index.js";
 import { createFetchMock, header, sandboxSnapshot } from "./test-helpers.js";
 
-describe("RailwaySandboxes", () => {
+describe("Sandbox.Client", () => {
+  it("exposes the sandbox client through the Sandbox namespace", () => {
+    expect(Sandbox.Client).toBe(SandboxClient);
+  });
+
   it("uses the production GraphQL endpoint by default", async () => {
     const mock = createFetchMock([
       { data: { sandboxCreate: sandboxSnapshot() } },
     ]);
-    const client = new RailwaySandboxes({
+    const client = new SandboxClient({
       token: "token_123",
       projectId: "project_123",
       environmentId: "environment_123",
@@ -29,7 +34,7 @@ describe("RailwaySandboxes", () => {
     const mock = createFetchMock([
       { data: { sandboxCreate: sandboxSnapshot() } },
     ]);
-    const client = new RailwaySandboxes({
+    const client = new SandboxClient({
       token: "token_123",
       projectId: "project_123",
       environmentId: "environment_123",
@@ -54,7 +59,7 @@ describe("RailwaySandboxes", () => {
     const mock = createFetchMock([
       { data: { sandboxCreate: sandboxSnapshot({ name: "agent-run" }) } },
     ]);
-    const client = new RailwaySandboxes({
+    const client = new SandboxClient({
       token: "token_123",
       projectId: "project_123",
       environmentId: "environment_123",
@@ -82,7 +87,7 @@ describe("RailwaySandboxes", () => {
     const mock = createFetchMock([
       { errors: [{ message: "no access" }] },
     ]);
-    const client = new RailwaySandboxes({
+    const client = new SandboxClient({
       token: "token_123",
       projectId: "project_123",
       environmentId: "environment_123",

@@ -1,26 +1,51 @@
 {
-  "name": "railway-sandbox-ts",
-  "version": "0.0.0",
-  "private": true,
+  "name": "railway",
+  "version": "3.0.0",
+  "description": "TypeScript SDK for Railway.",
   "type": "module",
-  "description": "TypeScript client for Railway sandboxes.",
+  "license": "MIT",
+  "author": "Railway <contact@railway.com>",
+  "homepage": "https://github.com/railwayapp/railway-ts-sdk#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/railwayapp/railway-ts-sdk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/railwayapp/railway-ts-sdk/issues"
+  },
+  "keywords": [
+    "railway",
+    "railway.app",
+    "sdk",
+    "typescript",
+    "sandbox"
+  ],
   "sideEffects": false,
   "engines": {
     "node": ">=22"
   },
   "packageManager": "pnpm@10.12.4",
-  "main": "./dist/index.js",
+  "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     }
   },
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
@@ -28,7 +53,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "codegen": "graphql-codegen --config codegen.ts",
-    "clean": "rm -rf dist coverage"
+    "package:check": "publint --strict --pack npm && npm pack --dry-run && tsx scripts/package-smoke.ts",
+    "clean": "rm -rf dist coverage railway-*.tgz"
   },
   "dependencies": {
     "@graphql-typed-document-node/core": "^3.2.0",
@@ -42,6 +68,7 @@
     "@types/node": "^22.15.0",
     "dotenv": "^16.5.0",
     "fallow": "^2.67.0",
+    "publint": "^0.3.21",
     "tsup": "^8.5.0",
     "tsx": "^4.20.0",
     "typescript": "^5.8.3",

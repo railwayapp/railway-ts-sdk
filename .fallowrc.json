@@ -7,7 +7,7 @@
     "*.config.ts"
   ],
   "publicPackages": [
-    "railway-sandbox-ts"
+    "railway"
   ],
   "usedClassMembers": [
     "exec",

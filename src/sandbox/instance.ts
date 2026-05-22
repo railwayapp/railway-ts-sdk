@@ -1,24 +1,13 @@
-import type { RailwaySandboxes } from "./client.js";
 import type {
-  RailwaySandboxExecMutation,
-  RailwaySandboxFieldsFragment,
-} from "./generated/graphql.js";
+  SandboxExecOptions,
+  SandboxExecResult,
+  SandboxInstanceOperations,
+  SandboxSnapshot,
+  SandboxStatus,
+} from "./types.js";
 
-export type SandboxStatus = RailwaySandboxFieldsFragment["status"];
-export type SandboxExecResult = RailwaySandboxExecMutation["sandboxExec"];
-export type SandboxSnapshot = RailwaySandboxFieldsFragment;
-
-export interface CreateSandboxOptions {
-  name?: string;
-  idleTimeoutMinutes?: number;
-}
-
-export interface ExecOptions {
-  timeoutSec?: number;
-}
-
-export class Sandbox {
-  readonly #client: RailwaySandboxes;
+export class SandboxInstance {
+  readonly #operations: SandboxInstanceOperations;
 
   readonly id: string;
   readonly name: string;
@@ -31,8 +20,11 @@ export class Sandbox {
   readonly createdAt: string;
   readonly updatedAt: string;
 
-  constructor(client: RailwaySandboxes, snapshot: SandboxSnapshot) {
-    this.#client = client;
+  constructor(
+    snapshot: SandboxSnapshot,
+    operations: SandboxInstanceOperations,
+  ) {
+    this.#operations = operations;
     this.id = snapshot.id;
     this.name = snapshot.name;
     this.status = snapshot.status;
@@ -45,12 +37,15 @@ export class Sandbox {
     this.updatedAt = snapshot.updatedAt;
   }
 
-  exec(command: string, options: ExecOptions = {}): Promise<SandboxExecResult> {
-    return this.#client.exec(this.id, command, options);
+  exec(
+    command: string,
+    options: SandboxExecOptions = {},
+  ): Promise<SandboxExecResult> {
+    return this.#operations.exec(this.id, command, options);
   }
 
-  delete(): Promise<Sandbox> {
-    return this.#client.delete(this.id);
+  delete(): Promise<SandboxInstance> {
+    return this.#operations.delete(this.id);
   }
 
   toJSON(): SandboxSnapshot {

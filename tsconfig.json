@@ -17,6 +17,6 @@
     "declarationMap": true,
     "sourceMap": true
   },
-  "include": ["src", "tests", "examples", "codegen.ts", "*.config.ts"],
+  "include": ["src", "tests", "examples", "scripts", "codegen.ts", "*.config.ts"],
   "exclude": ["dist", "node_modules"]
 }

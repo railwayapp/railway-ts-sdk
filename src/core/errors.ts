@@ -5,14 +5,14 @@ export interface RailwayGraphQLErrorItem {
   [key: string]: unknown;
 }
 
-export class RailwaySandboxError extends Error {
+export class RailwayError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = new.target.name;
   }
 }
 
-export class RailwayGraphQLError extends RailwaySandboxError {
+export class RailwayGraphQLError extends RailwayError {
   readonly status: number;
   readonly errors: readonly RailwayGraphQLErrorItem[];
   readonly responseBody: unknown;

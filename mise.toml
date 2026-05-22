@@ -35,7 +35,12 @@ run = "pnpm run codegen"
 
 [tasks.fallow]
 description = "Run Fallow codebase analysis after large changes"
-run = "pnpm exec fallow --format json --fail-on-issues"
+run = "pnpm exec fallow --fail-on-issues"
+
+[tasks.package-check]
+description = "Validate the packed npm package"
+depends = ["build"]
+run = "pnpm run package:check"
 
 [tasks.clean]
 description = "Remove build/test artifacts"

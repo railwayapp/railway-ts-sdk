@@ -1,45 +1,36 @@
-# railway-sandbox-ts
+# Railway TypeScript SDK
 
-TypeScript client for Railway sandboxes.
+TypeScript SDK for Railway.
+
+```bash
+npm install railway
+```
+
+## Sandboxes
 
 ```ts
-import { RailwaySandboxes } from "railway-sandbox-ts";
+import { Sandbox } from "railway";
 
-const sandboxes = new RailwaySandboxes({
+const client = new Sandbox.Client({
   token: process.env.RAILWAY_API_TOKEN!,
   projectId: process.env.RAILWAY_PROJECT_ID!,
   environmentId: process.env.RAILWAY_ENVIRONMENT_ID!,
 });
 
-const sandbox = await sandboxes.create({ name: "agent-run" });
+const sandbox = await client.create({ name: "agent-run" });
 const result = await sandbox.exec("pwd", { timeoutSec: 30 });
+
+console.log(result.stdout);
+
 await sandbox.delete();
 ```
 
-## Development
+`Sandbox.Client` accepts:
 
-Use mise tasks:
+- `token` — Railway API token.
+- `projectId` — Railway project ID.
+- `environmentId` — Railway environment ID.
+- `endpoint` — optional GraphQL endpoint override.
+- `fetch` — optional custom fetch implementation.
 
-```bash
-mise run install
-mise run build
-mise run test
-mise run typecheck
-mise run check
-```
-
-Regenerate GraphQL types:
-
-```bash
-mise run codegen
-```
-
-Run the manual local example:
-
-```bash
-cp .env.example .env
-# fill in credentials
-mise run example:create-exec-delete
-```
-
-`mise.toml` enables Node's system CA store so local Railway development certificates work.
+By default, the SDK uses `https://backboard.railway.com/graphql/v2`.

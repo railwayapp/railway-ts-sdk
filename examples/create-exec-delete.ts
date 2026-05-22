@@ -1,14 +1,14 @@
-import { RailwaySandboxes } from "../src/index.js";
+import { Sandbox } from "../src/index.js";
 import {
   exampleSandboxName,
-  railwaySandboxesConfigFromEnv,
+  sandboxConfigFromEnv,
   runExample,
 } from "./helpers.js";
 
 await runExample(async () => {
-  const sandboxes = new RailwaySandboxes(railwaySandboxesConfigFromEnv());
+  const client = new Sandbox.Client(sandboxConfigFromEnv());
 
-  const sandbox = await sandboxes.create({ name: exampleSandboxName() });
+  const sandbox = await client.create({ name: exampleSandboxName() });
 
   console.log((await sandbox.exec("ls")).stdout);
   console.log(

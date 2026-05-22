@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { RailwaySandboxes } from "../src/index.js";
+import { SandboxClient } from "../src/index.js";
 import { createFetchMock, sandboxSnapshot } from "./test-helpers.js";
 
-describe("Sandbox handle", () => {
-  it("execs commands through the root client", async () => {
+describe("SandboxInstance", () => {
+  it("execs commands from the sandbox instance", async () => {
     const mock = createFetchMock([
       { data: { sandboxCreate: sandboxSnapshot() } },
       {
@@ -19,7 +19,7 @@ describe("Sandbox handle", () => {
         },
       },
     ]);
-    const client = new RailwaySandboxes({
+    const client = new SandboxClient({
       token: "token_123",
       projectId: "project_123",
       environmentId: "environment_123",
@@ -38,7 +38,7 @@ describe("Sandbox handle", () => {
     });
   });
 
-  it("deletes sandboxes through the root client", async () => {
+  it("deletes sandboxes from the sandbox instance", async () => {
     const mock = createFetchMock([
       { data: { sandboxCreate: sandboxSnapshot() } },
       {
@@ -47,7 +47,7 @@ describe("Sandbox handle", () => {
         },
       },
     ]);
-    const client = new RailwaySandboxes({
+    const client = new SandboxClient({
       token: "token_123",
       projectId: "project_123",
       environmentId: "environment_123",

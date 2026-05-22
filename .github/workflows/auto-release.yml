@@ -1,0 +1,167 @@
+name: Auto Release
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  checks: read
+  contents: read
+  pull-requests: read
+
+jobs:
+  auto-release:
+    name: Auto Release
+    if: |
+      github.event.pull_request.merged == true &&
+      (contains(github.event.pull_request.labels.*.name, 'release/patch') ||
+       contains(github.event.pull_request.labels.*.name, 'release/minor') ||
+       contains(github.event.pull_request.labels.*.name, 'release/major'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN }}
+
+      - name: Wait for batch window
+        run: sleep 120
+
+      - name: Wait for CI on main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          MAIN_SHA=$(git rev-parse origin/main)
+          echo "Main SHA: $MAIN_SHA"
+
+          for i in {1..20}; do
+            CHECKS=$(gh api repos/${{ github.repository }}/commits/$MAIN_SHA/check-runs --jq '{
+              total: .total_count,
+              completed: [.check_runs[] | select(.status == "completed")] | length,
+              success: [.check_runs[] | select(.conclusion == "success" or .conclusion == "skipped")] | length,
+              failure: [.check_runs[] | select(.conclusion == "failure" or .conclusion == "cancelled" or .conclusion == "timed_out" or .conclusion == "action_required")] | length
+            }')
+
+            TOTAL=$(echo "$CHECKS" | jq -r '.total')
+            COMPLETED=$(echo "$CHECKS" | jq -r '.completed')
+            SUCCESS=$(echo "$CHECKS" | jq -r '.success')
+            FAILURE=$(echo "$CHECKS" | jq -r '.failure')
+
+            echo "CI checks: $COMPLETED/$TOTAL completed, $SUCCESS success/skipped, $FAILURE failure"
+
+            if [ "$FAILURE" -gt 0 ]; then
+              exit 1
+            fi
+
+            if [ "$TOTAL" -gt 0 ] && [ "$COMPLETED" -eq "$TOTAL" ]; then
+              break
+            fi
+
+            sleep 30
+          done
+
+      - name: Check for running releases
+        id: check-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          AUTO_RUNNING=$(gh api repos/${{ github.repository }}/actions/workflows/auto-release.yml/runs \
+            --jq '[.workflow_runs[] | select(.status == "in_progress" and .id != ${{ github.run_id }})] | length')
+          CREATE_RUNNING=$(gh api repos/${{ github.repository }}/actions/workflows/create-release.yml/runs \
+            --jq '[.workflow_runs[] | select(.status == "in_progress" or .status == "queued")] | length' 2>/dev/null || echo "0")
+
+          if [ "$AUTO_RUNNING" -gt 0 ] || [ "$CREATE_RUNNING" -gt 0 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Determine release type
+        if: steps.check-release.outputs.skip != 'true'
+        id: release-type
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          rm -f /tmp/bump_types
+          touch /tmp/bump_types
+
+          if [ -n "$LAST_TAG" ]; then
+            for pr_num in $(git log "$LAST_TAG"..HEAD --oneline | grep -oE '#[0-9]+' | tr -d '#' | sort -u || true); do
+              LABELS=$(gh pr view "$pr_num" --json labels --jq '.labels[].name' 2>/dev/null || echo "")
+              for label in $LABELS; do
+                case "$label" in
+                  release/major) echo "major" >> /tmp/bump_types ;;
+                  release/minor) echo "minor" >> /tmp/bump_types ;;
+                  release/patch) echo "patch" >> /tmp/bump_types ;;
+                esac
+              done
+            done
+          fi
+
+          if [ -s /tmp/bump_types ]; then
+            if grep -q "major" /tmp/bump_types; then
+              BUMP="major"
+            elif grep -q "minor" /tmp/bump_types; then
+              BUMP="minor"
+            else
+              BUMP="patch"
+            fi
+          else
+            if ${{ contains(github.event.pull_request.labels.*.name, 'release/major') }}; then
+              BUMP="major"
+            elif ${{ contains(github.event.pull_request.labels.*.name, 'release/minor') }}; then
+              BUMP="minor"
+            else
+              BUMP="patch"
+            fi
+          fi
+
+          echo "bump=$BUMP" >> "$GITHUB_OUTPUT"
+
+      - uses: jdx/mise-action@v2
+        if: steps.check-release.outputs.skip != 'true'
+        with:
+          cache: true
+
+      - name: Install dependencies
+        if: steps.check-release.outputs.skip != 'true'
+        run: mise run install
+
+      - name: Configure git
+        if: steps.check-release.outputs.skip != 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump version and create tag
+        if: steps.check-release.outputs.skip != 'true'
+        id: bump
+        run: |
+          set -euo pipefail
+          npm version ${{ steps.release-type.outputs.bump }} --no-git-tag-version
+          pnpm install --lockfile-only
+          VERSION=$(node -p "require('./package.json').version")
+          git add package.json pnpm-lock.yaml
+          git commit -m "chore: release v$VERSION"
+          git tag "v$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Push changes and tag
+        if: steps.check-release.outputs.skip != 'true'
+        run: |
+          git pull --rebase origin main
+          git push origin main
+          git push origin "v${{ steps.bump.outputs.version }}"
