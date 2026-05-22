@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "project": {
+    "name": "todo-list"
+  },
+  "environments": [
+    {
+      "name": "production"
+    }
+  ],
+  "resources": [
+    {
+      "id": "redis.api-cache",
+      "type": "database",
+      "kind": "database",
+      "engine": "redis",
+      "name": "api-cache",
+      "image": "redis:8",
+      "output": "REDIS_URL",
+      "defaultMountPath": "/data",
+      "source": {
+        "type": "image",
+        "image": "redis:8"
+      }
+    },
+    {
+      "id": "service.backend",
+      "type": "service",
+      "kind": "github",
+      "name": "backend",
+      "source": {
+        "type": "github",
+        "repo": "futurepastori/todo-iac-example",
+        "branch": "main",
+        "rootDirectory": "apps/backend"
+      },
+      "build": {
+        "buildCommand": "pnpm install --frozen-lockfile && pnpm --filter backend build"
+      },
+      "deploy": {
+        "startCommand": "pnpm --filter backend start",
+        "healthcheckPath": "/health"
+      },
+      "variables": {
+        "PORT": {
+          "type": "literal",
+          "value": "3000"
+        },
+        "REDIS_URL": {
+          "type": "reference",
+          "resource": "redis.api-cache",
+          "output": "REDIS_URL"
+        },
+        "CORS_ORIGIN": {
+          "type": "literal",
+          "value": "${{frontend.RAILWAY_PUBLIC_DOMAIN}}"
+        }
+      }
+    },
+    {
+      "id": "service.frontend",
+      "type": "service",
+      "kind": "github",
+      "name": "frontend",
+      "source": {
+        "type": "github",
+        "repo": "futurepastori/todo-iac-example",
+        "branch": "main",
+        "rootDirectory": "apps/frontend"
+      },
+      "build": {
+        "buildCommand": "pnpm install --frozen-lockfile && pnpm --filter frontend build"
+      },
+      "deploy": {
+        "startCommand": "pnpm --filter frontend preview -- --port ${PORT:-4173}",
+        "preDeployCommand": [
+          "pnpm --filter frontend generate-sitemap"
+        ],
+        "multiRegionConfig": {
+          "us-west1": {
+            "numReplicas": 3
+          },
+          "europe-west4": {
+            "numReplicas": 2
+          }
+        }
+      },
+      "variables": {
+        "VITE_API_URL": {
+          "type": "literal",
+          "value": "https://${{backend.RAILWAY_PUBLIC_DOMAIN}}"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "service.backend",
+      "to": "redis.api-cache",
+      "type": "variable",
+      "key": "REDIS_URL"
+    }
+  ]
+}

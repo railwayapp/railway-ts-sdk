@@ -1,3 +1,5 @@
+/// <reference path="./.railway/generated/graph-types.d.ts" />
+
 import { Sandbox, evaluateRailwayProject } from "railway";
 
 const project = await evaluateRailwayProject();
