@@ -11,7 +11,7 @@ npm install railway
 ```ts
 import { Sandbox } from "railway";
 
-const client = new Sandbox.Client({
+const client = new Sandbox({
   token: process.env.RAILWAY_API_TOKEN!,
   projectId: process.env.RAILWAY_PROJECT_ID!,
   environmentId: process.env.RAILWAY_ENVIRONMENT_ID!,
@@ -25,7 +25,7 @@ console.log(result.stdout);
 await sandbox.delete();
 ```
 
-`Sandbox.Client` accepts:
+`Sandbox` accepts:
 
 - `token` — Railway API token.
 - `projectId` — Railway project ID.

@@ -1,9 +1,9 @@
 import "dotenv/config";
 
-import type { SandboxClientConfig } from "../../src/index.js";
-import { RailwayGraphQLError } from "../../src/index.js";
+import type { SandboxConfig } from "../../src/index.ts";
+import { RailwayGraphQLError } from "../../src/index.ts";
 
-export function sandboxConfigFromEnv(): SandboxClientConfig {
+export function sandboxConfigFromEnv(): SandboxConfig {
   const endpoint = process.env.RAILWAY_GRAPHQL_ENDPOINT;
 
   return {

@@ -1,4 +1,4 @@
-import { Sandbox } from "../../src/index.js";
+import { Sandbox } from "../../src/index.ts";
 import {
   exampleSandboxName,
   sandboxConfigFromEnv,
@@ -6,7 +6,7 @@ import {
 } from "./helpers.js";
 
 await runExample(async () => {
-  const client = new Sandbox.Client(sandboxConfigFromEnv());
+  const client = new Sandbox(sandboxConfigFromEnv());
 
   const sandbox = await client.create({ name: exampleSandboxName() });
 

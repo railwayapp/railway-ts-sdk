@@ -1,13 +1,15 @@
+import type { RailwayClientConfig } from "../core/config.js";
 import type {
   RailwaySandboxExecMutation,
   RailwaySandboxFieldsFragment,
 } from "../generated/graphql.js";
-import type { RailwayClientConfig } from "../core/config.js";
 
-export interface SandboxClientConfig extends RailwayClientConfig {
+export interface SandboxConfig extends RailwayClientConfig {
   projectId: string;
   environmentId: string;
 }
+
+export type SandboxClientConfig = SandboxConfig;
 
 export type SandboxStatus = RailwaySandboxFieldsFragment["status"];
 export type SandboxExecResult = RailwaySandboxExecMutation["sandboxExec"];

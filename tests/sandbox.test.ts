@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { SandboxClient } from "../src/index.js";
+import { Sandbox } from "../src/index.js";
 import { createFetchMock, sandboxSnapshot } from "./test-helpers.js";
 
 describe("SandboxInstance", () => {
@@ -19,7 +19,7 @@ describe("SandboxInstance", () => {
         },
       },
     ]);
-    const client = new SandboxClient({
+    const client = new Sandbox({
       token: "token_123",
       projectId: "project_123",
       environmentId: "environment_123",
@@ -47,7 +47,7 @@ describe("SandboxInstance", () => {
         },
       },
     ]);
-    const client = new SandboxClient({
+    const client = new Sandbox({
       token: "token_123",
       projectId: "project_123",
       environmentId: "environment_123",

@@ -8,16 +8,16 @@ import {
 } from "../src/index.js";
 import { createFetchMock, header, sandboxSnapshot } from "./test-helpers.js";
 
-describe("Sandbox.Client", () => {
-  it("exposes the sandbox client through the Sandbox namespace", () => {
-    expect(Sandbox.Client).toBe(SandboxClient);
+describe("Sandbox", () => {
+  it("keeps SandboxClient as an explicit alias", () => {
+    expect(SandboxClient).toBe(Sandbox);
   });
 
   it("uses the production GraphQL endpoint by default", async () => {
     const mock = createFetchMock([
       { data: { sandboxCreate: sandboxSnapshot() } },
     ]);
-    const client = new SandboxClient({
+    const client = new Sandbox({
       token: "token_123",
       projectId: "project_123",
       environmentId: "environment_123",
@@ -34,7 +34,7 @@ describe("Sandbox.Client", () => {
     const mock = createFetchMock([
       { data: { sandboxCreate: sandboxSnapshot() } },
     ]);
-    const client = new SandboxClient({
+    const client = new Sandbox({
       token: "token_123",
       projectId: "project_123",
       environmentId: "environment_123",
@@ -59,7 +59,7 @@ describe("Sandbox.Client", () => {
     const mock = createFetchMock([
       { data: { sandboxCreate: sandboxSnapshot({ name: "agent-run" }) } },
     ]);
-    const client = new SandboxClient({
+    const client = new Sandbox({
       token: "token_123",
       projectId: "project_123",
       environmentId: "environment_123",
@@ -87,7 +87,7 @@ describe("Sandbox.Client", () => {
     const mock = createFetchMock([
       { errors: [{ message: "no access" }] },
     ]);
-    const client = new SandboxClient({
+    const client = new Sandbox({
       token: "token_123",
       projectId: "project_123",
       environmentId: "environment_123",

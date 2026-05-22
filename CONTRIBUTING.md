@@ -47,12 +47,12 @@ Unit tests must stay offline and must not call Railway.
 
 ## Public API
 
-Sandbox APIs are namespaced under the root `Sandbox` export:
+Sandbox APIs are scoped under the root `Sandbox` export:
 
 ```ts
 import { Sandbox } from "railway";
 
-const client = new Sandbox.Client(config);
+const client = new Sandbox(config);
 const sandbox = await client.create();
 await sandbox.exec("pwd");
 await sandbox.delete();

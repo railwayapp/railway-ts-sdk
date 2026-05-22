@@ -17,7 +17,7 @@ import {
 } from "../generated/graphql.js";
 import { SandboxInstance } from "./instance.js";
 import type {
-  SandboxClientConfig,
+  SandboxConfig,
   SandboxCreateOptions,
   SandboxExecOptions,
   SandboxExecResult,
@@ -25,17 +25,17 @@ import type {
   SandboxSnapshot,
 } from "./types.js";
 
-interface NormalizedSandboxClientConfig extends NormalizedRailwayClientConfig {
+interface NormalizedSandboxConfig extends NormalizedRailwayClientConfig {
   projectId: string;
   environmentId: string;
 }
 
-export class SandboxClient {
-  readonly #config: NormalizedSandboxClientConfig;
+export class Sandbox {
+  readonly #config: NormalizedSandboxConfig;
   readonly #operations: SandboxInstanceOperations;
 
-  constructor(config: SandboxClientConfig) {
-    this.#config = normalizeSandboxClientConfig(config);
+  constructor(config: SandboxConfig) {
+    this.#config = normalizeSandboxConfig(config);
     this.#operations = {
       exec: (id, command, options) => this.#exec(id, command, options),
       delete: id => this.#delete(id),
@@ -99,9 +99,9 @@ export class SandboxClient {
   }
 }
 
-function normalizeSandboxClientConfig(
-  config: SandboxClientConfig,
-): NormalizedSandboxClientConfig {
+function normalizeSandboxConfig(
+  config: SandboxConfig,
+): NormalizedSandboxConfig {
   assertNonEmpty("projectId", config.projectId);
   assertNonEmpty("environmentId", config.environmentId);
 

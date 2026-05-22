@@ -1,13 +1,8 @@
-import { SandboxClient } from "./client.js";
-
-export const Sandbox = Object.freeze({
-  Client: SandboxClient,
-});
-
-export { SandboxClient } from "./client.js";
+export { Sandbox, Sandbox as SandboxClient } from "./client.js";
 export { SandboxInstance } from "./instance.js";
 export type {
   SandboxClientConfig,
+  SandboxConfig,
   SandboxCreateOptions,
   SandboxExecOptions,
   SandboxExecResult,

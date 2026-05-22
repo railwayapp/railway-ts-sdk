@@ -15,5 +15,5 @@ TypeScript SDK for Railway sandbox create/exec/delete.
 - Local examples use `.env`; copy `.env.example` to `.env`, fill credentials, then run `mise run example:create-exec-delete`.
 - `mise.toml` enables Node's system CA store for local Railway development certificates.
 - Unit tests must stay offline and must not call Railway.
-- Public API is domain-scoped: sandbox usage is `import { Sandbox } from "railway"` and `new Sandbox.Client(...)`.
+- Public API is domain-scoped: sandbox usage is `import { Sandbox } from "railway"` and `new Sandbox(...)`.
 - Keep public SDK scope minimal: sandbox create, exec from the sandbox instance, delete from the sandbox instance.

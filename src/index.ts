@@ -12,6 +12,7 @@ export {
   SandboxClient,
   SandboxInstance,
   type SandboxClientConfig,
+  type SandboxConfig,
   type SandboxCreateOptions,
   type SandboxExecOptions,
   type SandboxExecResult,

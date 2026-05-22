@@ -24,19 +24,19 @@ try {
 
   writeFileSync(
     join(tempDir, "esm.mjs"),
-    `import { Sandbox } from "railway";\nif (typeof Sandbox.Client !== "function") throw new Error("Sandbox.Client missing");\n`,
+    `import { Sandbox } from "railway";\nif (typeof Sandbox !== "function") throw new Error("Sandbox missing");\n`,
   );
   run(process.execPath, [join(tempDir, "esm.mjs")]);
 
   writeFileSync(
     join(tempDir, "cjs.cjs"),
-    `const { Sandbox } = require("railway");\nif (typeof Sandbox.Client !== "function") throw new Error("Sandbox.Client missing");\n`,
+    `const { Sandbox } = require("railway");\nif (typeof Sandbox !== "function") throw new Error("Sandbox missing");\n`,
   );
   run(process.execPath, [join(tempDir, "cjs.cjs")]);
 
   writeFileSync(
     join(tempDir, "consumer.ts"),
-    `import { Sandbox, type SandboxClientConfig, type SandboxInstance } from "railway";\n\nconst config: SandboxClientConfig = {\n  token: "token_123",\n  projectId: "project_123",\n  environmentId: "environment_123",\n  fetch: async () => new Response(JSON.stringify({ data: { sandboxCreate: {} } })),\n};\n\nconst client = new Sandbox.Client(config);\nconst created: Promise<SandboxInstance> = client.create();\nvoid created;\n`,
+    `import { Sandbox, type SandboxConfig, type SandboxInstance } from "railway";\n\nconst config: SandboxConfig = {\n  token: "token_123",\n  projectId: "project_123",\n  environmentId: "environment_123",\n  fetch: async () => new Response(JSON.stringify({ data: { sandboxCreate: {} } })),\n};\n\nconst client = new Sandbox(config);\nconst created: Promise<SandboxInstance> = client.create();\nvoid created;\n`,
   );
   writeFileSync(
     join(tempDir, "tsconfig.json"),
