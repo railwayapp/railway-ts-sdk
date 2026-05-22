@@ -27,7 +27,7 @@ mise run codegen
 
 ## Examples
 
-Local examples use `.env` and may call Railway.
+Local examples live under `examples/<domain>/`, use `.env`, and may call Railway.
 
 ```bash
 cp .env.example .env

@@ -1,4 +1,4 @@
-import { Sandbox } from "../src/index.js";
+import { Sandbox } from "../../src/index.js";
 import {
   exampleSandboxName,
   sandboxConfigFromEnv,
