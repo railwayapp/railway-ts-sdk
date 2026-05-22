@@ -23,6 +23,8 @@ permissions:
 jobs:
   create-release:
     name: Create release tag
+    # Temporarily disabled while releases are paused.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
