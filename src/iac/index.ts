@@ -3,5 +3,7 @@ export * from "./compiler.js";
 export * from "./diff.js";
 export * from "./evaluator.js";
 export * from "./graph.js";
+export * from "./project.js";
 export * from "./schema.js";
 export * from "./sdk.js";
+export * from "./typegen.js";
