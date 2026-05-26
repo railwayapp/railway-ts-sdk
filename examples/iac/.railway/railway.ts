@@ -1,4 +1,4 @@
-import { defineRailway, github, project, redis, service } from "railway/iac";
+import { defineRailway, github, project, redis, service } from "../../../src/iac/index.ts";
 
 export default defineRailway(() => {
   const cache = redis("api-cache");
