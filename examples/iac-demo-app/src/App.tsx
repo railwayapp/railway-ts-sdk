@@ -11,9 +11,14 @@ type Fixtures = {
   diff: string;
 };
 
+type VisiblePane = "currentGraph" | "graph" | "diff" | "changeSet" | "patch";
+
+const paneOrder: VisiblePane[] = ["currentGraph", "graph", "diff", "changeSet", "patch"];
+
 function App() {
   const [fixtures, setFixtures] = useState<Fixtures | null>(null);
   const [source, setSource] = useState("");
+  const [visiblePanes, setVisiblePanes] = useState<Set<VisiblePane>>(new Set());
   const [synced, setSynced] = useState(false);
   const [stageResult, setStageResult] = useState<string | null>(null);
 
@@ -41,14 +46,36 @@ function App() {
 
   async function mockSync() {
     setSynced(false);
-    setStageResult("Evaluating railway.ts…");
-    await wait(300);
-    setStageResult("Generated RailwayGraph v1…");
-    await wait(300);
-    setStageResult("Computed RailwayChangeSet v0…");
-    await wait(300);
-    setStageResult("Compiled EnvironmentConfig patch for existing Backboard substrate.");
+    setVisiblePanes(new Set());
+    setStageResult("Loading mocked current Railway state…");
+    await reveal("currentGraph");
+    setStageResult("Evaluating railway.ts into RailwayGraph v1…");
+    await reveal("graph");
+    setStageResult("Rendering human-readable diff…");
+    await reveal("diff");
+    setStageResult("Computing RailwayChangeSet v0…");
+    await reveal("changeSet");
+    setStageResult("Compiling EnvironmentConfig patch for existing Backboard substrate…");
+    await reveal("patch");
+    setStageResult("Sync preview ready. Nothing was sent to Backboard.");
     setSynced(true);
+  }
+
+  function refreshSource() {
+    if (!fixtures) return;
+    setSource(fixtures.source);
+    setStageResult("Reloaded railway.ts from fixture.");
+  }
+
+  function clearAll() {
+    setVisiblePanes(new Set());
+    setSynced(false);
+    setStageResult("Cleared generated panes. railway.ts authoring remains loaded.");
+  }
+
+  async function reveal(pane: VisiblePane) {
+    await wait(350);
+    setVisiblePanes(previous => new Set([...previous, pane]));
   }
 
   async function mockStage() {
@@ -65,6 +92,8 @@ function App() {
         </div>
         <div className="actions">
           <button onClick={mockSync} disabled={!fixtures}>Sync</button>
+          <button className="secondary" onClick={refreshSource} disabled={!fixtures}>Refresh railway.ts</button>
+          <button className="secondary" onClick={clearAll} disabled={!fixtures}>Clear panes</button>
           <button className="secondary" onClick={mockStage} disabled={!synced}>Stage patch mock</button>
         </div>
       </header>
@@ -78,29 +107,37 @@ function App() {
 
       {stageResult && <div className="status">{stageResult}</div>}
 
+      <section className="timeline">
+        {paneOrder.map((pane, index) => (
+          <div key={pane} className={visiblePanes.has(pane) ? "step active" : "step"}>
+            <span>{index + 1}</span>{labelForPane(pane)}
+          </div>
+        ))}
+      </section>
+
       <section className="workspace">
         <Panel title="1. railway.ts authoring" subtitle="Editable demo source; sync uses precomputed fixtures for now." wide>
           <textarea value={source} onChange={event => setSource(event.target.value)} spellCheck={false} />
         </Panel>
 
         <Panel title="2. Current graph" subtitle="Mocked Railway state: backend + Redis, no frontend.">
-          <Code value={fixtures?.currentGraph} />
+          <Code value={visiblePanes.has("currentGraph") ? fixtures?.currentGraph : null} />
         </Panel>
 
         <Panel title="3. Desired RailwayGraph" subtitle="Pure deterministic project-state intermediate representation.">
-          <Code value={fixtures?.graph} />
+          <Code value={visiblePanes.has("graph") ? fixtures?.graph : null} />
         </Panel>
 
         <Panel title="4. Diff preview" subtitle="Human-readable ChangeSet rendering.">
-          <pre className="diff">{fixtures?.diff ?? "Loading…"}</pre>
+          <pre className="diff">{visiblePanes.has("diff") ? fixtures?.diff : "Waiting for sync…"}</pre>
         </Panel>
 
         <Panel title="5. RailwayChangeSet" subtitle="Intent-level operations and diagnostics.">
-          <Code value={fixtures?.changeSet} />
+          <Code value={visiblePanes.has("changeSet") ? fixtures?.changeSet : null} />
         </Panel>
 
         <Panel title="6. EnvironmentConfig patch" subtitle="Current bridge to existing staged patch shape.">
-          <Code value={fixtures?.patch} />
+          <Code value={visiblePanes.has("patch") ? fixtures?.patch : null} />
         </Panel>
       </section>
     </main>
@@ -125,6 +162,16 @@ function Stat({ label, value }: { label: string; value: string | number }) {
 
 function Code({ value }: { value: unknown }) {
   return <pre>{value == null ? "Loading…" : JSON.stringify(value, null, 2)}</pre>;
+}
+
+function labelForPane(pane: VisiblePane) {
+  return {
+    currentGraph: "Current",
+    graph: "Graph",
+    diff: "Diff",
+    changeSet: "ChangeSet",
+    patch: "Patch",
+  }[pane];
 }
 
 function wait(ms: number) {
