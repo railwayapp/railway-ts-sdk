@@ -7,7 +7,7 @@ const project = await evaluateRailwayProject();
 // If `.railway/generated/graph-types.d.ts` has been generated, these names
 // autocomplete from the deterministic evaluated graph rather than from source.
 const backend = project.service("backend");
-const cache = project.database("api-cache");
+const cache = project.database("Redis");
 
 console.log(
   `Running against ${project.name}/${backend.name} with ${cache.name}`,

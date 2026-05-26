@@ -1,9 +1,9 @@
 {
   "services": {
-    "api-cache": {
+    "Redis": {
       "isCreated": true,
       "source": {
-        "image": "redis:8"
+        "image": "redis:8.2.1"
       },
       "deploy": {
         "requiredMountPath": "/data"
@@ -28,7 +28,7 @@
           "value": "3000"
         },
         "REDIS_URL": {
-          "value": "${{api-cache.REDIS_URL}}"
+          "value": "${{Redis.REDIS_URL}}"
         },
         "CORS_ORIGIN": {
           "value": "${{frontend.RAILWAY_PUBLIC_DOMAIN}}"

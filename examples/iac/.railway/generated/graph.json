@@ -10,12 +10,12 @@
   ],
   "resources": [
     {
-      "address": "database.api-cache",
+      "address": "database.Redis",
       "type": "database",
       "kind": "database",
       "engine": "redis",
-      "name": "api-cache",
-      "image": "redis:8",
+      "name": "Redis",
+      "image": "redis:8.2.1",
       "output": "REDIS_URL",
       "defaultMountPath": "/data",
       "source": {
@@ -48,7 +48,7 @@
         },
         "REDIS_URL": {
           "type": "reference",
-          "resource": "database.api-cache",
+          "resource": "database.Redis",
           "output": "REDIS_URL"
         },
         "CORS_ORIGIN": {
@@ -96,7 +96,7 @@
   "edges": [
     {
       "from": "service.backend",
-      "to": "database.api-cache",
+      "to": "database.Redis",
       "type": "variable",
       "key": "REDIS_URL"
     }

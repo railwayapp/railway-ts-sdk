@@ -5,17 +5,17 @@ import "railway/iac";
 
 declare module "railway/iac" {
   interface RailwayIacServiceMap {
-    "api-cache": true;
+    "Redis": true;
     "backend": true;
     "frontend": true;
   }
   interface RailwayIacDatabaseMap {
-    "api-cache": true;
+    "Redis": true;
   }
   interface RailwayIacBucketMap {}
   interface RailwayIacVolumeMap {}
   interface RailwayIacResourceMap {
-    "api-cache": true;
+    "Redis": true;
     "backend": true;
     "frontend": true;
   }
