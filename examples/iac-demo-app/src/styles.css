@@ -27,6 +27,8 @@ h1 { margin: 0; font-size: 26px; letter-spacing: -0.04em; line-height: 1.05; }
 button { border: 1px solid #6c4a24; padding: 7px 10px; color: #120f0c; background: #ffb86b; font-size: 12px; font-weight: 800; cursor: pointer; }
 button.secondary { color: #ece7df; background: #202020; border-color: #333; }
 button:disabled { opacity: 0.45; cursor: not-allowed; }
+input { width: 100%; padding: 8px; color: #ece7df; background: #0b0b0b; border: 1px solid #333; font: inherit; }
+label { display: grid; gap: 4px; color: #b6aa9a; font-size: 12px; font-weight: 700; }
 
 .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 8px 0; }
 .stat { padding: 8px 10px; background: #151515; border: 1px solid #2b2b2b; }
@@ -136,6 +138,12 @@ textarea,
 .tok-literal { color: #d9a7ff; }
 .tok-comment { color: #7d756d; }
 .tok-call { color: #ffb86b; }
+
+.modalBackdrop { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,0.68); z-index: 20; }
+.modal { width: min(560px, calc(100vw - 32px)); display: grid; gap: 12px; padding: 16px; background: #151515; border: 1px solid #444; }
+.modal h2 { font-size: 18px; }
+.modal p { margin: 0; color: #8d8377; font-size: 12px; }
+.modalActions { display: flex; justify-content: flex-end; gap: 8px; }
 
 @media (max-width: 1280px) {
   .workspace.split { grid-template-columns: 1fr; }

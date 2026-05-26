@@ -2,6 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 
+type ConnectionSettings = {
+  graphqlUrl: string;
+  token: string;
+  projectId: string;
+  environmentId: string;
+};
+
 type Fixtures = {
   source: string;
   graph: unknown;
@@ -19,6 +26,8 @@ function App() {
   const [visiblePanes, setVisiblePanes] = useState<Set<VisiblePane>>(new Set());
   const [synced, setSynced] = useState(false);
   const [stageResult, setStageResult] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settings, setSettings] = useState<ConnectionSettings>(() => loadSettings());
 
   useEffect(() => {
     Promise.all([
@@ -76,8 +85,28 @@ function App() {
     setVisiblePanes(previous => new Set([...previous, pane]));
   }
 
-  async function mockStage() {
-    setStageResult("Mock stage only: this demo does not call Backboard. In production this payload would go to environmentStageChanges, or future Backboard would accept RailwayChangeSet directly.");
+  async function stageChangeSet() {
+    if (!fixtures) return;
+    if (!settings.graphqlUrl || !settings.token || !settings.environmentId) {
+      setSettingsOpen(true);
+      setStageResult("Add Backboard URL, token, and environment ID before staging.");
+      return;
+    }
+
+    setStageResult("Submitting RailwayChangeSet to Backboard…");
+    try {
+      const result = await callBackboardStageChangeSet({ settings, changeSet: fixtures.changeSet });
+      setStageResult(`Staged real Backboard patch: ${result.id}`);
+    } catch (error) {
+      setStageResult(`Backboard staging failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  function saveSettings(next: ConnectionSettings) {
+    setSettings(next);
+    localStorage.setItem("railway-iac-demo-settings", JSON.stringify(next));
+    setSettingsOpen(false);
+    setStageResult("Saved Backboard connection settings.");
   }
 
   return (
@@ -92,7 +121,8 @@ function App() {
           <button onClick={mockSync} disabled={!fixtures}>Sync</button>
           <button className="secondary" onClick={refreshSource} disabled={!fixtures}>Refresh railway.ts</button>
           <button className="secondary" onClick={clearAll} disabled={!fixtures}>Clear panes</button>
-          <button className="secondary" onClick={mockStage} disabled={!synced}>Stage patch mock</button>
+          <button className="secondary" onClick={() => setSettingsOpen(true)}>Backboard settings</button>
+          <button className="secondary" onClick={stageChangeSet} disabled={!synced}>Stage real ChangeSet</button>
         </div>
       </header>
 
@@ -104,6 +134,7 @@ function App() {
       </section>
 
       {stageResult && <div className="status">{stageResult}</div>}
+      {settingsOpen && <SettingsModal settings={settings} onCancel={() => setSettingsOpen(false)} onSave={saveSettings} />}
 
       <section className="workspace split">
         <Panel title="1. railway.ts authoring" subtitle="Editable demo source; sync uses precomputed fixtures for now." sticky>
@@ -153,6 +184,23 @@ function TimelinePanel({ step, active, title, subtitle, children }: { step: numb
     <div className={active ? "timelineItem active" : "timelineItem"}>
       <div className="timelineMarker">{step}</div>
       <Panel title={title} subtitle={subtitle}>{children}</Panel>
+    </div>
+  );
+}
+
+function SettingsModal({ settings, onCancel, onSave }: { settings: ConnectionSettings; onCancel: () => void; onSave: (settings: ConnectionSettings) => void }) {
+  const [draft, setDraft] = useState(settings);
+  return (
+    <div className="modalBackdrop">
+      <form className="modal" onSubmit={event => { event.preventDefault(); onSave(draft); }}>
+        <h2>Backboard connection</h2>
+        <p>Use localdev/develop GraphQL. Token stays in this browser localStorage.</p>
+        <label>GraphQL URL<input value={draft.graphqlUrl} onChange={event => setDraft({ ...draft, graphqlUrl: event.target.value })} placeholder="http://localhost:3000/graphql/v2" /></label>
+        <label>Token<input value={draft.token} onChange={event => setDraft({ ...draft, token: event.target.value })} placeholder="railway token" type="password" /></label>
+        <label>Project ID<input value={draft.projectId} onChange={event => setDraft({ ...draft, projectId: event.target.value })} placeholder="project id" /></label>
+        <label>Environment ID<input value={draft.environmentId} onChange={event => setDraft({ ...draft, environmentId: event.target.value })} placeholder="environment id" /></label>
+        <div className="modalActions"><button type="button" className="secondary" onClick={onCancel}>Cancel</button><button type="submit">Save</button></div>
+      </form>
     </div>
   );
 }
@@ -214,6 +262,38 @@ function escapeHtml(value: string) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+async function callBackboardStageChangeSet({ settings, changeSet }: { settings: ConnectionSettings; changeSet: unknown }) {
+  const response = await fetch(settings.graphqlUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${settings.token}`,
+    },
+    body: JSON.stringify({
+      query: `mutation IacDemoStageChangeSet($environmentId: String!, $input: JSON!, $merge: Boolean) { environmentStageChangeSet(environmentId: $environmentId, input: $input, merge: $merge) { id patch } }`,
+      variables: { environmentId: settings.environmentId, input: changeSet, merge: true },
+    }),
+  });
+  const payload = await response.json();
+  if (!response.ok || payload.errors?.length) throw new Error(payload.errors?.[0]?.message ?? response.statusText);
+  return payload.data.environmentStageChangeSet as { id: string; patch: unknown };
+}
+
+function loadSettings(): ConnectionSettings {
+  try {
+    const raw = localStorage.getItem("railway-iac-demo-settings");
+    if (raw) return JSON.parse(raw) as ConnectionSettings;
+  } catch {
+    // Ignore corrupt local demo settings.
+  }
+  return {
+    graphqlUrl: "http://localhost:3000/graphql/v2",
+    token: "",
+    projectId: "",
+    environmentId: "",
+  };
 }
 
 function wait(ms: number) {

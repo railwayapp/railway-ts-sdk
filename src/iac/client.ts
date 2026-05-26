@@ -7,6 +7,7 @@ import type {
   ServiceCreateInput,
   VolumeCreateInput,
 } from "../generated/graphql.js";
+import type { RailwayChangeSet } from "./change-set.js";
 import type { RailwayGraph, ResourceNode } from "./graph.js";
 import type { EnvironmentConfig } from "./schema.js";
 
@@ -116,6 +117,13 @@ export class IacClient {
       environmentStageChanges(environmentId: $environmentId, input: $payload, merge: $merge) { id }
     }`, { environmentId, payload: patch, merge });
     return data.environmentStageChanges;
+  }
+
+  async stageChangeSet({ environmentId, changeSet, merge = true }: { environmentId: string; changeSet: RailwayChangeSet; merge?: boolean }): Promise<{ id: string; patch: EnvironmentConfig }> {
+    const data = await gql<{ environmentStageChangeSet: { id: string; patch: EnvironmentConfig } }, { environmentId: string; input: RailwayChangeSet; merge: boolean }>(this.#config, `mutation IacStageChangeSet($environmentId: String!, $input: JSON!, $merge: Boolean) {
+      environmentStageChangeSet(environmentId: $environmentId, input: $input, merge: $merge) { id patch }
+    }`, { environmentId, input: changeSet, merge });
+    return data.environmentStageChangeSet;
   }
 
   async commitStagedPatch({ environmentId, message, skipDeploys }: { environmentId: string; message?: string; skipDeploys?: boolean }): Promise<string> {
