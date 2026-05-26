@@ -182,7 +182,15 @@ function CodeEditor({ value, onChange }: { value: string; onChange: (value: stri
 
 function HighlightedDiff({ value }: { value: string | undefined }) {
   const lines = (value ?? "Waiting for sync…").split("\n");
-  return <pre className="diff">{lines.map((line, index) => <span key={index} className={line.startsWith("+") ? "plus" : line.startsWith("-") ? "minus" : line.startsWith("~") ? "change" : undefined}>{line}\n</span>)}</pre>;
+  return (
+    <pre className="diff">
+      {lines.map((line, index) => (
+        <span key={index} className={line.startsWith("+") ? "plus" : line.startsWith("-") ? "minus" : line.startsWith("~") ? "change" : undefined}>
+          {line}{"\n"}
+        </span>
+      ))}
+    </pre>
+  );
 }
 
 function highlightJson(value: string) {
