@@ -1,0 +1,2 @@
+~ Set variable backend.REDIS_URL
++ Create service frontend
