@@ -1,10 +1,7 @@
-import { defineRailway, github, project, redis, service, type DatabaseNode } from "../../../src/iac/index.ts";
+import { defineRailway, github, project, redis, service } from "../../../src/iac/index.ts";
 
 export default defineRailway(() => {
-  // Existing Railway Redis imported from the live project.
-  // Keeping this authored handle aligned prevents the demo ChangeSet from
-  // treating the already-provisioned database as drift to delete/recreate.
-  const cache = redis("Redis") as DatabaseNode & { url: () => { type: "reference"; resource: "database.Redis"; output: "REDIS_URL" } };
+  const cache = redis("Redis");
   cache.image = "redis:8.2.1";
 
   const repo = "futurepastori/todo-iac-example";
