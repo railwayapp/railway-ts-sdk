@@ -1,8 +1,13 @@
-import { defineRailway, github, project, redis, service } from "../../../src/iac/index.ts";
+import {
+  defineRailway,
+  github,
+  project,
+  redis,
+  service,
+} from "../../../src/iac/index.ts";
 
 export default defineRailway(() => {
   const cache = redis("Redis");
-  cache.image = "redis:8.2.1";
 
   const repo = "futurepastori/todo-iac-example";
 

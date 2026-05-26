@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 
@@ -27,7 +27,6 @@ type VisiblePane = "currentGraph" | "graph" | "diff" | "changeSet" | "patch";
 
 function App() {
   const [fixtures, setFixtures] = useState<Fixtures | null>(null);
-  const [source, setSource] = useState("");
   const [visiblePanes, setVisiblePanes] = useState<Set<VisiblePane>>(new Set());
   const [synced, setSynced] = useState(false);
   const [stageResult, setStageResult] = useState<string | null>(null);
@@ -38,19 +37,12 @@ function App() {
     fetch(`${demoServerUrl}/api/source`)
       .then(response => response.json())
       .then((payload: { source: string }) => {
-        setSource(payload.source);
         setFixtures({ source: payload.source, graph: null, currentGraph: null, changeSet: {}, diff: "" });
       })
       .catch(error => {
         setStageResult(`Failed to load railway.ts from demo server: ${String(error)}`);
       });
   }, []);
-
-  const changeCount = fixtures?.changeSet.changes?.length ?? 0;
-  const destructiveCount = useMemo(
-    () => fixtures?.changeSet.changes?.filter(change => change.severity === "destructive").length ?? 0,
-    [fixtures],
-  );
 
   async function sync() {
     setSynced(false);
@@ -59,7 +51,6 @@ function App() {
     try {
       const payload = await postJson<Fixtures>(`${demoServerUrl}/api/sync`, { settings });
       setFixtures(payload);
-      setSource(payload.source);
       setStageResult(payload.mode === "real" ? "Loaded real Backboard current graph." : "Loaded mocked current graph. Add Backboard settings for real state.");
       await reveal("currentGraph");
       setStageResult("Evaluated desired RailwayGraph v1.");
@@ -78,7 +69,6 @@ function App() {
   async function refreshSource() {
     try {
       const payload = await fetch(`${demoServerUrl}/api/source`).then(response => response.json()) as { source: string };
-      setSource(payload.source);
       setFixtures(previous => ({ ...(previous ?? { graph: null, currentGraph: null, changeSet: {}, diff: "" }), source: payload.source }));
       setStageResult("Reloaded railway.ts from filesystem.");
     } catch (error) {
@@ -89,7 +79,7 @@ function App() {
   function clearAll() {
     setVisiblePanes(new Set());
     setSynced(false);
-    setStageResult("Cleared generated panes. railway.ts authoring remains loaded.");
+    setStageResult("Cleared generated panes.");
   }
 
   async function reveal(pane: VisiblePane) {
@@ -138,39 +128,28 @@ function App() {
         </div>
       </header>
 
-      <section className="stats">
-        <Stat label="Changes" value={changeCount} />
-        <Stat label="Destructive" value={destructiveCount} />
-        <Stat label="Backboard" value={fixtures?.mode ?? "mock"} />
-        <Stat label="Protocol" value="v0" />
-      </section>
-
       {stageResult && <div className="status">{stageResult}</div>}
       {settingsOpen && <SettingsModal settings={settings} onCancel={() => setSettingsOpen(false)} onSave={saveSettings} />}
 
-      <section className="workspace split">
-        <Panel title="1. railway.ts authoring" subtitle="Loaded from filesystem by the local demo server." sticky>
-          <CodeEditor value={source} onChange={setSource} />
-        </Panel>
-
+      <section className="workspace">
         <div className="outputs">
-          <TimelinePanel step={2} active={visiblePanes.has("currentGraph")} title="Current graph" subtitle="Mocked Railway state: backend + Redis, no frontend.">
+          <TimelinePanel step={1} active={visiblePanes.has("currentGraph")} title="Current graph">
             <Code value={visiblePanes.has("currentGraph") ? fixtures?.currentGraph : null} />
           </TimelinePanel>
 
-          <TimelinePanel step={3} active={visiblePanes.has("graph")} title="Desired RailwayGraph" subtitle="Pure deterministic project-state intermediate representation.">
+          <TimelinePanel step={2} active={visiblePanes.has("graph")} title="Desired RailwayGraph">
             <Code value={visiblePanes.has("graph") ? fixtures?.graph : null} />
           </TimelinePanel>
 
-          <TimelinePanel step={4} active={visiblePanes.has("diff")} title="Diff preview" subtitle="Human-readable ChangeSet rendering.">
+          <TimelinePanel step={3} active={visiblePanes.has("diff")} title="Diff preview">
             <HighlightedDiff value={visiblePanes.has("diff") ? fixtures?.diff : "Waiting for sync…"} />
           </TimelinePanel>
 
-          <TimelinePanel step={5} active={visiblePanes.has("changeSet")} title="RailwayChangeSet" subtitle="Intent-level operations and diagnostics.">
+          <TimelinePanel step={4} active={visiblePanes.has("changeSet")} title="RailwayChangeSet">
             <Code value={visiblePanes.has("changeSet") ? fixtures?.changeSet : null} />
           </TimelinePanel>
 
-          <TimelinePanel step={6} active={synced} title="Backboard staging" subtitle="ChangeSet is submitted to Backboard; Backboard compiles/stages the patch.">
+          <TimelinePanel step={5} active={synced} title="Backboard staging">
             <Code value={synced ? { endpoint: "environmentStageChangeSet", mode: fixtures?.mode ?? "mock", note: "Click Stage real ChangeSet to submit." } : null} />
           </TimelinePanel>
         </div>
@@ -179,23 +158,22 @@ function App() {
   );
 }
 
-function Panel({ title, subtitle, sticky, children }: { title: string; subtitle: string; sticky?: boolean; children: React.ReactNode }) {
+function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <article className={sticky ? "panel sticky" : "panel"}>
+    <article className="panel">
       <div className="panelHeader">
         <h2>{title}</h2>
-        <p>{subtitle}</p>
       </div>
       {children}
     </article>
   );
 }
 
-function TimelinePanel({ step, active, title, subtitle, children }: { step: number; active: boolean; title: string; subtitle: string; children: React.ReactNode }) {
+function TimelinePanel({ step, active, title, children }: { step: number; active: boolean; title: string; children: React.ReactNode }) {
   return (
     <div className={active ? "timelineItem active" : "timelineItem"}>
       <div className="timelineMarker">{step}</div>
-      <Panel title={title} subtitle={subtitle}>{children}</Panel>
+      <Panel title={title}>{children}</Panel>
     </div>
   );
 }
@@ -218,26 +196,8 @@ function SettingsModal({ settings, onCancel, onSave }: { settings: ConnectionSet
   );
 }
 
-function Stat({ label, value }: { label: string; value: string | number }) {
-  return <div className="stat"><span>{label}</span><strong>{value}</strong></div>;
-}
-
 function Code({ value }: { value: unknown }) {
   return <pre className="code" dangerouslySetInnerHTML={{ __html: highlightJson(value == null ? "Loading…" : JSON.stringify(value, null, 2)) }} />;
-}
-
-function CodeEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {
-  return (
-    <div className="editor">
-      <pre className="editorHighlight" aria-hidden dangerouslySetInnerHTML={{ __html: highlightTs(value) }} />
-      <textarea
-        value={value}
-        onChange={event => onChange(event.target.value)}
-        spellCheck={false}
-        aria-label="railway.ts authoring"
-      />
-    </div>
-  );
 }
 
 function HighlightedDiff({ value }: { value: string | undefined }) {
@@ -259,14 +219,6 @@ function highlightJson(value: string) {
     .replace(/(:\s*)(&quot;[^&]*?&quot;)/g, '$1<span class="tok-string">$2</span>')
     .replace(/\b(true|false|null)\b/g, '<span class="tok-literal">$1</span>')
     .replace(/\b(-?\d+(?:\.\d+)?)\b/g, '<span class="tok-number">$1</span>');
-}
-
-function highlightTs(value: string) {
-  return escapeHtml(value)
-    .replace(/(\/\/.*)$/gm, '<span class="tok-comment">$1</span>')
-    .replace(/(&quot;[^&]*?&quot;|'[^']*?'|`[^`]*?`)/g, '<span class="tok-string">$1</span>')
-    .replace(/\b(import|from|export|default|const|return|type|function)\b/g, '<span class="tok-keyword">$1</span>')
-    .replace(/\b(defineRailway|project|service|github|redis|postgres|mysql|mongo|bucket|volume)\b/g, '<span class="tok-call">$1</span>');
 }
 
 function escapeHtml(value: string) {
