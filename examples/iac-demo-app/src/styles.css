@@ -1,6 +1,6 @@
 :root {
-  color: #f7f1e8;
-  background: #120f0c;
+  color: #ece7df;
+  background: #0f0f0f;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-synthesis: none;
   text-rendering: geometricPrecision;
@@ -8,72 +8,195 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 1120px; }
-main { padding: 32px; }
+main { padding: 14px; }
 
 .hero {
-  display: flex;
-  justify-content: space-between;
-  gap: 32px;
-  align-items: flex-end;
-  padding: 28px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 28px;
-  background:
-    radial-gradient(circle at 20% 0%, rgba(255, 116, 58, 0.28), transparent 35%),
-    linear-gradient(135deg, rgba(255,255,255,0.09), rgba(255,255,255,0.03));
-  box-shadow: 0 24px 80px rgba(0,0,0,0.35);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: end;
+  padding: 14px;
+  border: 1px solid #2b2b2b;
+  background: #151515;
 }
 
-.eyebrow { margin: 0 0 10px; color: #ffb86b; text-transform: uppercase; letter-spacing: 0.16em; font-size: 12px; font-weight: 800; }
-h1 { margin: 0; font-size: 54px; letter-spacing: -0.06em; line-height: 0.96; max-width: 820px; }
-.lede { margin: 18px 0 0; max-width: 780px; color: #c9b9a2; font-size: 18px; line-height: 1.5; }
-.actions { display: flex; gap: 12px; flex-wrap: wrap; justify-content: flex-end; max-width: 520px; }
+.eyebrow {
+  margin: 0 0 4px;
+  color: #ffb86b;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+h1 {
+  margin: 0;
+  font-size: 26px;
+  letter-spacing: -0.04em;
+  line-height: 1.05;
+}
+
+.lede {
+  margin: 8px 0 0;
+  max-width: 900px;
+  color: #b6aa9a;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: repeat(2, max-content);
+  gap: 6px;
+  justify-content: end;
+}
+
 button {
-  border: 0;
-  border-radius: 999px;
-  padding: 14px 22px;
-  color: #160f09;
+  border: 1px solid #6c4a24;
+  padding: 7px 10px;
+  color: #120f0c;
   background: #ffb86b;
-  font-size: 15px;
+  font-size: 12px;
   font-weight: 800;
   cursor: pointer;
 }
-button.secondary { color: #f7f1e8; background: rgba(255,255,255,0.12); }
+
+button.secondary {
+  color: #ece7df;
+  background: #202020;
+  border-color: #333;
+}
+
 button:disabled { opacity: 0.45; cursor: not-allowed; }
 
-.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 18px 0; }
-.stat { padding: 16px 18px; border-radius: 18px; background: #1d1813; border: 1px solid rgba(255,255,255,0.08); }
-.stat span { display: block; color: #a9967f; font-size: 12px; text-transform: uppercase; letter-spacing: 0.12em; }
-.stat strong { display: block; margin-top: 6px; font-size: 25px; }
-.status { margin: 0 0 18px; padding: 14px 18px; border-radius: 16px; color: #ffe0b7; background: rgba(255,184,107,0.12); border: 1px solid rgba(255,184,107,0.24); }
-.timeline { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 0 0 18px; }
-.step { padding: 12px 14px; border-radius: 15px; color: #8d7f6d; background: #18130f; border: 1px solid rgba(255,255,255,0.07); transition: 180ms ease; }
-.step span { display: inline-grid; place-items: center; width: 22px; height: 22px; margin-right: 8px; border-radius: 999px; background: rgba(255,255,255,0.08); font-size: 12px; font-weight: 800; }
-.step.active { color: #f7f1e8; border-color: rgba(255,184,107,0.45); background: rgba(255,184,107,0.13); box-shadow: 0 0 0 1px rgba(255,184,107,0.08) inset; }
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin: 8px 0;
+}
 
-.workspace { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
-.panel { min-height: 410px; overflow: hidden; border-radius: 22px; background: #1a1511; border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 16px 45px rgba(0,0,0,0.25); }
-.panel.wide { grid-column: span 3; min-height: 430px; }
-.panelHeader { padding: 18px 18px 14px; border-bottom: 1px solid rgba(255,255,255,0.07); background: rgba(255,255,255,0.03); }
-h2 { margin: 0; font-size: 16px; letter-spacing: -0.02em; }
-.panelHeader p { margin: 6px 0 0; color: #9c8c77; font-size: 13px; }
-pre, textarea {
-  width: 100%;
-  height: 340px;
+.stat {
+  padding: 8px 10px;
+  background: #151515;
+  border: 1px solid #2b2b2b;
+}
+
+.stat span {
+  display: block;
+  color: #8d8377;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.stat strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 17px;
+}
+
+.status {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  color: #ffe0b7;
+  background: #201810;
+  border: 1px solid #4b3017;
+  font-size: 12px;
+}
+
+.timeline {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  margin: 0 0 8px;
+}
+
+.step {
+  padding: 7px 9px;
+  color: #82786c;
+  background: #141414;
+  border: 1px solid #252525;
+  font-size: 12px;
+}
+
+.step span {
+  display: inline-block;
+  width: 18px;
+  margin-right: 6px;
+  color: #b6aa9a;
+  font-weight: 800;
+}
+
+.step.active {
+  color: #f1ece5;
+  border-color: #7b5124;
+  background: #21180f;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.panel {
+  min-height: 300px;
+  overflow: hidden;
+  background: #151515;
+  border: 1px solid #2b2b2b;
+}
+
+.panel.wide {
+  grid-column: span 3;
+  min-height: 300px;
+}
+
+.panelHeader {
+  padding: 8px 10px;
+  border-bottom: 1px solid #2b2b2b;
+  background: #1a1a1a;
+}
+
+h2 {
   margin: 0;
-  padding: 18px;
-  color: #f6dec1;
-  background: #100d0a;
+  font-size: 13px;
+  letter-spacing: -0.01em;
+}
+
+.panelHeader p {
+  margin: 3px 0 0;
+  color: #8d8377;
+  font-size: 11px;
+}
+
+pre,
+textarea {
+  width: 100%;
+  height: 252px;
+  margin: 0;
+  padding: 10px;
+  color: #f4d5af;
+  background: #0b0b0b;
   border: 0;
   outline: none;
   overflow: auto;
   font: 12px/1.55 "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   tab-size: 2;
 }
-.panel.wide textarea { height: 346px; resize: vertical; }
-.diff { color: #c6ffd6; font-size: 15px; }
+
+.panel.wide textarea {
+  height: 248px;
+  resize: vertical;
+}
+
+.diff {
+  color: #b9f7c7;
+  font-size: 15px;
+}
 
 @media (max-width: 1280px) {
   .workspace { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .panel.wide { grid-column: span 2; }
+  .actions { grid-template-columns: 1fr; }
 }
