@@ -19,6 +19,7 @@ export {
   defineRailway,
   empty,
   evaluateRailwayFile,
+  environmentConfigToGraph,
   evaluateRailwayProject,
   EvaluatedRailwayProject,
   findRailwayFile,
