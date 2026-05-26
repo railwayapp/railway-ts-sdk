@@ -24,9 +24,19 @@ export function projectDefinitionToGraph(definition: ProjectDefinition): Railway
     version: RAILWAY_GRAPH_VERSION,
     project: { name: definition.name },
     environments: definition.environments.map(name => ({ name })),
-    resources: definition.services,
+    resources: definition.services.map(stripRuntimeHelpers),
     edges,
   };
+}
+
+function stripRuntimeHelpers<T>(value: T): T {
+  if (Array.isArray(value)) return value.map(stripRuntimeHelpers) as T;
+  if (value == null || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([, child]) => typeof child !== "function")
+      .map(([key, child]) => [key, stripRuntimeHelpers(child)]),
+  ) as T;
 }
 
 export function graphToEnvironmentConfig(graph: RailwayGraph, options: GraphCompileOptions = {}): EnvironmentConfig {

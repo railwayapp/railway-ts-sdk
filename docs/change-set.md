@@ -57,13 +57,18 @@ deployEffect: none | deploy | unknown
 
 The SDK can draft change sets to prove the protocol. Backboard should eventually own final validation and translation to staged patch/application behavior.
 
-Initial adapter path:
+Initial adapter path now exists in the SDK prototype:
 
 ```txt
-graph diff → RailwayChangeSet → existing EnvironmentConfig patch → environmentStageChanges
+diffGraphs(current, desired)
+  → RailwayChangeSet
+  → changeSetToGraph(current, changeSet)
+  → graphToEnvironmentConfig(...)
+  → composePatch(...)
+  → environmentStageChanges
 ```
 
-Long-term producers target the same protocol; apply semantics stay centralized.
+This proves the receiving shape without making Backboard accept it yet. Long-term producers target the same protocol; apply semantics stay centralized.
 
 ## Non-goals for v0
 
@@ -75,3 +80,13 @@ Long-term producers target the same protocol; apply semantics stay centralized.
 - canonical deploy-impact calculation
 
 v0 exists to make the receiving shape concrete before Backboard integration.
+
+## Current SDK helpers
+
+```ts
+diffGraphs({ current, desired });
+validateChangeSet(changeSet);
+renderChangeSet(changeSet);
+changeSetToGraph({ current, changeSet });
+changeSetToEnvironmentPatch({ currentGraph, currentConfig, changeSet });
+```

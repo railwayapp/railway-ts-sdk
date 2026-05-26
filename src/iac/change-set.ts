@@ -1,4 +1,6 @@
-import type { RailwayGraph, ResourceAddress, ResourceNode, VariableValue } from "./graph.js";
+import { composePatch, graphToEnvironmentConfig } from "./compiler.js";
+import type { GraphCompileOptions, RailwayGraph, ResourceAddress, ResourceNode, VariableValue } from "./graph.js";
+import type { EnvironmentConfig } from "./schema.js";
 
 export const RAILWAY_CHANGE_SET_VERSION = 0 as const;
 
@@ -118,6 +120,79 @@ export function diffGraphs({ current, desired }: { current: RailwayGraph; desire
   return { version: RAILWAY_CHANGE_SET_VERSION, changes, diagnostics };
 }
 
+export function changeSetToGraph({ current, changeSet }: { current: RailwayGraph; changeSet: RailwayChangeSet }): RailwayGraph {
+  const next = structuredClone(current) as RailwayGraph;
+  const resources = new Map<ResourceAddress, ResourceNode>(next.resources.map(resource => [resource.address, resource]));
+
+  for (const change of changeSet.changes) {
+    if (change.kind === "resource.create") {
+      resources.set(change.address, structuredClone(change.resource) as ResourceNode);
+      continue;
+    }
+
+    if (change.kind === "resource.delete") {
+      resources.delete(change.address);
+      continue;
+    }
+
+    const resource = resources.get(change.address);
+    if (!resource) continue;
+
+    if (change.kind === "resource.update") {
+      (resource as unknown as Record<string, unknown>)[change.field] = structuredClone(change.after);
+      continue;
+    }
+
+    if (change.kind === "variable.set") {
+      const serviceLike = resource as ResourceNode & { variables?: Record<string, VariableValue> };
+      serviceLike.variables = serviceLike.variables ?? {};
+      serviceLike.variables[change.variable] = structuredClone(change.after) as VariableValue;
+      continue;
+    }
+
+    if (change.kind === "variable.delete" && "variables" in resource) {
+      delete resource.variables?.[change.variable];
+    }
+  }
+
+  next.resources = [...resources.values()];
+  next.edges = next.edges.filter(edge => resources.has(edge.from) && resources.has(edge.to));
+  return next;
+}
+
+export function changeSetToEnvironmentPatch({
+  currentGraph,
+  currentConfig,
+  changeSet,
+  compileOptions = {},
+}: {
+  currentGraph: RailwayGraph;
+  currentConfig: EnvironmentConfig;
+  changeSet: RailwayChangeSet;
+  compileOptions?: GraphCompileOptions;
+}): EnvironmentConfig {
+  const desiredGraph = changeSetToGraph({ current: currentGraph, changeSet });
+  const desiredConfig = graphToEnvironmentConfig(desiredGraph, compileOptions);
+  return composePatch({ currentConfig, desiredConfig });
+}
+
+export function validateChangeSet(changeSet: RailwayChangeSet): ChangeDiagnostic[] {
+  const diagnostics: ChangeDiagnostic[] = [];
+  if (changeSet.version !== RAILWAY_CHANGE_SET_VERSION) {
+    diagnostics.push({ severity: "error", path: "version", message: `Unsupported change set version: ${changeSet.version}` });
+  }
+
+  for (const [index, change] of changeSet.changes.entries()) {
+    if (!change.path) diagnostics.push({ severity: "error", path: `changes.${index}.path`, message: "Change path is required" });
+    if (!change.summary) diagnostics.push({ severity: "error", path: `changes.${index}.summary`, message: "Change summary is required" });
+    if (change.kind === "resource.delete" && change.severity !== "destructive") {
+      diagnostics.push({ severity: "warning", path: `changes.${index}.severity`, message: "Resource deletion should be marked destructive" });
+    }
+  }
+
+  return diagnostics;
+}
+
 export function renderChangeSet(changeSet: RailwayChangeSet): string {
   if (changeSet.changes.length === 0) return "No changes.";
   return changeSet.changes.map(change => `${marker(change)} ${change.summary}`).join("\n");
@@ -184,5 +259,15 @@ function marker(change: RailwayChange): string {
 }
 
 function stableStringify(value: unknown): string {
-  return JSON.stringify(value, Object.keys(value as object | {}).sort());
+  return JSON.stringify(sortForJson(value));
+}
+
+function sortForJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortForJson);
+  if (value == null || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, child]) => [key, sortForJson(child)]),
+  );
 }

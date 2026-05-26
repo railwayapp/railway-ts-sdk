@@ -10,6 +10,8 @@ export {
 } from "./core/errors.js";
 export {
   bucket,
+  changeSetToEnvironmentPatch,
+  changeSetToGraph,
   createRailwayContext,
   diffGraphs,
   database,
@@ -40,6 +42,7 @@ export {
   renderRailwayGraphTypes,
   service,
   template,
+  validateChangeSet,
   validateGraph,
   volume,
   type BucketNode,
