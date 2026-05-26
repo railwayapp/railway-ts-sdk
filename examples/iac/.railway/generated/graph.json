@@ -10,7 +10,8 @@
   ],
   "resources": [
     {
-      "id": "redis.api-cache",
+      "address": "database.api-cache",
+      "id": "database.api-cache",
       "type": "database",
       "kind": "database",
       "engine": "redis",
@@ -24,6 +25,7 @@
       }
     },
     {
+      "address": "service.backend",
       "id": "service.backend",
       "type": "service",
       "kind": "github",
@@ -48,7 +50,7 @@
         },
         "REDIS_URL": {
           "type": "reference",
-          "resource": "redis.api-cache",
+          "resource": "database.api-cache",
           "output": "REDIS_URL"
         },
         "CORS_ORIGIN": {
@@ -58,6 +60,7 @@
       }
     },
     {
+      "address": "service.frontend",
       "id": "service.frontend",
       "type": "service",
       "kind": "github",
@@ -96,7 +99,7 @@
   "edges": [
     {
       "from": "service.backend",
-      "to": "redis.api-cache",
+      "to": "database.api-cache",
       "type": "variable",
       "key": "REDIS_URL"
     }

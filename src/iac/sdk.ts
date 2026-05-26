@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { resourceAddress } from "./graph.js";
 import type {
   BucketNode,
   DatabaseNode,
@@ -100,7 +101,8 @@ export function empty(): SourceConfig {
 export function service(name: string, config: ServiceConfigInput = {}): ServiceNode {
   const source = normalizeSource(config.source, config.root ?? config.rootDirectory);
   return pruneEmpty({
-    id: `service.${name}`,
+    address: resourceAddress("service", name) as `service.${string}`,
+    id: resourceAddress("service", name) as `service.${string}`,
     type: "service",
     kind: source?.type === "github" ? "github" : source?.type === "image" ? "docker-image" : source?.type === "template" ? "template" : "empty",
     name,
@@ -150,7 +152,8 @@ export function database(
 ): DatabaseNode & { url: () => VariableValue } {
   const output = options.output ?? "DATABASE_URL";
   return {
-    id: `${engine}.${name}`,
+    address: resourceAddress("database", name) as `database.${string}`,
+    id: resourceAddress("database", name) as `database.${string}`,
     type: "database",
     kind: "database",
     engine,
@@ -159,24 +162,24 @@ export function database(
     output,
     defaultMountPath: options.defaultMountPath,
     source: image(options.image),
-    url: () => ({ type: "reference", resource: `${engine}.${name}`, output }),
+    url: () => ({ type: "reference", resource: resourceAddress("database", name), output }),
   } as DatabaseNode & { url: () => VariableValue };
 }
 
 export function volume(name: string, config: VolumeConfig = {}): VolumeNode {
-  return { id: `volume.${name}`, type: "volume", name, config };
+  return { address: resourceAddress("volume", name) as `volume.${string}`, id: resourceAddress("volume", name) as `volume.${string}`, type: "volume", name, config };
 }
 
 export function bucket(name: string, config: BucketConfig = {}): BucketNode {
-  return { id: `bucket.${name}`, type: "bucket", name, config };
+  return { address: resourceAddress("bucket", name) as `bucket.${string}`, id: resourceAddress("bucket", name) as `bucket.${string}`, type: "bucket", name, config };
 }
 
-export function group(name: string, options: Omit<GroupNode, "id" | "type" | "name"> = {}): GroupNode {
-  return { id: `group.${name}`, type: "group", name, ...options };
+export function group(name: string, options: Omit<GroupNode, "address" | "id" | "type" | "name"> = {}): GroupNode {
+  return { address: resourceAddress("group", name) as `group.${string}`, id: resourceAddress("group", name) as `group.${string}`, type: "group", name, ...options };
 }
 
 export function ref(resource: ResourceNode, output: string): VariableValue {
-  return { type: "reference", resource: resource.id, output };
+  return { type: "reference", resource: resource.address, output };
 }
 
 function normalizeSource(source: ServiceConfigInput["source"], rootDirectory?: string): SourceConfig | undefined {

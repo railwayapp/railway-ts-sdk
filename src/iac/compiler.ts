@@ -1,3 +1,4 @@
+import { RAILWAY_GRAPH_VERSION, resourceAddress } from "./graph.js";
 import type {
   DatabaseNode,
   Edge,
@@ -16,11 +17,11 @@ export function projectDefinitionToGraph(definition: ProjectDefinition): Railway
     if (resource.type !== "service" && resource.type !== "database") continue;
     for (const [key, value] of Object.entries(resource.variables ?? {})) {
       if (value.type !== "reference") continue;
-      edges.push({ from: resource.id, to: value.resource, type: "variable", key });
+      edges.push({ from: resource.address, to: value.resource as Edge["to"], type: "variable", key });
     }
   }
   return {
-    version: 1,
+    version: RAILWAY_GRAPH_VERSION,
     project: { name: definition.name },
     environments: definition.environments.map(name => ({ name })),
     resources: definition.services,
@@ -30,7 +31,7 @@ export function projectDefinitionToGraph(definition: ProjectDefinition): Railway
 
 export function graphToEnvironmentConfig(graph: RailwayGraph, options: GraphCompileOptions = {}): EnvironmentConfig {
   const config: EnvironmentConfig = { services: {} };
-  const resourceNamesById = Object.fromEntries(graph.resources.map(resource => [resource.id, resource.name]));
+  const resourceNamesById = Object.fromEntries(graph.resources.map(resource => [resource.address, resource.name]));
   const existingServiceIds = new Set(options.existingServiceIds ?? []);
 
   for (const resource of graph.resources) {
@@ -98,7 +99,8 @@ export function environmentConfigToGraph(
     if (looksLikeDatabase) {
       const engine = imageName?.includes("mysql") ? "mysql" : imageName?.includes("redis") ? "redis" : imageName?.includes("mongo") ? "mongo" : "postgres";
       resources.push({
-        id: `${engine}.${name}`,
+        address: resourceAddress("database", name) as `database.${string}`,
+        id: resourceAddress("database", name) as `database.${string}`,
         type: "database",
         kind: "database",
         engine,
@@ -109,7 +111,8 @@ export function environmentConfigToGraph(
       continue;
     }
     resources.push({
-      id: `service.${name}`,
+      address: resourceAddress("service", name) as `service.${string}`,
+      id: resourceAddress("service", name) as `service.${string}`,
       type: "service",
       kind: serviceConfig.source?.repo ? "github" : serviceConfig.source?.image ? "docker-image" : serviceConfig.deploy?.cronSchedule ? "function" : "empty",
       name,
@@ -127,7 +130,7 @@ export function environmentConfigToGraph(
   for (const [bucketId, bucketConfig] of Object.entries(config.buckets ?? {})) {
     if (bucketConfig == null || bucketConfig.isDeleted) continue;
     const name = options.bucketNamesById?.[bucketId] ?? bucketId;
-    resources.push({ id: `bucket.${name}`, type: "bucket", name, config: bucketConfig });
+    resources.push({ address: resourceAddress("bucket", name) as `bucket.${string}`, id: resourceAddress("bucket", name) as `bucket.${string}`, type: "bucket", name, config: bucketConfig });
   }
 
   return projectDefinitionToGraph({
