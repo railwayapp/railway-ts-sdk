@@ -66,16 +66,6 @@ function App() {
     }
   }
 
-  async function refreshSource() {
-    try {
-      const payload = await fetch(`${demoServerUrl}/api/source`).then(response => response.json()) as { source: string };
-      setFixtures(previous => ({ ...(previous ?? { graph: null, currentGraph: null, changeSet: {}, diff: "" }), source: payload.source }));
-      setStageResult("Reloaded railway.ts from filesystem.");
-    } catch (error) {
-      setStageResult(`Failed to refresh railway.ts: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
   function clearAll() {
     setVisiblePanes(new Set());
     setSynced(false);
@@ -120,11 +110,13 @@ function App() {
           <p className="lede">Server reads railway.ts, evaluates a deterministic graph, optionally queries Backboard for real current state, computes a ChangeSet, then submits it to Backboard for staging.</p>
         </div>
         <div className="actions">
-          <button onClick={sync} disabled={!fixtures}>Sync</button>
-          <button className="secondary" onClick={refreshSource} disabled={!fixtures}>Refresh railway.ts</button>
-          <button className="secondary" onClick={clearAll} disabled={!fixtures}>Clear panes</button>
-          <button className="secondary" onClick={() => setSettingsOpen(true)}>Backboard settings</button>
-          <button className="secondary" onClick={stageChangeSet} disabled={!synced}>Stage real ChangeSet</button>
+          <div className="primaryActions">
+            <button onClick={sync} disabled={!fixtures}>Sync</button>
+            <button className="secondary" onClick={clearAll} disabled={!fixtures}>Clear</button>
+            <button className="secondary" onClick={stageChangeSet} disabled={!synced}>Stage</button>
+            <button onClick={stageChangeSet} disabled={!synced}>Submit</button>
+          </div>
+          <button className="ghost" onClick={() => setSettingsOpen(true)}>Settings</button>
         </div>
       </header>
 

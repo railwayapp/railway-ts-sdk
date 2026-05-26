@@ -22,9 +22,11 @@ main { padding: 14px; }
 .eyebrow { margin: 0 0 4px; color: #ffb86b; text-transform: uppercase; letter-spacing: 0.12em; font-size: 10px; font-weight: 800; }
 h1 { margin: 0; font-size: 26px; letter-spacing: -0.04em; line-height: 1.05; }
 .lede { margin: 8px 0 0; max-width: 900px; color: #b6aa9a; font-size: 13px; line-height: 1.35; }
-.actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.actions { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+.primaryActions { display: flex; flex-wrap: wrap; gap: 6px; }
 button { border: 1px solid #6c4a24; padding: 7px 10px; color: #120f0c; background: #ffb86b; font-size: 12px; font-weight: 800; cursor: pointer; }
 button.secondary { color: #ece7df; background: #202020; border-color: #333; }
+button.ghost { color: #8d8377; background: transparent; border-color: #252525; }
 button:disabled { opacity: 0.45; cursor: not-allowed; }
 input { width: 100%; padding: 8px; color: #ece7df; background: #0b0b0b; border: 1px solid #333; font: inherit; }
 label { display: grid; gap: 4px; color: #b6aa9a; font-size: 12px; font-weight: 700; }
@@ -61,5 +63,7 @@ pre { width: 100%; height: 252px; margin: 0; padding: 10px; color: #f4d5af; back
 @media (max-width: 720px) {
   main { padding: 8px; }
   h1 { font-size: 22px; }
-  .actions button { flex: 1 1 160px; }
+  .actions { align-items: stretch; }
+  .primaryActions { flex: 1; }
+  .primaryActions button { flex: 1 1 110px; }
 }
