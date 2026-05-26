@@ -235,6 +235,7 @@ function diffVariables({ previous, resource, changes }: { previous: ResourceNode
 function diffTopLevelField({ previous, resource, field, changes }: { previous: ResourceNode; resource: ResourceNode; field: string; changes: RailwayChange[] }) {
   const before = (previous as unknown as Record<string, unknown>)[field];
   const after = (resource as unknown as Record<string, unknown>)[field];
+  if (field === "source" && previous.type === "database" && isEquivalentDatabaseSource(previous, after)) return;
   if (stableStringify(normalizeForDiff(field, before)) === stableStringify(normalizeForDiff(field, after))) return;
   changes.push(update(resource.address, field, before, after, `Update ${resource.name} ${field}`));
 }
@@ -257,6 +258,12 @@ function marker(change: RailwayChange): string {
   if (change.kind === "resource.create") return "+";
   if (change.kind === "resource.delete") return "-";
   return "~";
+}
+
+function isEquivalentDatabaseSource(previous: ResourceNode, after: unknown): boolean {
+  if (previous.type !== "database" || after == null || typeof after !== "object") return false;
+  const source = after as Record<string, unknown>;
+  return source.type === "image" && normalizeImageTag(String(source.image)) === normalizeImageTag(previous.image);
 }
 
 function isUnknownImportedVariable(value: VariableValue | undefined): boolean {
