@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "server": "tsx server.ts",
-    "demo": "sh -c 'trap \"kill 0\" EXIT; pnpm server & pnpm dev'",
+    "demo": "pnpm dev",
     "build": "tsc -b && vite build",
     "preview": "vite preview"
   },
