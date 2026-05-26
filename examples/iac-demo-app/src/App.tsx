@@ -2,11 +2,14 @@ import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 
+const demoServerUrl = "http://localhost:8787";
+
 type ConnectionSettings = {
   graphqlUrl: string;
   token: string;
   projectId: string;
   environmentId: string;
+  railwayFile: string;
 };
 
 type Fixtures = {
@@ -14,7 +17,9 @@ type Fixtures = {
   graph: unknown;
   currentGraph: unknown;
   changeSet: { changes?: Array<{ summary?: string; severity?: string; deployEffect?: string }> };
-  patch: unknown;
+  currentConfig?: unknown;
+  graphTypes?: string;
+  mode?: "real" | "mock";
   diff: string;
 };
 
@@ -30,19 +35,15 @@ function App() {
   const [settings, setSettings] = useState<ConnectionSettings>(() => loadSettings());
 
   useEffect(() => {
-    Promise.all([
-      fetch("/fixtures/railway.ts").then(response => response.text()),
-      fetch("/fixtures/graph.json").then(response => response.json()),
-      fetch("/fixtures/current-graph.json").then(response => response.json()),
-      fetch("/fixtures/change-set.json").then(response => response.json()),
-      fetch("/fixtures/patch.json").then(response => response.json()),
-      fetch("/fixtures/diff.txt").then(response => response.text()),
-    ]).then(([loadedSource, graph, currentGraph, changeSet, patch, diff]) => {
-      setFixtures({ source: loadedSource, graph, currentGraph, changeSet, patch, diff });
-      setSource(loadedSource);
-    }).catch(error => {
-      setStageResult(`Failed to load fixtures: ${String(error)}`);
-    });
+    fetch(`${demoServerUrl}/api/source`)
+      .then(response => response.json())
+      .then((payload: { source: string }) => {
+        setSource(payload.source);
+        setFixtures({ source: payload.source, graph: null, currentGraph: null, changeSet: {}, diff: "" });
+      })
+      .catch(error => {
+        setStageResult(`Failed to load railway.ts from demo server: ${String(error)}`);
+      });
   }, []);
 
   const changeCount = fixtures?.changeSet.changes?.length ?? 0;
@@ -51,27 +52,38 @@ function App() {
     [fixtures],
   );
 
-  async function mockSync() {
+  async function sync() {
     setSynced(false);
     setVisiblePanes(new Set());
-    setStageResult("Loading mocked current Railway state…");
-    await reveal("currentGraph");
-    setStageResult("Evaluating railway.ts into RailwayGraph v1…");
-    await reveal("graph");
-    setStageResult("Rendering human-readable diff…");
-    await reveal("diff");
-    setStageResult("Computing RailwayChangeSet v0…");
-    await reveal("changeSet");
-    setStageResult("Compiling EnvironmentConfig patch for existing Backboard substrate…");
-    await reveal("patch");
-    setStageResult("Sync preview ready. Nothing was sent to Backboard.");
-    setSynced(true);
+    setStageResult("Server evaluating railway.ts and querying Backboard current state…");
+    try {
+      const payload = await postJson<Fixtures>(`${demoServerUrl}/api/sync`, { settings });
+      setFixtures(payload);
+      setSource(payload.source);
+      setStageResult(payload.mode === "real" ? "Loaded real Backboard current graph." : "Loaded mocked current graph. Add Backboard settings for real state.");
+      await reveal("currentGraph");
+      setStageResult("Evaluated desired RailwayGraph v1.");
+      await reveal("graph");
+      setStageResult("Rendered human-readable diff.");
+      await reveal("diff");
+      setStageResult("Computed RailwayChangeSet v0.");
+      await reveal("changeSet");
+      setStageResult("Ready to submit ChangeSet to Backboard for server-side patch staging.");
+      setSynced(true);
+    } catch (error) {
+      setStageResult(`Sync failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
-  function refreshSource() {
-    if (!fixtures) return;
-    setSource(fixtures.source);
-    setStageResult("Reloaded railway.ts from fixture.");
+  async function refreshSource() {
+    try {
+      const payload = await fetch(`${demoServerUrl}/api/source`).then(response => response.json()) as { source: string };
+      setSource(payload.source);
+      setFixtures(previous => ({ ...(previous ?? { graph: null, currentGraph: null, changeSet: {}, diff: "" }), source: payload.source }));
+      setStageResult("Reloaded railway.ts from filesystem.");
+    } catch (error) {
+      setStageResult(`Failed to refresh railway.ts: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   function clearAll() {
@@ -95,7 +107,7 @@ function App() {
 
     setStageResult("Submitting RailwayChangeSet to Backboard…");
     try {
-      const result = await callBackboardStageChangeSet({ settings, changeSet: fixtures.changeSet });
+      const result = await postJson<{ id: string; patch: unknown }>(`${demoServerUrl}/api/stage`, { settings, changeSet: fixtures.changeSet });
       setStageResult(`Staged real Backboard patch: ${result.id}`);
     } catch (error) {
       setStageResult(`Backboard staging failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -114,11 +126,11 @@ function App() {
       <header className="hero">
         <div>
           <p className="eyebrow">Railway Project State Prototype</p>
-          <h1>IaC sync flow, mocked end-to-end</h1>
-          <p className="lede">Author TypeScript, evaluate to a deterministic graph, compute an intent-level ChangeSet, then bridge to the current EnvironmentConfig patch substrate.</p>
+          <h1>IaC sync flow, server-backed</h1>
+          <p className="lede">Server reads railway.ts, evaluates a deterministic graph, optionally queries Backboard for real current state, computes a ChangeSet, then submits it to Backboard for staging.</p>
         </div>
         <div className="actions">
-          <button onClick={mockSync} disabled={!fixtures}>Sync</button>
+          <button onClick={sync} disabled={!fixtures}>Sync</button>
           <button className="secondary" onClick={refreshSource} disabled={!fixtures}>Refresh railway.ts</button>
           <button className="secondary" onClick={clearAll} disabled={!fixtures}>Clear panes</button>
           <button className="secondary" onClick={() => setSettingsOpen(true)}>Backboard settings</button>
@@ -129,7 +141,7 @@ function App() {
       <section className="stats">
         <Stat label="Changes" value={changeCount} />
         <Stat label="Destructive" value={destructiveCount} />
-        <Stat label="Backboard" value="mocked" />
+        <Stat label="Backboard" value={fixtures?.mode ?? "mock"} />
         <Stat label="Protocol" value="v0" />
       </section>
 
@@ -137,7 +149,7 @@ function App() {
       {settingsOpen && <SettingsModal settings={settings} onCancel={() => setSettingsOpen(false)} onSave={saveSettings} />}
 
       <section className="workspace split">
-        <Panel title="1. railway.ts authoring" subtitle="Editable demo source; sync uses precomputed fixtures for now." sticky>
+        <Panel title="1. railway.ts authoring" subtitle="Loaded from filesystem by the local demo server." sticky>
           <CodeEditor value={source} onChange={setSource} />
         </Panel>
 
@@ -158,8 +170,8 @@ function App() {
             <Code value={visiblePanes.has("changeSet") ? fixtures?.changeSet : null} />
           </TimelinePanel>
 
-          <TimelinePanel step={6} active={visiblePanes.has("patch")} title="EnvironmentConfig patch" subtitle="Current bridge to existing staged patch shape.">
-            <Code value={visiblePanes.has("patch") ? fixtures?.patch : null} />
+          <TimelinePanel step={6} active={synced} title="Backboard staging" subtitle="ChangeSet is submitted to Backboard; Backboard compiles/stages the patch.">
+            <Code value={synced ? { endpoint: "environmentStageChangeSet", mode: fixtures?.mode ?? "mock", note: "Click Stage real ChangeSet to submit." } : null} />
           </TimelinePanel>
         </div>
       </section>
@@ -199,6 +211,7 @@ function SettingsModal({ settings, onCancel, onSave }: { settings: ConnectionSet
         <label>Token<input value={draft.token} onChange={event => setDraft({ ...draft, token: event.target.value })} placeholder="railway token" type="password" /></label>
         <label>Project ID<input value={draft.projectId} onChange={event => setDraft({ ...draft, projectId: event.target.value })} placeholder="project id" /></label>
         <label>Environment ID<input value={draft.environmentId} onChange={event => setDraft({ ...draft, environmentId: event.target.value })} placeholder="environment id" /></label>
+        <label>Railway file<input value={draft.railwayFile} onChange={event => setDraft({ ...draft, railwayFile: event.target.value })} placeholder="optional absolute path" /></label>
         <div className="modalActions"><button type="button" className="secondary" onClick={onCancel}>Cancel</button><button type="submit">Save</button></div>
       </form>
     </div>
@@ -264,21 +277,15 @@ function escapeHtml(value: string) {
     .replace(/"/g, "&quot;");
 }
 
-async function callBackboardStageChangeSet({ settings, changeSet }: { settings: ConnectionSettings; changeSet: unknown }) {
-  const response = await fetch(settings.graphqlUrl, {
+async function postJson<T>(url: string, body: unknown): Promise<T> {
+  const response = await fetch(url, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${settings.token}`,
-    },
-    body: JSON.stringify({
-      query: `mutation IacDemoStageChangeSet($environmentId: String!, $input: JSON!, $merge: Boolean) { environmentStageChangeSet(environmentId: $environmentId, input: $input, merge: $merge) { id patch } }`,
-      variables: { environmentId: settings.environmentId, input: changeSet, merge: true },
-    }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
   const payload = await response.json();
-  if (!response.ok || payload.errors?.length) throw new Error(payload.errors?.[0]?.message ?? response.statusText);
-  return payload.data.environmentStageChangeSet as { id: string; patch: unknown };
+  if (!response.ok || payload.error) throw new Error(payload.error ?? response.statusText);
+  return payload as T;
 }
 
 function loadSettings(): ConnectionSettings {
@@ -293,6 +300,7 @@ function loadSettings(): ConnectionSettings {
     token: "",
     projectId: "",
     environmentId: "",
+    railwayFile: "",
   };
 }
 

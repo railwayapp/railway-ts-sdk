@@ -4,6 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
+    "server": "tsx server.ts",
+    "demo": "pnpm server & pnpm dev",
     "build": "tsc -b && vite build",
     "preview": "vite preview"
   },
