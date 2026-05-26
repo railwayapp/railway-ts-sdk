@@ -36,7 +36,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .workspace.split {
   display: grid;
-  grid-template-columns: minmax(420px, 0.95fr) minmax(0, 2fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 8px;
   align-items: start;
 }
