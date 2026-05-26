@@ -203,6 +203,7 @@ function diffVariables({ previous, resource, changes }: { previous: ResourceNode
   const before = "variables" in previous ? previous.variables ?? {} : {};
   const after = "variables" in resource ? resource.variables ?? {} : {};
   for (const [key, value] of Object.entries(after)) {
+    if (isUnknownImportedVariable(before[key])) continue;
     if (stableStringify(before[key]) === stableStringify(value)) continue;
     changes.push({
       kind: "variable.set",
@@ -234,7 +235,7 @@ function diffVariables({ previous, resource, changes }: { previous: ResourceNode
 function diffTopLevelField({ previous, resource, field, changes }: { previous: ResourceNode; resource: ResourceNode; field: string; changes: RailwayChange[] }) {
   const before = (previous as unknown as Record<string, unknown>)[field];
   const after = (resource as unknown as Record<string, unknown>)[field];
-  if (stableStringify(before) === stableStringify(after)) return;
+  if (stableStringify(normalizeForDiff(field, before)) === stableStringify(normalizeForDiff(field, after))) return;
   changes.push(update(resource.address, field, before, after, `Update ${resource.name} ${field}`));
 }
 
@@ -256,6 +257,39 @@ function marker(change: RailwayChange): string {
   if (change.kind === "resource.create") return "+";
   if (change.kind === "resource.delete") return "-";
   return "~";
+}
+
+function isUnknownImportedVariable(value: VariableValue | undefined): boolean {
+  return value?.type === "literal" && value.value === "";
+}
+
+function normalizeForDiff(field: string, value: unknown): unknown {
+  if (value == null || typeof value !== "object") return value;
+  const copy = structuredClone(value) as Record<string, unknown>;
+
+  if (field === "source") {
+    if (copy.checkSuites === false) delete copy.checkSuites;
+    if (typeof copy.image === "string") copy.image = normalizeImageTag(copy.image);
+  }
+
+  if (field === "build") {
+    if (copy.builder === "RAILPACK") delete copy.builder;
+    if (copy.buildEnvironment === "V3") delete copy.buildEnvironment;
+  }
+
+  if (field === "deploy") {
+    if (copy.useLegacyStacker === false) delete copy.useLegacyStacker;
+    if (copy.ipv6EgressEnabled === false) delete copy.ipv6EgressEnabled;
+    if (copy.runtime === "V2") delete copy.runtime;
+  }
+
+  return copy;
+}
+
+function normalizeImageTag(image: string): string {
+  const match = /^(redis|mysql|mongo|postgres):(\d+)(?:\.\d+)*$/.exec(image);
+  if (!match) return image;
+  return `${match[1]}:${match[2]}`;
 }
 
 function stableStringify(value: unknown): string {
