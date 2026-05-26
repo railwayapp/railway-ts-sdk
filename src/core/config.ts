@@ -4,6 +4,8 @@ export const DEFAULT_RAILWAY_GRAPHQL_ENDPOINT =
 export interface RailwayClientConfig {
   token: string;
   endpoint?: string;
+  /** Alias used by IaC/demo flows. Prefer endpoint for the stable SDK surface. */
+  graphqlEndpoint?: string;
   fetch?: typeof fetch;
 }
 
@@ -25,7 +27,7 @@ export function normalizeRailwayClientConfig(
 
   return {
     token: config.token,
-    endpoint: config.endpoint ?? DEFAULT_RAILWAY_GRAPHQL_ENDPOINT,
+    endpoint: config.endpoint ?? config.graphqlEndpoint ?? DEFAULT_RAILWAY_GRAPHQL_ENDPOINT,
     fetch: fetchImpl,
   };
 }
