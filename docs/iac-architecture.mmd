@@ -1,74 +1,54 @@
-flowchart TD
-  %% Railway Project State / IaC architecture
+flowchart LR
+  %% Railway Project State / IaC architecture, optimized for presentation.
 
-  subgraph Producers[Authoring / intent producers]
+  subgraph A[Authoring surfaces]
     TS["TypeScript IaC\n.railway/railway.ts"]
-    Web["Web UI\nforms/actions"]
-    CLI["Railway CLI\ncommands"]
-    Templates["Templates"]
-    MCP["MCP tools"]
-    Diagnosis["Diagnosis\nsuggested fixes"]
-    Chat["Chat / agents"]
+    Other["Web / CLI / Templates\nMCP / Diagnosis / Agents"]
   end
 
-  subgraph SDK["railway-ts-sdk prototype"]
-    Eval["evaluateRailwayProject()\nread-only evaluation"]
-    Graph["RailwayGraph v1\ndeterministic project-state IR"]
-    Typegen["graph-types.d.ts\nautocomplete for graph lookups"]
-    RuntimeCtx["Evaluated project context\nproject.service('api')"]
-    Diff["diffGraphs()"]
-    ChangeSet["RailwayChangeSet v0\nintent-level operations"]
-    Render["render / validate\npreview + diagnostics"]
-    PatchAdapter["changeSetToEnvironmentPatch()\nprototype adapter"]
-    EnvPatch["EnvironmentConfig patch\nexisting patch substrate shape"]
+  subgraph B[Shared project-state model]
+    Eval["Evaluate / normalize\nread-only"]
+    Graph["RailwayGraph v1\ndeterministic project intent"]
+    Types["Generated types\ngraph-types.d.ts"]
+    Runtime["Runtime context\nproject.service('api')"]
+    ChangeSet["RailwayChangeSet v0\nintent-level changes"]
   end
 
-  subgraph Runtime["Runtime SDK"]
-    Sandbox["Sandboxes / ephemeral compute\nwhat should happen now?"]
+  subgraph C[Current bridge]
+    Adapter["Prototype adapter\nChangeSet → EnvironmentConfig patch"]
+    Patch["EnvironmentConfig patch\nexisting substrate shape"]
   end
 
-  subgraph Backboard["Backboard today / near future"]
+  subgraph D[Backboard today]
     Stage["environmentStageChanges"]
     Commit["environmentPatchCommitStaged"]
-    Provision["Provisioning / template workflows\nservices, databases, buckets, volumes"]
-    Deploy["Deploy orchestration"]
+    Apply["Provision / deploy\nexisting workflows"]
   end
 
-  subgraph Future["Desired platform convergence"]
-    BackboardChangeSet["Backboard accepts RailwayChangeSet\nvalidate + authorize + realize"]
-    SharedProtocol["One project-state protocol\nfor IaC, Web, CLI, MCP, Diagnosis, Templates"]
+  subgraph E[Future platform direction]
+    Receiver["Backboard accepts RailwayChangeSet\nvalidate + authorize + realize"]
+    Protocol["One project-state protocol\nfor all producers"]
   end
 
-  TS --> Eval --> Graph
-  Graph --> Typegen
-  Graph --> RuntimeCtx
-  RuntimeCtx --> Sandbox
-  Graph --> Diff --> ChangeSet
+  TS --> Eval --> Graph --> ChangeSet
+  Other -. "may emit graph or changes" .-> ChangeSet
 
-  Web -. may emit .-> ChangeSet
-  CLI -. may emit .-> ChangeSet
-  Templates -. graph fragment or changes .-> ChangeSet
-  MCP -. direct intent changes .-> ChangeSet
-  Diagnosis -. suggested fixes .-> ChangeSet
-  Chat -. agent edits/actions .-> ChangeSet
+  Graph --> Types
+  Graph --> Runtime
 
-  ChangeSet --> Render
-  ChangeSet --> PatchAdapter --> EnvPatch --> Stage --> Commit --> Deploy
-  Commit --> Provision
+  ChangeSet --> Adapter --> Patch --> Stage --> Commit --> Apply
 
-  ChangeSet -. future direct receiver .-> BackboardChangeSet
-  BackboardChangeSet --> Provision
-  BackboardChangeSet --> Stage
-  SharedProtocol -. embodied by .-> ChangeSet
+  ChangeSet -. "future direct path" .-> Receiver --> Apply
+  Protocol -. "standardizes" .-> ChangeSet
 
-  classDef source fill:#1f2937,stroke:#64748b,color:#fff
-  classDef graph fill:#0f766e,stroke:#14b8a6,color:#fff
-  classDef change fill:#92400e,stroke:#f59e0b,color:#fff
-  classDef apply fill:#1d4ed8,stroke:#60a5fa,color:#fff
+  classDef author fill:#111827,stroke:#374151,color:#fff
+  classDef model fill:#0f766e,stroke:#14b8a6,color:#fff
+  classDef bridge fill:#92400e,stroke:#f59e0b,color:#fff
+  classDef backboard fill:#1d4ed8,stroke:#60a5fa,color:#fff
   classDef future fill:#581c87,stroke:#c084fc,color:#fff
 
-  class TS,Web,CLI,Templates,MCP,Diagnosis,Chat source
-  class Eval,Graph,Typegen,RuntimeCtx,Diff graph
-  class ChangeSet,Render,PatchAdapter,EnvPatch change
-  class Stage,Commit,Provision,Deploy,Sandbox apply
-  class BackboardChangeSet,SharedProtocol future
+  class TS,Other author
+  class Eval,Graph,Types,Runtime,ChangeSet model
+  class Adapter,Patch bridge
+  class Stage,Commit,Apply backboard
+  class Receiver,Protocol future

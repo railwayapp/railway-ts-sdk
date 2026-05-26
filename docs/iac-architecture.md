@@ -1,66 +1,46 @@
 # Railway Project State architecture
 
 ```mermaid
-flowchart TD
-  subgraph Producers[Authoring / intent producers]
+flowchart LR
+  subgraph A[Authoring surfaces]
     TS["TypeScript IaC<br/>.railway/railway.ts"]
-    Web["Web UI<br/>forms/actions"]
-    CLI["Railway CLI<br/>commands"]
-    Templates["Templates"]
-    MCP["MCP tools"]
-    Diagnosis["Diagnosis<br/>suggested fixes"]
-    Chat["Chat / agents"]
+    Other["Web / CLI / Templates<br/>MCP / Diagnosis / Agents"]
   end
 
-  subgraph SDK["railway-ts-sdk prototype"]
-    Eval["evaluateRailwayProject()<br/>read-only evaluation"]
-    Graph["RailwayGraph v1<br/>deterministic project-state intermediate representation"]
-    Typegen["graph-types.d.ts<br/>autocomplete for graph lookups"]
-    RuntimeCtx["Evaluated project context<br/>project.service('api')"]
-    Diff["diffGraphs()"]
-    ChangeSet["RailwayChangeSet v0<br/>intent-level operations"]
-    Render["render / validate<br/>preview + diagnostics"]
-    PatchAdapter["changeSetToEnvironmentPatch()<br/>prototype adapter"]
-    EnvPatch["EnvironmentConfig patch<br/>existing patch substrate shape"]
+  subgraph B[Shared project-state model]
+    Eval["Evaluate / normalize<br/>read-only"]
+    Graph["RailwayGraph v1<br/>deterministic project intent"]
+    Types["Generated types<br/>graph-types.d.ts"]
+    Runtime["Runtime context<br/>project.service('api')"]
+    ChangeSet["RailwayChangeSet v0<br/>intent-level changes"]
   end
 
-  subgraph Runtime["Runtime SDK"]
-    Sandbox["Sandboxes / ephemeral compute<br/>what should happen now?"]
+  subgraph C[Current bridge]
+    Adapter["Prototype adapter<br/>ChangeSet → EnvironmentConfig patch"]
+    Patch["EnvironmentConfig patch<br/>existing substrate shape"]
   end
 
-  subgraph Backboard["Backboard today / near future"]
+  subgraph D[Backboard today]
     Stage["environmentStageChanges"]
     Commit["environmentPatchCommitStaged"]
-    Provision["Provisioning / template workflows<br/>services, databases, buckets, volumes"]
-    Deploy["Deploy orchestration"]
+    Apply["Provision / deploy<br/>existing workflows"]
   end
 
-  subgraph Future["Desired platform convergence"]
-    BackboardChangeSet["Backboard accepts RailwayChangeSet<br/>validate + authorize + realize"]
-    SharedProtocol["One project-state protocol<br/>IaC, Web, CLI, MCP, Diagnosis, Templates"]
+  subgraph E[Future platform direction]
+    Receiver["Backboard accepts RailwayChangeSet<br/>validate + authorize + realize"]
+    Protocol["One project-state protocol<br/>for all producers"]
   end
 
-  TS --> Eval --> Graph
-  Graph --> Typegen
-  Graph --> RuntimeCtx
-  RuntimeCtx --> Sandbox
-  Graph --> Diff --> ChangeSet
+  TS --> Eval --> Graph --> ChangeSet
+  Other -. "may emit graph or changes" .-> ChangeSet
 
-  Web -. may emit .-> ChangeSet
-  CLI -. may emit .-> ChangeSet
-  Templates -. graph fragment or changes .-> ChangeSet
-  MCP -. direct intent changes .-> ChangeSet
-  Diagnosis -. suggested fixes .-> ChangeSet
-  Chat -. agent edits/actions .-> ChangeSet
+  Graph --> Types
+  Graph --> Runtime
 
-  ChangeSet --> Render
-  ChangeSet --> PatchAdapter --> EnvPatch --> Stage --> Commit --> Deploy
-  Commit --> Provision
+  ChangeSet --> Adapter --> Patch --> Stage --> Commit --> Apply
 
-  ChangeSet -. future direct receiver .-> BackboardChangeSet
-  BackboardChangeSet --> Provision
-  BackboardChangeSet --> Stage
-  SharedProtocol -. embodied by .-> ChangeSet
+  ChangeSet -. "future direct path" .-> Receiver --> Apply
+  Protocol -. "standardizes" .-> ChangeSet
 ```
 
 ## Reading the graph
