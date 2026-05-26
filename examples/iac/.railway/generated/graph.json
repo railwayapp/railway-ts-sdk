@@ -11,7 +11,6 @@
   "resources": [
     {
       "address": "database.api-cache",
-      "id": "database.api-cache",
       "type": "database",
       "kind": "database",
       "engine": "redis",
@@ -26,7 +25,6 @@
     },
     {
       "address": "service.backend",
-      "id": "service.backend",
       "type": "service",
       "kind": "github",
       "name": "backend",
@@ -61,7 +59,6 @@
     },
     {
       "address": "service.frontend",
-      "id": "service.frontend",
       "type": "service",
       "kind": "github",
       "name": "frontend",

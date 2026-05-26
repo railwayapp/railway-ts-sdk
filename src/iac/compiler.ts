@@ -100,7 +100,6 @@ export function environmentConfigToGraph(
       const engine = imageName?.includes("mysql") ? "mysql" : imageName?.includes("redis") ? "redis" : imageName?.includes("mongo") ? "mongo" : "postgres";
       resources.push({
         address: resourceAddress("database", name) as `database.${string}`,
-        id: resourceAddress("database", name) as `database.${string}`,
         type: "database",
         kind: "database",
         engine,
@@ -112,7 +111,6 @@ export function environmentConfigToGraph(
     }
     resources.push({
       address: resourceAddress("service", name) as `service.${string}`,
-      id: resourceAddress("service", name) as `service.${string}`,
       type: "service",
       kind: serviceConfig.source?.repo ? "github" : serviceConfig.source?.image ? "docker-image" : serviceConfig.deploy?.cronSchedule ? "function" : "empty",
       name,
@@ -130,7 +128,7 @@ export function environmentConfigToGraph(
   for (const [bucketId, bucketConfig] of Object.entries(config.buckets ?? {})) {
     if (bucketConfig == null || bucketConfig.isDeleted) continue;
     const name = options.bucketNamesById?.[bucketId] ?? bucketId;
-    resources.push({ address: resourceAddress("bucket", name) as `bucket.${string}`, id: resourceAddress("bucket", name) as `bucket.${string}`, type: "bucket", name, config: bucketConfig });
+    resources.push({ address: resourceAddress("bucket", name) as `bucket.${string}`, type: "bucket", name, config: bucketConfig });
   }
 
   return projectDefinitionToGraph({

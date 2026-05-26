@@ -102,7 +102,6 @@ export function service(name: string, config: ServiceConfigInput = {}): ServiceN
   const source = normalizeSource(config.source, config.root ?? config.rootDirectory);
   return pruneEmpty({
     address: resourceAddress("service", name) as `service.${string}`,
-    id: resourceAddress("service", name) as `service.${string}`,
     type: "service",
     kind: source?.type === "github" ? "github" : source?.type === "image" ? "docker-image" : source?.type === "template" ? "template" : "empty",
     name,
@@ -153,7 +152,6 @@ export function database(
   const output = options.output ?? "DATABASE_URL";
   return {
     address: resourceAddress("database", name) as `database.${string}`,
-    id: resourceAddress("database", name) as `database.${string}`,
     type: "database",
     kind: "database",
     engine,
@@ -167,15 +165,15 @@ export function database(
 }
 
 export function volume(name: string, config: VolumeConfig = {}): VolumeNode {
-  return { address: resourceAddress("volume", name) as `volume.${string}`, id: resourceAddress("volume", name) as `volume.${string}`, type: "volume", name, config };
+  return { address: resourceAddress("volume", name) as `volume.${string}`, type: "volume", name, config };
 }
 
 export function bucket(name: string, config: BucketConfig = {}): BucketNode {
-  return { address: resourceAddress("bucket", name) as `bucket.${string}`, id: resourceAddress("bucket", name) as `bucket.${string}`, type: "bucket", name, config };
+  return { address: resourceAddress("bucket", name) as `bucket.${string}`, type: "bucket", name, config };
 }
 
-export function group(name: string, options: Omit<GroupNode, "address" | "id" | "type" | "name"> = {}): GroupNode {
-  return { address: resourceAddress("group", name) as `group.${string}`, id: resourceAddress("group", name) as `group.${string}`, type: "group", name, ...options };
+export function group(name: string, options: Omit<GroupNode, "address" | "type" | "name"> = {}): GroupNode {
+  return { address: resourceAddress("group", name) as `group.${string}`, type: "group", name, ...options };
 }
 
 export function ref(resource: ResourceNode, output: string): VariableValue {

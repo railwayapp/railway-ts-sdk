@@ -36,8 +36,6 @@ export interface EnvironmentNode {
 export interface GraphResourceBase {
   /** Deterministic graph handle. Remote Railway IDs live in bindings/lock state. */
   address: ResourceAddress;
-  /** Legacy alias while the prototype migrates to address-first naming. */
-  id: ResourceAddress;
   type: ResourceType;
   name: string;
 }
@@ -55,7 +53,6 @@ export interface SourceConfig extends ServiceSource {
 
 export interface ServiceNode extends GraphResourceBase {
   address: `service.${string}`;
-  id: `service.${string}`;
   type: "service";
   kind: ServiceKind;
   source?: SourceConfig;
@@ -74,7 +71,6 @@ export interface ServiceNode extends GraphResourceBase {
 
 export interface DatabaseNode extends Omit<ServiceNode, "address" | "id" | "type" | "kind"> {
   address: `database.${string}`;
-  id: `database.${string}`;
   type: "database";
   kind: "database";
   engine: "postgres" | "mysql" | "redis" | "mongo" | "private";
@@ -85,21 +81,18 @@ export interface DatabaseNode extends Omit<ServiceNode, "address" | "id" | "type
 
 export interface VolumeNode extends GraphResourceBase {
   address: `volume.${string}`;
-  id: `volume.${string}`;
   type: "volume";
   config?: VolumeConfig;
 }
 
 export interface BucketNode extends GraphResourceBase {
   address: `bucket.${string}`;
-  id: `bucket.${string}`;
   type: "bucket";
   config?: BucketConfig;
 }
 
 export interface GroupNode extends GraphResourceBase {
   address: `group.${string}`;
-  id: `group.${string}`;
   type: "group";
   color?: string;
   icon?: string;
@@ -165,7 +158,6 @@ export function validateGraph(graph: RailwayGraph): string[] {
   for (const resource of graph.resources) {
     if (addresses.has(resource.address)) errors.push(`Duplicate resource address: ${resource.address}`);
     addresses.add(resource.address);
-    if (resource.id !== resource.address) errors.push(`Resource id must match address for ${resource.address}`);
   }
 
   for (const edge of graph.edges) {

@@ -1,6 +1,6 @@
 # RailwayGraph v1
 
-`RailwayGraph` is the deterministic project-state IR. It is the boundary between authoring surfaces and Railway changes.
+`RailwayGraph` is the deterministic project-state intermediate representation. It is the boundary between authoring surfaces and Railway changes.
 
 ```txt
 railway.ts / Web / CLI / Template / Agent
@@ -36,7 +36,6 @@ Every resource has:
 ```ts
 {
   address: "service.api"; // deterministic graph address
-  id: "service.api";      // legacy alias for now
   name: "api";            // display/authored name
   type: "service";
 }
@@ -55,6 +54,14 @@ Future binding file:
   }
 }
 ```
+
+## Environment boundary
+
+Graph v1 intentionally does not model Backboard `ServiceInstance` as a first-class resource.
+
+Backboard currently materializes service/environment state as `Service + Environment → ServiceInstance`. That is an apply/storage detail, not necessarily durable project intent. Many environments are ephemeral, especially PR environments; sandbox and ephemeral compute workflows may increase that churn further.
+
+The graph should capture durable project intent and policy. Sync/runtime context selects concrete environments at apply time. Do not encode every live environment or service-instance mapping as graph truth unless product friction proves we need that abstraction.
 
 ## Resource kinds
 
@@ -94,7 +101,6 @@ Edges power ordering, validation, graph visualization, drift explanations, and g
 
 - `version` is required.
 - resource `address` values are unique.
-- resource `id` values are unique and currently equal `address`.
 - resource names are unique within a resource type for name-based lookup.
 - edges reference existing resource addresses.
 - evaluation must not perform Railway mutations.
