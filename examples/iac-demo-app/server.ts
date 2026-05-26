@@ -37,12 +37,14 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "POST" && request.url === "/api/sync") {
       const body = await readJson<{ settings?: ConnectionSettings }>(request);
+      console.log("[iac-demo] /api/sync", describeSettings(body.settings));
       const result = await buildSyncPayload(body.settings ?? {});
       return send(response, 200, result);
     }
 
     if (request.method === "POST" && request.url === "/api/stage") {
       const body = await readJson<{ settings: ConnectionSettings; changeSet: RailwayChangeSet }>(request);
+      console.log("[iac-demo] /api/stage", describeSettings(body.settings));
       const { settings, changeSet } = body;
       if (!settings?.graphqlUrl || !settings.token || !settings.environmentId) {
         return send(response, 400, { error: "Backboard GraphQL URL, token, and environmentId are required." });
@@ -54,6 +56,7 @@ const server = http.createServer(async (request, response) => {
 
     return send(response, 404, { error: "Not found" });
   } catch (error) {
+    logError(error);
     return send(response, 500, { error: error instanceof Error ? error.message : String(error) });
   }
 });
@@ -86,6 +89,7 @@ async function buildSyncPayload(settings: ConnectionSettings) {
 }
 
 async function getRealCurrentGraph(settings: ConnectionSettings, projectName: string): Promise<{ mode: "real"; graph: RailwayGraph; config: EnvironmentConfig }> {
+  console.log("[iac-demo] querying Backboard current environment", describeSettings(settings));
   const client = new IacClient({ token: settings.token!, graphqlEndpoint: settings.graphqlUrl! });
   const current = await client.getCurrentEnvironment(settings.environmentId!);
   return {
@@ -121,6 +125,27 @@ async function readJson<T>(request: http.IncomingMessage): Promise<T> {
   const chunks: Buffer[] = [];
   for await (const chunk of request) chunks.push(Buffer.from(chunk));
   return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}") as T;
+}
+
+function describeSettings(settings?: ConnectionSettings) {
+  return {
+    graphqlUrl: settings?.graphqlUrl || "(not set)",
+    projectId: settings?.projectId || "(not set)",
+    environmentId: settings?.environmentId || "(not set)",
+    railwayFile: settings?.railwayFile || defaultRailwayFile,
+    hasToken: Boolean(settings?.token),
+    tokenPrefix: settings?.token ? `${settings.token.slice(0, 6)}…` : "(not set)",
+  };
+}
+
+function logError(error: unknown) {
+  console.error("[iac-demo] request failed");
+  if (error instanceof Error) {
+    console.error("[iac-demo]", error.name, error.message);
+    console.error(error.stack);
+    return;
+  }
+  console.error(error);
 }
 
 function send(response: http.ServerResponse, status: number, payload: unknown) {
