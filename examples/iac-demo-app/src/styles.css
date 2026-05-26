@@ -34,11 +34,6 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .stat strong { display: block; margin-top: 2px; font-size: 17px; }
 .status { margin: 0 0 8px; padding: 8px 10px; color: #ffe0b7; background: #201810; border: 1px solid #4b3017; font-size: 12px; }
 
-.timeline { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin: 0 0 8px; }
-.step { padding: 7px 9px; color: #82786c; background: #141414; border: 1px solid #252525; font-size: 12px; }
-.step span { display: inline-block; width: 18px; margin-right: 6px; color: #b6aa9a; font-weight: 800; }
-.step.active { color: #f1ece5; border-color: #7b5124; background: #21180f; }
-
 .workspace.split {
   display: grid;
   grid-template-columns: minmax(420px, 0.95fr) minmax(0, 2fr);
@@ -47,12 +42,54 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 
 .outputs {
+  position: relative;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 8px;
+  padding-left: 38px;
 }
 
-.panel { min-height: 300px; overflow: hidden; background: #151515; border: 1px solid #2b2b2b; }
+.outputs::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 14px;
+  width: 1px;
+  background: #333;
+}
+
+.timelineItem {
+  position: relative;
+}
+
+.timelineMarker {
+  position: absolute;
+  left: -38px;
+  top: 8px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  color: #8d8377;
+  background: #151515;
+  border: 1px solid #333;
+  font-size: 12px;
+  font-weight: 900;
+  z-index: 1;
+}
+
+.timelineItem.active .timelineMarker {
+  color: #120f0c;
+  background: #ffb86b;
+  border-color: #ffb86b;
+}
+
+.timelineItem.active .panel {
+  border-color: #7b5124;
+}
+
+.panel { min-height: 250px; overflow: hidden; background: #151515; border: 1px solid #2b2b2b; }
 .panel.sticky { position: sticky; top: 14px; min-height: calc(100vh - 28px); }
 .panelHeader { padding: 8px 10px; border-bottom: 1px solid #2b2b2b; background: #1a1a1a; }
 h2 { margin: 0; font-size: 13px; letter-spacing: -0.01em; }

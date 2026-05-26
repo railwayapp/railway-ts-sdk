@@ -13,8 +13,6 @@ type Fixtures = {
 
 type VisiblePane = "currentGraph" | "graph" | "diff" | "changeSet" | "patch";
 
-const paneOrder: VisiblePane[] = ["currentGraph", "graph", "diff", "changeSet", "patch"];
-
 function App() {
   const [fixtures, setFixtures] = useState<Fixtures | null>(null);
   const [source, setSource] = useState("");
@@ -107,39 +105,31 @@ function App() {
 
       {stageResult && <div className="status">{stageResult}</div>}
 
-      <section className="timeline">
-        {paneOrder.map((pane, index) => (
-          <div key={pane} className={visiblePanes.has(pane) ? "step active" : "step"}>
-            <span>{index + 1}</span>{labelForPane(pane)}
-          </div>
-        ))}
-      </section>
-
       <section className="workspace split">
         <Panel title="1. railway.ts authoring" subtitle="Editable demo source; sync uses precomputed fixtures for now." sticky>
           <CodeEditor value={source} onChange={setSource} />
         </Panel>
 
         <div className="outputs">
-          <Panel title="2. Current graph" subtitle="Mocked Railway state: backend + Redis, no frontend.">
+          <TimelinePanel step={2} active={visiblePanes.has("currentGraph")} title="Current graph" subtitle="Mocked Railway state: backend + Redis, no frontend.">
             <Code value={visiblePanes.has("currentGraph") ? fixtures?.currentGraph : null} />
-          </Panel>
+          </TimelinePanel>
 
-          <Panel title="3. Desired RailwayGraph" subtitle="Pure deterministic project-state intermediate representation.">
+          <TimelinePanel step={3} active={visiblePanes.has("graph")} title="Desired RailwayGraph" subtitle="Pure deterministic project-state intermediate representation.">
             <Code value={visiblePanes.has("graph") ? fixtures?.graph : null} />
-          </Panel>
+          </TimelinePanel>
 
-          <Panel title="4. Diff preview" subtitle="Human-readable ChangeSet rendering.">
+          <TimelinePanel step={4} active={visiblePanes.has("diff")} title="Diff preview" subtitle="Human-readable ChangeSet rendering.">
             <HighlightedDiff value={visiblePanes.has("diff") ? fixtures?.diff : "Waiting for sync…"} />
-          </Panel>
+          </TimelinePanel>
 
-          <Panel title="5. RailwayChangeSet" subtitle="Intent-level operations and diagnostics.">
+          <TimelinePanel step={5} active={visiblePanes.has("changeSet")} title="RailwayChangeSet" subtitle="Intent-level operations and diagnostics.">
             <Code value={visiblePanes.has("changeSet") ? fixtures?.changeSet : null} />
-          </Panel>
+          </TimelinePanel>
 
-          <Panel title="6. EnvironmentConfig patch" subtitle="Current bridge to existing staged patch shape.">
+          <TimelinePanel step={6} active={visiblePanes.has("patch")} title="EnvironmentConfig patch" subtitle="Current bridge to existing staged patch shape.">
             <Code value={visiblePanes.has("patch") ? fixtures?.patch : null} />
-          </Panel>
+          </TimelinePanel>
         </div>
       </section>
     </main>
@@ -155,6 +145,15 @@ function Panel({ title, subtitle, sticky, children }: { title: string; subtitle:
       </div>
       {children}
     </article>
+  );
+}
+
+function TimelinePanel({ step, active, title, subtitle, children }: { step: number; active: boolean; title: string; subtitle: string; children: React.ReactNode }) {
+  return (
+    <div className={active ? "timelineItem active" : "timelineItem"}>
+      <div className="timelineMarker">{step}</div>
+      <Panel title={title} subtitle={subtitle}>{children}</Panel>
+    </div>
   );
 }
 
@@ -215,16 +214,6 @@ function escapeHtml(value: string) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
-}
-
-function labelForPane(pane: VisiblePane) {
-  return {
-    currentGraph: "Current",
-    graph: "Graph",
-    diff: "Diff",
-    changeSet: "ChangeSet",
-    patch: "Patch",
-  }[pane];
 }
 
 function wait(ms: number) {
