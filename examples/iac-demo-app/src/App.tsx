@@ -115,38 +115,40 @@ function App() {
         ))}
       </section>
 
-      <section className="workspace">
-        <Panel title="1. railway.ts authoring" subtitle="Editable demo source; sync uses precomputed fixtures for now." wide>
-          <textarea value={source} onChange={event => setSource(event.target.value)} spellCheck={false} />
+      <section className="workspace split">
+        <Panel title="1. railway.ts authoring" subtitle="Editable demo source; sync uses precomputed fixtures for now." sticky>
+          <CodeEditor value={source} onChange={setSource} />
         </Panel>
 
-        <Panel title="2. Current graph" subtitle="Mocked Railway state: backend + Redis, no frontend.">
-          <Code value={visiblePanes.has("currentGraph") ? fixtures?.currentGraph : null} />
-        </Panel>
+        <div className="outputs">
+          <Panel title="2. Current graph" subtitle="Mocked Railway state: backend + Redis, no frontend.">
+            <Code value={visiblePanes.has("currentGraph") ? fixtures?.currentGraph : null} />
+          </Panel>
 
-        <Panel title="3. Desired RailwayGraph" subtitle="Pure deterministic project-state intermediate representation.">
-          <Code value={visiblePanes.has("graph") ? fixtures?.graph : null} />
-        </Panel>
+          <Panel title="3. Desired RailwayGraph" subtitle="Pure deterministic project-state intermediate representation.">
+            <Code value={visiblePanes.has("graph") ? fixtures?.graph : null} />
+          </Panel>
 
-        <Panel title="4. Diff preview" subtitle="Human-readable ChangeSet rendering.">
-          <pre className="diff">{visiblePanes.has("diff") ? fixtures?.diff : "Waiting for sync…"}</pre>
-        </Panel>
+          <Panel title="4. Diff preview" subtitle="Human-readable ChangeSet rendering.">
+            <HighlightedDiff value={visiblePanes.has("diff") ? fixtures?.diff : "Waiting for sync…"} />
+          </Panel>
 
-        <Panel title="5. RailwayChangeSet" subtitle="Intent-level operations and diagnostics.">
-          <Code value={visiblePanes.has("changeSet") ? fixtures?.changeSet : null} />
-        </Panel>
+          <Panel title="5. RailwayChangeSet" subtitle="Intent-level operations and diagnostics.">
+            <Code value={visiblePanes.has("changeSet") ? fixtures?.changeSet : null} />
+          </Panel>
 
-        <Panel title="6. EnvironmentConfig patch" subtitle="Current bridge to existing staged patch shape.">
-          <Code value={visiblePanes.has("patch") ? fixtures?.patch : null} />
-        </Panel>
+          <Panel title="6. EnvironmentConfig patch" subtitle="Current bridge to existing staged patch shape.">
+            <Code value={visiblePanes.has("patch") ? fixtures?.patch : null} />
+          </Panel>
+        </div>
       </section>
     </main>
   );
 }
 
-function Panel({ title, subtitle, wide, children }: { title: string; subtitle: string; wide?: boolean; children: React.ReactNode }) {
+function Panel({ title, subtitle, sticky, children }: { title: string; subtitle: string; sticky?: boolean; children: React.ReactNode }) {
   return (
-    <article className={wide ? "panel wide" : "panel"}>
+    <article className={sticky ? "panel sticky" : "panel"}>
       <div className="panelHeader">
         <h2>{title}</h2>
         <p>{subtitle}</p>
@@ -161,7 +163,50 @@ function Stat({ label, value }: { label: string; value: string | number }) {
 }
 
 function Code({ value }: { value: unknown }) {
-  return <pre>{value == null ? "Loading…" : JSON.stringify(value, null, 2)}</pre>;
+  return <pre className="code" dangerouslySetInnerHTML={{ __html: highlightJson(value == null ? "Loading…" : JSON.stringify(value, null, 2)) }} />;
+}
+
+function CodeEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <div className="editor">
+      <pre className="editorHighlight" aria-hidden dangerouslySetInnerHTML={{ __html: highlightTs(value) }} />
+      <textarea
+        value={value}
+        onChange={event => onChange(event.target.value)}
+        spellCheck={false}
+        aria-label="railway.ts authoring"
+      />
+    </div>
+  );
+}
+
+function HighlightedDiff({ value }: { value: string | undefined }) {
+  const lines = (value ?? "Waiting for sync…").split("\n");
+  return <pre className="diff">{lines.map((line, index) => <span key={index} className={line.startsWith("+") ? "plus" : line.startsWith("-") ? "minus" : line.startsWith("~") ? "change" : undefined}>{line}\n</span>)}</pre>;
+}
+
+function highlightJson(value: string) {
+  return escapeHtml(value)
+    .replace(/(&quot;[^&]*?&quot;)(\s*:)/g, '<span class="tok-key">$1</span>$2')
+    .replace(/(:\s*)(&quot;[^&]*?&quot;)/g, '$1<span class="tok-string">$2</span>')
+    .replace(/\b(true|false|null)\b/g, '<span class="tok-literal">$1</span>')
+    .replace(/\b(-?\d+(?:\.\d+)?)\b/g, '<span class="tok-number">$1</span>');
+}
+
+function highlightTs(value: string) {
+  return escapeHtml(value)
+    .replace(/(\/\/.*)$/gm, '<span class="tok-comment">$1</span>')
+    .replace(/(&quot;[^&]*?&quot;|'[^']*?'|`[^`]*?`)/g, '<span class="tok-string">$1</span>')
+    .replace(/\b(import|from|export|default|const|return|type|function)\b/g, '<span class="tok-keyword">$1</span>')
+    .replace(/\b(defineRailway|project|service|github|redis|postgres|mysql|mongo|bucket|volume)\b/g, '<span class="tok-call">$1</span>');
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function labelForPane(pane: VisiblePane) {
