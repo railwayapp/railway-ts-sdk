@@ -9,7 +9,9 @@ const project = await evaluateRailwayProject();
 const backend = project.service("backend");
 const cache = project.database("api-cache");
 
-console.log(`Running against ${project.name}/${backend.name} with ${cache.name}`);
+console.log(
+  `Running against ${project.name}/${backend.name} with ${cache.name}`,
+);
 
 const sandbox = new Sandbox({
   token: process.env.RAILWAY_API_TOKEN!,
