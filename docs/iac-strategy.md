@@ -2,193 +2,120 @@
 
 ## Status
 
-Draft. This document is a strategy artifact, not an RFC. It describes the direction we want to move toward over the next 1-3 years so RFCs, implementation work, and product decisions can align behind a coherent model.
+Draft strategy, not RFC. Goal: align 1-3 year direction before locking implementation details.
 
 ## Thesis
 
-Railway needs a durable, typed project-state layer.
+Railway needs an owned, typed project-state layer.
 
-IaC is the first user-facing reason to build it, but the real opportunity is broader: create a shared graph and change protocol that can power IaC, the CLI, Web, Templates, MCP, Diagnosis, Chat, agents, and future platform features without each surface inventing its own partial patch system.
+IaC is the forcing function, not the whole product. The same model should eventually power CLI, Web, Templates, MCP, Diagnosis, Chat, agents, and runtime SDK context.
 
-The goal is not to rewrite Backboard first. The goal is to establish a clean boundary around project state, then migrate producers and consumers toward that boundary over time.
+Do not start by rewriting Backboard. Start by putting a durable boundary around project state, then migrate producers/consumers toward it.
 
 ```txt
-authored intent / product action / agent suggestion
-        ↓
-Railway graph
-        ↓
-Railway change set
-        ↓
-validation + staging + apply
-        ↓
-existing Railway systems
+authoring/action/suggestion
+  → RailwayGraph
+  → RailwayChangeSet
+  → validate/stage/apply
+  → existing Railway systems
 ```
 
 ## Problem
 
-Railway project state has grown through many product iterations and many feature-specific paths. That has helped us ship quickly, but the accumulated model is hard to reason about and hard to extend safely.
+Railway project state is spread across feature-specific paths and generic service blobs. This made shipping fast, but now slows safe evolution.
 
-Current pain:
+Pain:
 
-- Service configuration is a broad generic model that many unrelated features must share.
-- Product-specific concepts often require digging through generic service blobs.
-- Multiple systems produce changes in different shapes: Web, CLI, Diagnosis, Templates, MCP, Chat, and future IaC.
-- Defaults, generated values, runtime state, user-authored values, and deprecated fields are not cleanly separated.
-- Existing project state is difficult to import, diff, explain, or reconcile at an intent level.
-- Agents and tools can propose changes, but there is no common typed protocol for those changes.
-- Confidence is low because there is no single conceptual model that owns project state evolution.
+- service data modeling is too generic for product-specific evolution
+- Web, CLI, Templates, Diagnosis, MCP, Chat, and IaC all shape changes differently
+- authored values, platform defaults, generated values, runtime state, and deprecated fields blur together
+- existing projects are hard to import, diff, explain, or reconcile
+- agents/tools can suggest edits, but lack a common typed change protocol
+- no clear owner/model for long-term project-state evolution
 
-This is not only an IaC problem. IaC exposes the problem because declarative state requires names, identity, diffs, defaults, drift, validation, and safe apply semantics to be explicit.
+IaC exposes this because declarative state forces names, identity, defaults, drift, validation, diffs, and safe apply semantics to be explicit.
 
-## Vision
+## Target model
 
-Railway project state should have a small number of durable layers:
+Four layers:
 
 1. **Authoring surfaces**: TypeScript IaC, Web forms, CLI commands, Templates, MCP tools, Diagnosis fixes, Chat/agent actions.
-2. **Graph**: a deterministic typed model of what should exist.
-3. **Change protocol**: a typed list of intent-level changes from current state to desired state.
-4. **Apply substrate**: validation, staging, review, commit, deploy orchestration, and audit.
+2. **Graph**: deterministic typed model of desired project state.
+3. **Change protocol**: typed intent-level delta from current state to desired state.
+4. **Apply substrate**: validation, staging, review, commit, deploy orchestration, audit.
 
-Backboard can remain the initial apply substrate. The staged patch engine is useful and should not be discarded. But producers should increasingly target the same graph/change boundary instead of each one hand-building ad hoc patches.
+Backboard remains the first apply substrate. The staged patch engine is useful. The change is that producers target one graph/change boundary instead of hand-building incompatible patches.
 
 ## Principles
 
-### Graph is truth
+- **Graph is truth.** Source code, Web forms, and agent output are authoring. Runtime code consumes evaluated graph, not source shape.
+- **Evaluation is read-only.** `.railway/railway.ts` evaluation emits graph/config/change data. Mutation only happens through explicit stage/apply.
+- **One change protocol.** IaC, Diagnosis, MCP, Chat, CLI, Web, and Templates converge on `RailwayChangeSet`.
+- **No monolith rewrite first.** Build a typed boundary that translates into existing staging/apply behavior.
+- **Authored intent beats serialization.** Users should not copy platform defaults, generated fields, runtime state, or deprecated artifacts into source.
+- **Existing projects are first-class.** Import, drift, reconciliation, and adoption matter as much as greenfield creation.
+- **Identity is not display name.** Names are UX handles; bindings connect authored resources, graph nodes, and Railway IDs.
+- **Declarative and runtime meet at context.** IaC answers “what should exist?” Runtime SDK answers “what should happen now?” They meet through evaluated project graph.
+- **Migration is product work.** Once infra is source-controlled, schema versioning, migrations, generated artifacts, and backwards compatibility are our responsibility.
 
-TypeScript is authoring. Web forms are authoring. Chat suggestions are authoring. The graph is the deterministic representation that other systems should consume.
-
-Runtime APIs should reference the evaluated graph, not the user's source code shape.
-
-### Code evaluation must not mutate Railway
-
-Evaluating `.railway/railway.ts` should produce graph/config/change information only. Mutation happens through explicit stage/apply flows.
-
-### One change protocol
-
-IaC, Diagnosis, MCP, Chat, CLI, Web, and Templates should converge on a shared `RailwayChangeSet` rather than separate patch languages.
-
-### Backboard remains the apply substrate initially
-
-We should not start with a monolith rewrite. The first milestone is a typed boundary that can translate into existing staging/apply behavior.
-
-### Authored intent over serialized defaults
-
-Users should not have to copy Railway serialization artifacts into source. Defaults, generated values, runtime state, and deprecated fields must be normalized away or represented explicitly as platform-owned state.
-
-### Existing projects must be adoptable
-
-Greenfield IaC is not enough. Users need import, drift, reconciliation, and safe adoption flows for projects that already exist.
-
-### Identity is separate from display names
-
-Names are good authored handles and UX labels, but Railway needs durable bindings between authored resources, graph nodes, and remote resource IDs.
-
-### Runtime and declarative APIs meet at context
-
-Declarative APIs answer: what should exist?
-
-Runtime APIs answer: what should happen now?
-
-They can live in the same SDK, but should meet through evaluated graph/project context, not by turning runtime objects into fake declarative resources.
-
-### Migration is our responsibility
-
-Once users place infrastructure in source control, backwards compatibility, schema versioning, migrations, and generated artifacts become product responsibilities.
-
-## Proposed architecture
+## Architecture
 
 ```txt
 .railway/railway.ts
-  TypeScript authoring API
-  modules compose graph fragments
-  no direct mutations
-        ↓
-evaluate
-        ↓
+  TS authoring API; modules compose graph fragments; no mutation
+      ↓ evaluate
 RailwayGraph
-  typed project resources
-  deterministic IDs
-  references and edges
-  generated type information
-        ↓
-compare with current Railway state
-        ↓
+  typed resources; stable handles; refs/edges; generated type info
+      ↓ compare current state
 RailwayChangeSet
-  create/update/delete/rename intent
-  destructive-change metadata
-  deploy side-effect metadata
-  validation paths
-        ↓
-Backboard adapter
-  translates changes to staged environment patch
-  uses existing validation/staging/commit/deploy systems
-        ↓
-Railway
+  create/update/delete/rename intent; safety/deploy metadata; validation paths
+      ↓ adapter
+Backboard staged patch
+  existing validation/stage/commit/deploy systems
 ```
 
-## Core concepts
+## Core artifacts
 
 ### RailwayGraph
 
-A deterministic typed model of project state.
+Deterministic typed project model. It should model Railway concepts directly even if persistence remains generic:
 
-It should model Railway concepts directly, even if the current persistence model is generic:
+```txt
+project, environments, services, databases, volumes, buckets,
+variables, domains, networking, regions, build/deploy policy,
+references, dependencies
+```
 
-- project
-- environments
-- services
-- databases
-- volumes
-- buckets
-- variables
-- domains
-- networking
-- regions
-- deployment policy
-- build policy
-- references and dependencies
-
-The graph is where future-facing service modeling can begin without requiring an immediate database rewrite.
+This lets us create the future service model at the boundary before changing storage.
 
 ### RailwayChangeSet
 
-A typed protocol for moving from current state to desired state.
+Typed intent-level delta, not raw blob diff.
 
-It should express intent-level operations, not raw blob diffs:
+Examples:
 
-- create service
-- update build command
-- update start command
-- set variable
-- create volume
-- attach volume
-- create domain
-- update region replicas
-- delete resource
-- preserve existing secret
-- generate secret
+```txt
+create service
+update build/start command
+set/preserve/generate variable
+create/attach volume
+create domain
+update region replicas
+delete resource
+```
 
-A change set should carry enough metadata for UI, CLI, CI, agents, and review flows:
+Each change should carry:
 
-- human-readable summary
-- machine-readable paths
-- destructive or safe classification
-- whether deploys are required
-- validation errors
-- warnings
-- dependencies between changes
+```txt
+summary, paths, warnings/errors, dependencies,
+destructive/safe classification, deploy side-effect metadata
+```
+
+This is the protocol Web/CLI/CI/agents can preview, review, and apply.
 
 ### Resource bindings
 
-We need a durable binding layer between authored resources and Railway resources.
-
-Possible shape:
-
-```txt
-.railway/railway.lock.json
-```
-
-containing mappings like:
+Durable mapping from authored resource to Railway resource:
 
 ```json
 {
@@ -201,13 +128,11 @@ containing mappings like:
 }
 ```
 
-The source file remains intent. The lock/provenance file records binding and reconciliation state.
+Likely lives in `.railway/railway.lock.json`. Source remains intent; lock/provenance records identity and reconciliation state.
 
 ### Generated artifacts
 
-Generated artifacts can improve DX and agent workflows, but must not become hidden source of truth.
-
-Possible generated files:
+Useful for DX and agents, never hidden source of truth:
 
 ```txt
 .railway/generated/graph.json
@@ -216,7 +141,7 @@ Possible generated files:
 .railway/drifts/<id>/...
 ```
 
-Generated type declarations are useful for autocomplete:
+`graph-types.d.ts` gives autocomplete for evaluated graph lookups:
 
 ```ts
 const project = await railway.iac.evaluate();
@@ -224,54 +149,49 @@ project.service("api");
 project.database("Postgres");
 ```
 
-Full generated graph/config artifacts should be treated as reproducible state unless a specific workflow requires committing them.
+## Implementation path
 
-## Initial implementation strategy
+### 1. SDK prototype as architecture slice
 
-### Phase 1: SDK prototype as architecture slice
+Prove the model in TS SDK without Backboard refactor:
 
-Use the TypeScript SDK to prove the model without forcing a Backboard refactor.
-
-Deliverables:
-
-- experimental `railway/iac` package surface
+- experimental `railway/iac`
 - deterministic graph evaluation
-- graph-to-environment-config compiler
-- current-state import path
+- graph → environment config compiler
+- current state → graph import path
 - generated graph typings
-- runtime SDK graph context helpers
-- examples showing authored intent and generated output
+- runtime graph context helpers
+- examples with authored source + generated output
 
-This is the current branch's purpose.
-
-### Phase 2: Change protocol draft
+### 2. Change protocol draft
 
 Define `RailwayChangeSet` in TypeScript first.
 
 Build adapters:
 
-- graph diff → change set
-- change set → existing staged patch input
-- current Railway state → graph
+```txt
+graph diff → change set
+change set → staged patch input
+current Railway state → graph
+```
 
-Use this to clarify what Backboard should eventually own versus what the SDK/compiler owns.
+Use this to clarify SDK/compiler responsibilities vs Backboard responsibilities.
 
-### Phase 3: Identity, drift, and adoption
+### 3. Identity, drift, adoption
 
-Add first-class flows for existing projects:
+Make existing projects safe to adopt:
 
-- import current project state
-- generate adoption artifacts
-- detect drift
-- explain drift at resource/property level
-- resolve in favor of code or Railway
+- import current state
+- generate adoption/drift artifacts
+- explain drift by resource/property
+- resolve toward code or Railway
 - preserve secrets safely
 
-The CLI should never silently rewrite `.railway/railway.ts`. Agents and users can edit source explicitly with generated context.
+CLI must not silently rewrite `.railway/railway.ts`; users/agents edit source explicitly with generated context.
 
-### Phase 4: CLI integration
+### 4. CLI integration
 
-Integrate with the existing Rust CLI once the model is stable enough:
+After model stabilization, Rust CLI owns UX and auth/project/env resolution:
 
 ```bash
 railway iac sync
@@ -281,71 +201,63 @@ railway iac pull
 railway iac typegen
 ```
 
-The CLI should reuse existing Railway auth, project linking, environment resolution, and output conventions.
+### 5. Platform convergence
 
-### Phase 5: Platform convergence
+Gradually route more producers through `RailwayChangeSet`:
 
-Start moving other producers toward the same change protocol:
+```txt
+Diagnosis fixes, MCP tools, Chat/agent edits, Templates, selected Web forms
+```
 
-- Diagnosis suggested fixes
-- MCP tools
-- Chat/agent changes
-- Templates
-- Web configuration forms where practical
+This creates a path, not a grand rewrite gate.
 
-This should happen gradually. The point is to create a path, not to block feature work on a grand rewrite.
+## GA checklist
 
-## GA readiness checklist
-
-GA requires more than SDK helpers.
-
-Minimum readiness:
-
-- documented project-state strategy and owner
-- stable graph schema with versioning
-- stable change protocol with versioning
-- adapter from change protocol to existing staged patch engine
+- named owner + strategy
+- versioned `RailwayGraph`
+- versioned `RailwayChangeSet`
+- ChangeSet → staged patch adapter
 - resource binding/provenance model
-- import/adoption flow for existing projects
-- drift detection and reconciliation UX
+- import/adoption for existing projects
+- drift detection/reconciliation UX
 - canonical default normalization
 - safe secrets/generation model
-- validation with actionable paths and messages
+- actionable validation paths/messages
 - destructive-change safeguards
-- project/environment/auth resolution through the Railway CLI
-- generated typings for evaluated graph references
-- tests for graph, compile, diff, change, apply, import, drift, and secrets
-- docs/examples for common production patterns
+- CLI auth/project/environment resolution
+- generated graph typings
+- tests for graph, compile, diff, change, apply, import, drift, secrets
+- production docs/examples
 
 ## Non-goals
 
-- Immediate Backboard rewrite.
-- Terraform compatibility.
-- Modeling runtime sandbox instances as declarative resources.
-- Making every Railway setting exhaustive before the graph/change model is stable.
-- Letting generated artifacts silently replace authored source.
-- Treating LLM output as ownership. Humans own the strategy, review, and long-term model.
+- immediate Backboard rewrite
+- Terraform compatibility
+- declarative sandbox instances
+- exhaustive settings before graph/change model stability
+- generated artifacts replacing authored source
+- LLM output as ownership substitute
 
 ## Open questions
 
-- Where should `RailwayGraph` and `RailwayChangeSet` ultimately live: TS SDK, shared JS package, Backboard package, or generated schema?
-- Should `graph-types.d.ts` be committed by default or generated as editor-only state?
-- What is the canonical lock/provenance file shape?
-- How do we represent field-level ownership or ignored drift?
-- How do we model project-level and environment-level resources cleanly?
-- What changes should require deploys, and where is that computed?
-- How do Web-owned edits communicate that a resource is IaC-managed?
-- What is the migration path from generic service blobs to more domain-specific models?
+- Where do `RailwayGraph` and `RailwayChangeSet` live long-term?
+- Is `graph-types.d.ts` committed or editor-only generated state?
+- What is the canonical lock/provenance shape?
+- How do we represent field ownership / ignored drift?
+- How do project-level vs environment-level resources compose?
+- Where do we compute “requires deploy”?
+- How does Web communicate IaC-managed state?
+- What is the migration path from generic service blobs to domain-specific models?
 
 ## Success criteria
 
-This effort is working if:
+This is working when:
 
-- New project-state features can target a typed graph/change layer instead of hand-editing generic service blobs.
-- IaC, CLI, MCP, Diagnosis, Templates, and Web can describe changes in the same protocol.
-- Existing projects can be adopted without scary diffs or secret leakage.
-- Users and agents can understand what will change before anything mutates.
-- Runtime SDK code can safely reference evaluated project context.
-- Platform engineers can extend service/database/bucket behavior with less spelunking and more confidence.
+- new project-state features target graph/change, not ad hoc service blob edits
+- IaC, CLI, MCP, Diagnosis, Templates, Web, and agents share a change protocol
+- existing projects adopt without scary diffs or secret leakage
+- users can preview exact impact before mutation
+- runtime SDK code can reference evaluated project context
+- platform engineers extend service/database/bucket behavior with less spelunking
 
-The intended outcome is not only a good IaC product. It is a better-owned model for Railway project state.
+Outcome: not just IaC. A better-owned model for Railway project state.
