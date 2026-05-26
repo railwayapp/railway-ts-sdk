@@ -1,3 +1,4 @@
+export * from "./change-set.js";
 export * from "./client.js";
 export * from "./compiler.js";
 export * from "./diff.js";
