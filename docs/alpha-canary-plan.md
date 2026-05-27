@@ -371,6 +371,47 @@ If it feels good, Backboard/CLI can converge on protobuf-generated types while G
 - collect unsupported diagnostics
 - add apply behind explicit flag
 
+## 7. Iteration cleanup / Raptor rule
+
+The alpha should be allowed to move fast, but it must not accumulate dead scaffolding from every prototype generation.
+
+Use the Raptor rule: every serious iteration should remove parts, collapse shapes, and make the final system more obvious.
+
+For every milestone, do a cleanup pass:
+
+| Cleanup target | Rule |
+| --- | --- |
+| Dead prototype code | Delete once superseded by the current path. |
+| Duplicate docs | Merge into the canonical doc or remove. |
+| Demo-only hacks | Either formalize as supported behavior or delete. |
+| Temporary adapters | Keep only if they are named as bridges and have an exit plan. |
+| Noisy examples | Keep the smallest set that proves supported alpha flows. |
+| Generated artifacts | Keep reproducible artifacts only; delete stale checked-in output. |
+| Internal serialization leaks | Remove any authoring/API surface that exposes Backboard patch shape. |
+
+Canonical docs for alpha should be:
+
+```txt
+docs/implementation-plan.md
+docs/alpha-canary-plan.md
+docs/project-graph.md
+docs/changeset-api-reference.md
+docs/iac-architecture.md
+```
+
+Everything else should justify its existence or be folded into one of those.
+
+Before canary, run a deletion audit:
+
+1. list all docs/examples/demo files added during exploration
+2. mark each as canonical, useful example, visual demo, or discard
+3. delete discarded files
+4. simplify names and commands
+5. ensure README points only to the blessed path
+6. run typecheck/build/package checks after deletion
+
+Alpha quality is not only what works; it is also how little obsolete machinery remains.
+
 ## Alpha non-goals
 
 - full Terraform parity
