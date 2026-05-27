@@ -39,15 +39,11 @@ Already in this branch:
 
 ## 2. Tighten ChangeSet contract
 
-- Move from generic resource operations toward product-intent operations where useful:
-  - `service.create`
-  - `service.update`
-  - `database.create`
-  - `bucket.create`
-  - `volume.create`
-  - `variable.set`
-  - `domain.create`
-  - `resource.delete`
+- Keep ChangeSets intent-level, not `EnvironmentConfigPatch`-shaped.
+- Keep operation taxonomy open for alpha:
+  - generic `resource.*` operations with typed resource payloads may be enough
+  - product-specific operations may be useful where realization has distinct platform semantics
+  - likely long-term answer is hybrid
 - Keep `RailwayChangeSet` producer-independent.
 - Add required metadata:
   - `path`
@@ -253,6 +249,17 @@ Future demos:
 3. real staging demo against dev Backboard
 4. real apply demo for safe primitive subset
 5. Backboard-native ChangeSet receiver demo
+
+## Alpha/canary plan
+
+See [`alpha-canary-plan.md`](./alpha-canary-plan.md) for the near-term ship plan covering:
+
+- end-to-end alpha scope
+- official Railway CLI integration
+- environment-agnostic ChangeSet staging
+- current vs future operation taxonomy
+- protobuf exploration
+- weekly prototype milestones
 
 ## 12. GA bar
 
