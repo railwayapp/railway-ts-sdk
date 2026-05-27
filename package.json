@@ -67,6 +67,7 @@
     "test:watch": "vitest",
     "codegen": "graphql-codegen --config codegen.ts",
     "demo:iac": "tsx examples/iac/demo.ts",
+    "iac:mock-cli": "tsx examples/iac/mock-railway-cli.ts",
     "package:check": "publint --strict --pack npm && npm pack --dry-run && tsx scripts/package-smoke.ts",
     "clean": "rm -rf dist coverage railway-*.tgz"
   },

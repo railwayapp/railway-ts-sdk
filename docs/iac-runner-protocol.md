@@ -123,6 +123,27 @@ stagedPatch: {
 };
 ```
 
+## Mock CLI harness
+
+The SDK repo includes a development-only mock for the future Rust CLI integration:
+
+```bash
+pnpm run iac:mock-cli -- \
+  --file examples/iac/.railway/railway.ts \
+  --endpoint https://backboard.railway-develop.com/graphql/v2 \
+  --token "$RAILWAY_TOKEN" \
+  --project-id "$RAILWAY_PROJECT_ID" \
+  --environment-id "$RAILWAY_ENVIRONMENT_ID"
+```
+
+Stage through the same runner protocol:
+
+```bash
+pnpm run iac:mock-cli -- --stage --yes ...
+```
+
+This is not a replacement for the official CLI. It exists only to prove the CLI/runner contract before porting behavior to `~/Railway/mono/packages/cli`.
+
 ## Ownership boundaries
 
 The TS runner:
