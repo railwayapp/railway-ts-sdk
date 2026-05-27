@@ -19,14 +19,7 @@ async function main() {
 async function readRequest(argv: string[]): Promise<RailwayIacRunnerRequest> {
   const args = parseArgs(argv);
   const stdin = await readStdinJson();
-  return {
-    ...stdin,
-    ...(args.command ? { command: args.command } : {}),
-    ...(args.cwd ? { cwd: args.cwd } : {}),
-    ...(args.file ? { file: args.file } : {}),
-    ...(args.includeTypes !== undefined ? { includeTypes: args.includeTypes } : {}),
-    ...(args.pretty !== undefined ? { pretty: args.pretty } : {}),
-  };
+  return mergeRequest(stdin, args);
 }
 
 async function readStdinJson(): Promise<RailwayIacRunnerRequest> {
@@ -40,9 +33,11 @@ async function readStdinJson(): Promise<RailwayIacRunnerRequest> {
 
 function parseArgs(argv: string[]): RailwayIacRunnerRequest {
   const parsed: RailwayIacRunnerRequest = {};
+  const backboard: NonNullable<RailwayIacRunnerRequest["backboard"]> = {};
+
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]!;
-    if (arg === "evaluate" || arg === "typegen") {
+    if (arg === "evaluate" || arg === "typegen" || arg === "plan" || arg === "stage") {
       parsed.command = arg;
       continue;
     }
@@ -58,6 +53,18 @@ function parseArgs(argv: string[]): RailwayIacRunnerRequest {
       parsed.pretty = true;
       continue;
     }
+    if (arg === "--decrypt-variables") {
+      backboard.decryptVariables = true;
+      continue;
+    }
+    if (arg === "--replace") {
+      backboard.merge = false;
+      continue;
+    }
+    if (arg === "--merge") {
+      backboard.merge = true;
+      continue;
+    }
     if (arg === "--cwd") {
       const cwd = argv[++i];
       if (cwd) parsed.cwd = cwd;
@@ -68,6 +75,34 @@ function parseArgs(argv: string[]): RailwayIacRunnerRequest {
       if (file) parsed.file = file;
       continue;
     }
+    if (arg === "--endpoint") {
+      const endpoint = argv[++i];
+      if (endpoint) backboard.endpoint = endpoint;
+      continue;
+    }
+    if (arg === "--token") {
+      const token = argv[++i];
+      if (token) backboard.token = token;
+      continue;
+    }
+    if (arg === "--project-id") {
+      const projectId = argv[++i];
+      if (projectId) backboard.projectId = projectId;
+      continue;
+    }
+    if (arg === "--environment-id") {
+      const environmentId = argv[++i];
+      if (environmentId) backboard.environmentId = environmentId;
+      continue;
+    }
   }
+
+  if (Object.keys(backboard).length > 0) parsed.backboard = backboard;
   return parsed;
+}
+
+function mergeRequest(stdin: RailwayIacRunnerRequest, args: RailwayIacRunnerRequest): RailwayIacRunnerRequest {
+  const merged: RailwayIacRunnerRequest = { ...stdin, ...args };
+  if (stdin.backboard || args.backboard) merged.backboard = { ...stdin.backboard, ...args.backboard };
+  return merged;
 }
