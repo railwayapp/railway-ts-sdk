@@ -95,7 +95,7 @@ export function diffGraphs({ current, desired }: { current: RailwayGraph; desire
       changes.push(update(resource.address, "name", previous.name, resource.name, `Rename ${resource.type} ${previous.name} to ${resource.name}`));
     }
 
-    diffVariables({ previous, resource, changes });
+    diffVariables({ previous, resource, changes, resourcesByAddress: desiredByAddress });
     diffTopLevelField({ previous, resource, field: "source", changes });
     diffTopLevelField({ previous, resource, field: "build", changes });
     diffTopLevelField({ previous, resource, field: "deploy", changes });
@@ -198,13 +198,13 @@ export function renderChangeSet(changeSet: RailwayChangeSet): string {
   return changeSet.changes.map(change => `${marker(change)} ${change.summary}`).join("\n");
 }
 
-function diffVariables({ previous, resource, changes }: { previous: ResourceNode; resource: ResourceNode; changes: RailwayChange[] }) {
+function diffVariables({ previous, resource, changes, resourcesByAddress }: { previous: ResourceNode; resource: ResourceNode; changes: RailwayChange[]; resourcesByAddress: Map<ResourceAddress, ResourceNode> }) {
   if (!("variables" in previous) && !("variables" in resource)) return;
   const before = "variables" in previous ? previous.variables ?? {} : {};
   const after = "variables" in resource ? resource.variables ?? {} : {};
   for (const [key, value] of Object.entries(after)) {
     if (isUnknownImportedVariable(before[key])) continue;
-    if (stableStringify(before[key]) === stableStringify(value)) continue;
+    if (stableStringify(normalizeVariableForDiff(before[key], resourcesByAddress)) === stableStringify(normalizeVariableForDiff(value, resourcesByAddress))) continue;
     changes.push({
       kind: "variable.set",
       address: resource.address,
@@ -258,6 +258,12 @@ function marker(change: RailwayChange): string {
   if (change.kind === "resource.create") return "+";
   if (change.kind === "resource.delete") return "-";
   return "~";
+}
+
+function normalizeVariableForDiff(value: VariableValue | undefined, resourcesByAddress: Map<ResourceAddress, ResourceNode>): unknown {
+  if (value?.type !== "reference") return value;
+  const name = resourcesByAddress.get(value.resource)?.name ?? value.resource.split(".").slice(1).join(".") ?? value.resource;
+  return { type: "literal", value: `\${{${name}.${value.output}}}` };
 }
 
 function isEquivalentDatabaseSource(previous: ResourceNode, after: unknown): boolean {

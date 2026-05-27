@@ -63,6 +63,7 @@ async function runRunner(command: "plan" | "stage"): Promise<RunnerResponse> {
     ...(projectId ? ["--project-id", projectId] : []),
     ...(args.includeTypes ? ["--include-types"] : []),
     ...(args.replace ? ["--replace"] : []),
+    ...(args.decryptVariables ? ["--decrypt-variables"] : []),
   ];
 
   const { stdout, stderr, code } = await spawnNode(argv);
@@ -136,7 +137,7 @@ function parseArgs(argv: string[]) {
     const arg = argv[i]!;
     if (!arg.startsWith("--")) continue;
     const key = toCamel(arg.slice(2));
-    if (["stage", "json", "yes", "includeTypes", "replace"].includes(key)) {
+    if (["stage", "json", "yes", "includeTypes", "replace", "decryptVariables"].includes(key)) {
       parsed[key] = true;
     } else {
       parsed[key] = argv[++i] ?? "";
@@ -153,6 +154,7 @@ function parseArgs(argv: string[]) {
     yes?: boolean;
     includeTypes?: boolean;
     replace?: boolean;
+    decryptVariables?: boolean;
   };
 }
 
