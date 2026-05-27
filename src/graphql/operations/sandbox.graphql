@@ -1,14 +1,10 @@
 fragment RailwaySandboxFields on Sandbox {
   id
-  name
   status
-  instanceId
-  region
-  projectId
   environmentId
+  region
   idleTimeoutMinutes
   createdAt
-  updatedAt
 }
 
 mutation RailwaySandboxCreate($input: SandboxCreateInput!) {
@@ -17,8 +13,18 @@ mutation RailwaySandboxCreate($input: SandboxCreateInput!) {
   }
 }
 
-mutation RailwaySandboxExec($id: String!, $command: String!, $timeoutSec: Int) {
-  sandboxExec(id: $id, command: $command, timeoutSec: $timeoutSec) {
+mutation RailwaySandboxExec(
+  $id: String!
+  $environmentId: String!
+  $command: String!
+  $timeoutSec: Int
+) {
+  sandboxExec(
+    id: $id
+    environmentId: $environmentId
+    command: $command
+    timeoutSec: $timeoutSec
+  ) {
     exitCode
     stdout
     stderr
@@ -27,8 +33,8 @@ mutation RailwaySandboxExec($id: String!, $command: String!, $timeoutSec: Int) {
   }
 }
 
-mutation RailwaySandboxDestroy($id: String!) {
-  sandboxDestroy(id: $id) {
+mutation RailwaySandboxDestroy($id: String!, $environmentId: String!) {
+  sandboxDestroy(id: $id, environmentId: $environmentId) {
     ...RailwaySandboxFields
   }
 }

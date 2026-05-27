@@ -26,9 +26,7 @@ import type {
 } from "./types.js";
 
 interface NormalizedSandboxConfig extends NormalizedRailwayClientConfig {
-  projectId: string;
   environmentId: string;
-  fileEndpoint: string;
 }
 
 export class Sandbox {
@@ -40,7 +38,6 @@ export class Sandbox {
     this.#operations = {
       exec: (id, command, options) => this.#exec(id, command, options),
       delete: id => this.#delete(id),
-      fileRequest: (id, path, init) => this.#fileRequest(id, path, init),
     };
   }
 
@@ -52,11 +49,9 @@ export class Sandbox {
     options: SandboxCreateOptions = {},
   ): Promise<SandboxInstance> {
     const input: RailwaySandboxCreateMutationVariables["input"] = {
-      projectId: this.#config.projectId,
       environmentId: this.#config.environmentId,
     };
 
-    if (options.name !== undefined) input.name = options.name;
     if (options.idleTimeoutMinutes !== undefined) {
       input.idleTimeoutMinutes = options.idleTimeoutMinutes;
     }
@@ -74,7 +69,11 @@ export class Sandbox {
     command: string,
     options: SandboxExecOptions = {},
   ): Promise<SandboxExecResult> {
-    const variables: RailwaySandboxExecMutationVariables = { id, command };
+    const variables: RailwaySandboxExecMutationVariables = {
+      id,
+      command,
+      environmentId: this.#config.environmentId,
+    };
 
     if (options.timeoutSec !== undefined) variables.timeoutSec = options.timeoutSec;
 
@@ -86,31 +85,17 @@ export class Sandbox {
     return data.sandboxExec;
   }
 
-  async #delete(id: string): Promise<SandboxInstance> {
-    const variables: RailwaySandboxDestroyMutationVariables = { id };
+  async #delete(id: string): Promise<SandboxInstance | null> {
+    const variables: RailwaySandboxDestroyMutationVariables = {
+      id,
+      environmentId: this.#config.environmentId,
+    };
     const data = await requestGraphQL<
       RailwaySandboxDestroyMutation,
       RailwaySandboxDestroyMutationVariables
     >(this.#config, RailwaySandboxDestroyDocument, variables);
 
-    return this.#instance(data.sandboxDestroy);
-  }
-
-  async #fileRequest(
-    id: string,
-    path: string,
-    init: RequestInit,
-  ): Promise<Response> {
-    const url = new URL(
-      `/api/v1/sandboxes/${encodeURIComponent(id)}/files`,
-      this.#config.fileEndpoint,
-    );
-    url.searchParams.set("path", path);
-
-    const headers = new Headers(init.headers);
-    headers.set("Authorization", `Bearer ${this.#config.token}`);
-
-    return this.#config.fetch(url.toString(), { ...init, headers });
+    return data.sandboxDestroy ? this.#instance(data.sandboxDestroy) : null;
   }
 
   #instance(snapshot: SandboxSnapshot): SandboxInstance {
@@ -121,19 +106,12 @@ export class Sandbox {
 function normalizeSandboxConfig(
   config: SandboxConfig,
 ): NormalizedSandboxConfig {
-  assertNonEmpty("projectId", config.projectId);
   assertNonEmpty("environmentId", config.environmentId);
 
   const railwayConfig = normalizeRailwayClientConfig(config);
 
   return {
     ...railwayConfig,
-    projectId: config.projectId,
     environmentId: config.environmentId,
-    fileEndpoint: deriveSandboxFileEndpoint(railwayConfig.endpoint),
   };
-}
-
-function deriveSandboxFileEndpoint(endpoint: string): string {
-  return new URL(endpoint).origin;
 }

@@ -8,17 +8,9 @@ export function sandboxConfigFromEnv(): SandboxConfig {
 
   return {
     token: requiredEnv("RAILWAY_API_TOKEN"),
-    projectId: requiredEnv("RAILWAY_PROJECT_ID"),
     environmentId: requiredEnv("RAILWAY_ENVIRONMENT_ID"),
     ...(endpoint ? { endpoint } : {}),
   };
-}
-
-export function exampleSandboxName(prefix?: string): string {
-  return (
-    process.env.RAILWAY_SANDBOX_NAME ??
-    `${prefix ?? "sdk-example"}-${Date.now()}`
-  );
 }
 
 export async function runExample(example: () => Promise<void>): Promise<void> {

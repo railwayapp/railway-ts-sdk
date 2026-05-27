@@ -1,20 +1,19 @@
-import { Sandbox } from "../../src/index.ts";
-import {
-  exampleSandboxName,
-  sandboxConfigFromEnv,
-  runExample,
-} from "./helpers.js";
+import { Sandbox, type SandboxInstance } from "../../src/index.ts";
+import { sandboxConfigFromEnv, runExample } from "./helpers.js";
 
 await runExample(async () => {
   const client = new Sandbox(sandboxConfigFromEnv());
+  let sandbox: SandboxInstance | undefined;
 
-  const sandbox = await client.create({ name: exampleSandboxName() });
+  try {
+    sandbox = await client.create();
 
-  console.log((await sandbox.exec("ls")).stdout);
-  console.log(
-    (await sandbox.exec("touch hello.txt | echo 'hello.txt' created")).stdout,
-  );
-  console.log((await sandbox.exec("ls")).stdout);
-
-  await sandbox.delete();
+    console.log((await sandbox.exec("ls")).stdout);
+    console.log(
+      (await sandbox.exec("touch hello.txt | echo 'hello.txt' created")).stdout,
+    );
+    console.log((await sandbox.exec("ls")).stdout);
+  } finally {
+    await sandbox?.delete();
+  }
 });

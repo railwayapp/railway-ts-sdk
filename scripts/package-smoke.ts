@@ -36,7 +36,7 @@ try {
 
   writeFileSync(
     join(tempDir, "consumer.ts"),
-    `import { Sandbox, type SandboxConfig, type SandboxInstance } from "railway";\n\nconst config: SandboxConfig = {\n  token: "token_123",\n  projectId: "project_123",\n  environmentId: "environment_123",\n  fetch: async () => new Response(JSON.stringify({ data: { sandboxCreate: {} } })),\n};\n\nconst client = new Sandbox(config);\nconst created: Promise<SandboxInstance> = client.create();\nvoid created;\n`,
+    `import { Sandbox, type SandboxConfig, type SandboxInstance } from "railway";\n\nconst config: SandboxConfig = {\n  token: "token_123",\n  environmentId: "environment_123",\n  fetch: async () => new Response(JSON.stringify({ data: { sandboxCreate: {} } })),\n};\n\nconst client = new Sandbox(config);\nconst created: Promise<SandboxInstance> = client.create();\nvoid created;\n`,
   );
   writeFileSync(
     join(tempDir, "tsconfig.json"),
