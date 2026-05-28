@@ -21,7 +21,6 @@ describe("SandboxInstance", () => {
     ]);
     const client = new Sandbox({
       token: "token_123",
-      projectId: "project_123",
       environmentId: "environment_123",
       fetch: mock.fetch,
     });
@@ -33,6 +32,7 @@ describe("SandboxInstance", () => {
     expect(mock.calls[1]?.body.query).toContain("mutation RailwaySandboxExec");
     expect(mock.calls[1]?.body.variables).toEqual({
       id: "sandbox_123",
+      environmentId: "environment_123",
       command: "pwd",
       timeoutSec: 30,
     });
@@ -49,7 +49,6 @@ describe("SandboxInstance", () => {
     ]);
     const client = new Sandbox({
       token: "token_123",
-      projectId: "project_123",
       environmentId: "environment_123",
       fetch: mock.fetch,
     });
@@ -57,8 +56,27 @@ describe("SandboxInstance", () => {
     const sandbox = await client.create();
     const destroyed = await sandbox.delete();
 
-    expect(destroyed.status).toBe("DESTROYED");
+    expect(destroyed?.status).toBe("DESTROYED");
     expect(mock.calls[1]?.body.query).toContain("mutation RailwaySandboxDestroy");
-    expect(mock.calls[1]?.body.variables).toEqual({ id: "sandbox_123" });
+    expect(mock.calls[1]?.body.variables).toEqual({
+      id: "sandbox_123",
+      environmentId: "environment_123",
+    });
+  });
+
+  it("returns null when delete returns no sandbox", async () => {
+    const mock = createFetchMock([
+      { data: { sandboxCreate: sandboxSnapshot() } },
+      { data: { sandboxDestroy: null } },
+    ]);
+    const client = new Sandbox({
+      token: "token_123",
+      environmentId: "environment_123",
+      fetch: mock.fetch,
+    });
+
+    const sandbox = await client.create();
+
+    await expect(sandbox.delete()).resolves.toBeNull();
   });
 });

@@ -19,7 +19,6 @@ describe("Sandbox", () => {
     ]);
     const client = new Sandbox({
       token: "token_123",
-      projectId: "project_123",
       environmentId: "environment_123",
       fetch: mock.fetch,
     });
@@ -36,7 +35,6 @@ describe("Sandbox", () => {
     ]);
     const client = new Sandbox({
       token: "token_123",
-      projectId: "project_123",
       environmentId: "environment_123",
       endpoint: "https://backboard.railway-develop.com/graphql/v2",
       fetch: mock.fetch,
@@ -55,29 +53,23 @@ describe("Sandbox", () => {
     );
   });
 
-  it("creates sandboxes with configured project and environment", async () => {
+  it("creates sandboxes in the configured environment", async () => {
     const mock = createFetchMock([
-      { data: { sandboxCreate: sandboxSnapshot({ name: "agent-run" }) } },
+      { data: { sandboxCreate: sandboxSnapshot() } },
     ]);
     const client = new Sandbox({
       token: "token_123",
-      projectId: "project_123",
       environmentId: "environment_123",
       fetch: mock.fetch,
     });
 
-    const sandbox = await client.create({
-      name: "agent-run",
-      idleTimeoutMinutes: 10,
-    });
+    const sandbox = await client.create({ idleTimeoutMinutes: 10 });
 
     expect(sandbox.id).toBe("sandbox_123");
     expect(mock.calls[0]?.body.query).toContain("mutation RailwaySandboxCreate");
     expect(mock.calls[0]?.body.variables).toEqual({
       input: {
-        projectId: "project_123",
         environmentId: "environment_123",
-        name: "agent-run",
         idleTimeoutMinutes: 10,
       },
     });
@@ -89,7 +81,6 @@ describe("Sandbox", () => {
     ]);
     const client = new Sandbox({
       token: "token_123",
-      projectId: "project_123",
       environmentId: "environment_123",
       fetch: mock.fetch,
     });

@@ -38,15 +38,11 @@ export function sandboxSnapshot(
 ): SandboxSnapshot {
   return {
     id: "sandbox_123",
-    name: "test-sandbox",
     status: "RUNNING",
-    instanceId: "instance_123",
-    region: "sjc",
-    projectId: "project_123",
     environmentId: "environment_123",
+    region: "us-west2",
     idleTimeoutMinutes: 5,
     createdAt: "2026-05-13T00:00:00.000Z",
-    updatedAt: "2026-05-13T00:00:00.000Z",
     ...overrides,
   };
 }
