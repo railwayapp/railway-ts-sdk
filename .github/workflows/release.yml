@@ -12,8 +12,6 @@ concurrency:
 jobs:
   create-release:
     name: Create draft release
-    # Temporarily disabled while releases are paused.
-    if: ${{ false }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -48,8 +46,6 @@ jobs:
   publish-npm:
     name: Publish npm
     needs: [create-release]
-    # Temporarily disabled while releases are paused.
-    if: ${{ false }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -79,8 +75,6 @@ jobs:
   publish-release:
     name: Publish GitHub release
     needs: [create-release, publish-npm]
-    # Temporarily disabled while releases are paused.
-    if: ${{ false }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
