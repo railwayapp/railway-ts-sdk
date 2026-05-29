@@ -2,11 +2,15 @@ import type { RailwayClientConfig } from "../core/config.js";
 import type {
   RailwaySandboxExecMutation,
   RailwaySandboxFieldsFragment,
+  RailwaySandboxTemplateFieldsFragment,
 } from "../generated/graphql.js";
 
 export type SandboxStatus = RailwaySandboxFieldsFragment["status"];
 export type ExecResult = RailwaySandboxExecMutation["sandboxExec"];
 export type SandboxInfo = RailwaySandboxFieldsFragment;
+
+export type SandboxTemplateStatus = RailwaySandboxTemplateFieldsFragment["status"];
+export type SandboxTemplateInfo = RailwaySandboxTemplateFieldsFragment;
 
 export interface CreateOptions extends RailwayClientConfig {
   environmentId?: string;
@@ -25,4 +29,8 @@ export interface ListOptions extends RailwayClientConfig {
 
 export interface ExecOptions {
   timeoutSec?: number;
+}
+
+export interface TemplateBuildOptions extends RailwayClientConfig {
+  environmentId?: string;
 }

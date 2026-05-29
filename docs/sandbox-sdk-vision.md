@@ -185,27 +185,31 @@ Planned surface: `read` / `readText` / `write` / `list` / `info` / `exists` /
 
 ---
 
-## 9. Templates: reusable bases _(future)_
+## 9. Templates: reusable bases
 
 The centerpiece of the vision. You rarely want a blank box — you want _your_
 environment (a runtime, system packages, your code) and you want to stamp sandboxes
 from it instantly.
 
 A `SandboxTemplate` is a **fluent, immutable recipe**. Every step returns a new
-template, so a base can branch into variants without mutation surprises.
+template, so a base can branch into variants without mutation surprises. It is a pure
+value — no network happens until `build()` or `Sandbox.create(template)`.
 
 ```ts
-// FUTURE
-const base = Sandbox.template("node:20")
+const base = Sandbox.template()
   .withPackages("build-essential", "ffmpeg")
   .workdir("/app");
 
 const withUv = base.run("pip install uv"); // branches; `base` is untouched
+
+const sandbox = await Sandbox.create(base); // builds if cold, forks if warm
 ```
 
-Node-first sugar (`withNode`, `withPython`, `withPackages`, `withEnv`, `workdir`,
-`copy`) keeps the common case to one line; `.run("…")` is the raw escape hatch for any
-build step; `.toDockerfile()` prints exactly what will be built, for transparency.
+Live today: `.run("…")` (the raw escape hatch), `.withPackages(…)`, `.withEnv(…)`,
+`.workdir(…)`, and `template.build()`. Builds run server-side on the default base
+image, content-addressed and cached — a warm template just forks. Reserved for later:
+custom base images (`Sandbox.template("node:20")`), more node-first sugar (`withNode`,
+`withPython`, `copy`), and `.toDockerfile()` transparency.
 
 > The types are named `SandboxTemplate` / `SandboxBase` — never a bare `Template` —
 > because the broader `railway` SDK will also wrap Railway's project-template system,
@@ -268,6 +272,9 @@ All SDK errors extend `RailwayError`:
 | `RailwayAuthError` | A required credential (`token` / `environmentId`) could not be resolved. Carries `.variable`. |
 | `RailwayGraphQLError` | The Railway API returned an error. Carries `.status`, `.errors`, `.responseBody`. |
 | `SandboxNotFoundError` | `connect` / `refresh` could not find the sandbox in the environment. Carries `.id`, `.environmentId`. |
+| `SandboxFailedError` | A sandbox reached a terminal state (`FAILED`/`DESTROYED`) before becoming `RUNNING` during `create`. Carries `.id`, `.status`. |
+| `SandboxTemplateBuildError` | A template build finished `FAILED`. Carries `.templateId`, `.environmentId`. |
+| `SandboxTimeoutError` | A readiness wait (template → `READY` or sandbox → `RUNNING`) exceeded the 5-minute ceiling. Carries `.resource`, `.id`, `.lastStatus`, `.timeoutMs`. |
 | `SandboxFileNotFoundError` / `SandboxFileTooLargeError` _(future)_ | File operations. |
 
 ---
@@ -285,7 +292,7 @@ that shipping it flips on a network call — never a breaking type change.
 | Env-resolved config + `RailwayAuthError` | **Live** |
 | `Sandbox.connect(id)` / `Sandbox.list()` / `sandbox.refresh()` | **Live** |
 | `sandbox.files.*` | Future |
-| `Sandbox.template()` / `SandboxTemplate` / `create(template)` | Future |
+| `Sandbox.template()` / `SandboxTemplate` / `create(template)` | **Live** |
 | `sandbox.fork()` / `create(sandbox)` / `create({ image })` | Future |
 | `sandbox.expose(port)` / `unexpose` / `exposedPorts` | Future |
 | `exec` streaming (`{ stream }`) and background (`{ background }`) | Future |
@@ -302,6 +309,9 @@ import {
   RailwayAuthError,
   RailwayGraphQLError,
   SandboxNotFoundError,
+  SandboxFailedError,
+  SandboxTemplateBuildError,
+  SandboxTimeoutError,
   DEFAULT_RAILWAY_GRAPHQL_ENDPOINT,
   type CreateOptions,
   type ConnectOptions,
@@ -310,6 +320,10 @@ import {
   type ExecResult,
   type SandboxInfo,
   type SandboxStatus,
+  type SandboxTemplate,
+  type SandboxTemplateInfo,
+  type SandboxTemplateStatus,
+  type TemplateBuildOptions,
   type RailwayClientConfig,
   type RailwayGraphQLErrorItem,
 } from "railway";
@@ -317,9 +331,11 @@ import {
 
 ```ts
 class Sandbox {
+  static create(template: SandboxTemplate, options?: CreateOptions): Promise<Sandbox>;
   static create(options?: CreateOptions): Promise<Sandbox>;
   static connect(id: string, options?: ConnectOptions): Promise<Sandbox>;
   static list(options?: ListOptions): Promise<SandboxInfo[]>;
+  static template(): SandboxTemplate;
 
   readonly id: string;
   readonly status: SandboxStatus;
@@ -333,5 +349,15 @@ class Sandbox {
   refresh(): Promise<this>;
   [Symbol.asyncDispose](): Promise<void>;
   toJSON(): SandboxInfo;
+}
+
+// Fluent, immutable recipe — every builder returns a new template. Obtain one
+// via `Sandbox.template()`; it is a pure value and does no network until built.
+interface SandboxTemplate {
+  run(command: string): SandboxTemplate;
+  withPackages(...packages: string[]): SandboxTemplate;
+  withEnv(vars: Record<string, string>): SandboxTemplate;
+  workdir(dir: string): SandboxTemplate;
+  build(options?: TemplateBuildOptions): Promise<SandboxTemplate>;
 }
 ```

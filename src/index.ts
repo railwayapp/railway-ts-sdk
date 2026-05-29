@@ -10,7 +10,10 @@ export {
 } from "./core/errors.js";
 export {
   Sandbox,
+  SandboxFailedError,
   SandboxNotFoundError,
+  SandboxTemplateBuildError,
+  SandboxTimeoutError,
   type ConnectOptions,
   type CreateOptions,
   type ExecOptions,
@@ -18,4 +21,8 @@ export {
   type ListOptions,
   type SandboxInfo,
   type SandboxStatus,
+  type SandboxTemplate,
+  type SandboxTemplateInfo,
+  type SandboxTemplateStatus,
+  type TemplateBuildOptions,
 } from "./sandbox/index.js";

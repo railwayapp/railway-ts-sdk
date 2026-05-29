@@ -70,3 +70,24 @@ mutation RailwaySandboxDestroy($id: String!, $environmentId: String!) {
     ...RailwaySandboxFields
   }
 }
+
+fragment RailwaySandboxTemplateFields on SandboxTemplate {
+  id
+  status
+  environmentId
+}
+
+mutation RailwaySandboxTemplateBuild(
+  $environmentId: String!
+  $input: SandboxTemplateInput!
+) {
+  sandboxTemplateBuild(environmentId: $environmentId, input: $input) {
+    ...RailwaySandboxTemplateFields
+  }
+}
+
+query RailwaySandboxTemplate($environmentId: String!, $id: ID!) {
+  sandboxTemplate(environmentId: $environmentId, id: $id) {
+    ...RailwaySandboxTemplateFields
+  }
+}
