@@ -192,8 +192,8 @@ environment (a runtime, system packages, your code) and you want to stamp sandbo
 from it instantly.
 
 A `SandboxTemplate` is a **fluent, immutable recipe**. Every step returns a new
-template, so a base can branch into variants without mutation surprises. It is a pure
-value — no network happens until `build()` or `Sandbox.create(template)`.
+template, so a base can branch into variants without mutation surprises. It is sent to
+Railway only when you build it or create a sandbox from it.
 
 ```ts
 const base = Sandbox.template()
@@ -202,13 +202,13 @@ const base = Sandbox.template()
 
 const withUv = base.run("pip install uv"); // branches; `base` is untouched
 
-const sandbox = await Sandbox.create(base); // builds if cold, forks if warm
+const sandbox = await Sandbox.create(base);
 ```
 
-Live today: `.run("…")` (the raw escape hatch), `.withPackages(…)`, `.withEnv(…)`,
-`.workdir(…)`, and `template.build()`. Builds run server-side on the default base
-image, content-addressed and cached — a warm template just forks. Reserved for later:
-custom base images (`Sandbox.template("node:20")`), more node-first sugar (`withNode`,
+Available today: `.run("…")` (the raw escape hatch), `.withPackages(…)`,
+`.withEnv(…)`, `.workdir(…)`, and `template.build()`. Builds run server-side on the
+default base image, content-addressed and cached. Reserved for later: custom base
+images (`Sandbox.template("node:20")`), more node-first sugar (`withNode`,
 `withPython`, `copy`), and `.toDockerfile()` transparency.
 
 > The types are named `SandboxTemplate` / `SandboxBase` — never a bare `Template` —
@@ -223,10 +223,10 @@ One verb covers every way to start a sandbox. `create()` with no source is the b
 box; `create(source)` starts from a reusable base.
 
 ```ts
-const fromTemplate = await Sandbox.create(base); // live today: a SandboxTemplate value
+const fromTemplate = await Sandbox.create(base);
 
 // FUTURE
-const forked = await sandbox.fork(); // == Sandbox.create(sandbox)
+const forked = await sandbox.fork(); // equivalent to Sandbox.create(sandbox)
 const fromImage = await Sandbox.create({ image: "ubuntu:24.04" });
 ```
 
@@ -275,7 +275,7 @@ All SDK errors extend `RailwayError`:
 | `SandboxNotFoundError` | `connect` / `refresh` could not find the sandbox in the environment. Carries `.id`, `.environmentId`. |
 | `SandboxFailedError` | A sandbox reached a terminal state (`FAILED`, `DESTROYING`, or `DESTROYED`) before becoming `RUNNING` during `create`. Carries `.id`, `.status`. |
 | `SandboxTemplateBuildError` | A template build finished `FAILED`. Carries `.templateId`, `.environmentId`. |
-| `SandboxTimeoutError` | A readiness wait (template → `READY` or sandbox → `RUNNING`) exceeded the 5-minute ceiling. Carries `.resource`, `.id`, `.lastStatus`, `.timeoutMs`. |
+| `SandboxTimeoutError` | A readiness wait (template → `READY` or sandbox → `RUNNING`) exceeded the 5-minute timeout. Carries `.resource`, `.id`, `.lastStatus`, `.timeoutMs`. |
 | `SandboxFileNotFoundError` / `SandboxFileTooLargeError` _(future)_ | File operations. |
 
 ---
@@ -350,8 +350,6 @@ class Sandbox {
   toJSON(): SandboxInfo;
 }
 
-// Fluent, immutable recipe — every builder returns a new template. Obtain one
-// via `Sandbox.template()`; it is a pure value and does no network until built.
 interface SandboxTemplate {
   run(command: string): SandboxTemplate;
   withPackages(...packages: string[]): SandboxTemplate;

@@ -1,44 +1,54 @@
 import { engineFromOptions } from "./engine.js";
-import { COMPILE } from "./internal.js";
 import type { TemplateBuildOptions } from "./types.js";
 
-/** Ambient build state carried forward by the immutable builder. */
 interface TemplateState {
   readonly instructions: readonly string[];
-  /** Ordered [key, value] pairs; insertion order preserved, override-in-place. */
   readonly env: ReadonlyArray<readonly [string, string]>;
   readonly workdir?: string;
 }
 
 const EMPTY_STATE: TemplateState = { instructions: [], env: [] };
 
-/**
- * A fluent, immutable recipe for a server-side sandbox base. Every builder step
- * returns a new template, so a base can branch into variants safely. Obtain one
- * with `Sandbox.template()`; it is a pure value and does no network until
- * `build()` or `Sandbox.create(template)`.
- *
- * Each instruction runs in its own shell server-side, so `env`/`workdir` do not
- * persist between instructions — they are folded into every subsequent command.
- */
-export class SandboxTemplate {
+/** Immutable sandbox base recipe returned by `Sandbox.template()`. */
+export interface SandboxTemplate {
+  /** Add a shell command build step. */
+  run(command: string): SandboxTemplate;
+  /** Install Debian packages with apt. */
+  withPackages(...packages: string[]): SandboxTemplate;
+  /** Set environment variables for later build steps. */
+  withEnv(vars: Record<string, string>): SandboxTemplate;
+  /** Set the working directory for later build steps. */
+  workdir(dir: string): SandboxTemplate;
+  /** Build the template before creating sandboxes from it. */
+  build(options?: TemplateBuildOptions): Promise<SandboxTemplate>;
+}
+
+export function createSandboxTemplate(): SandboxTemplate {
+  return new SandboxTemplateRecipe(EMPTY_STATE);
+}
+
+export function isSandboxTemplate(value: unknown): value is SandboxTemplate {
+  return value instanceof SandboxTemplateRecipe;
+}
+
+export function compileSandboxTemplate(template: SandboxTemplate): string[] {
+  if (!(template instanceof SandboxTemplateRecipe)) {
+    throw new TypeError("Expected a SandboxTemplate returned by Sandbox.template().");
+  }
+  return template.compile();
+}
+
+class SandboxTemplateRecipe implements SandboxTemplate {
   readonly #state: TemplateState;
 
-  private constructor(state: TemplateState) {
+  constructor(state: TemplateState) {
     this.#state = state;
   }
 
-  /** Internal entry used by `Sandbox.template()`. Not reachable by consumers. */
-  static blank(): SandboxTemplate {
-    return new SandboxTemplate(EMPTY_STATE);
-  }
-
-  /** Runs a raw shell command as a build step. */
   run(command: string): SandboxTemplate {
     return this.#append(command);
   }
 
-  /** Installs Debian packages via apt (the base image ships no apt index). */
   withPackages(...packages: string[]): SandboxTemplate {
     if (packages.length === 0) return this;
     return this.#append(
@@ -46,46 +56,37 @@ export class SandboxTemplate {
     );
   }
 
-  /** Sets environment variables folded into every subsequent build step. */
   withEnv(vars: Record<string, string>): SandboxTemplate {
     let env = this.#state.env;
     for (const [key, value] of Object.entries(vars)) {
       env = upsertEnv(env, key, value);
     }
-    return new SandboxTemplate({ ...this.#state, env });
+    return new SandboxTemplateRecipe({ ...this.#state, env });
   }
 
-  /** Sets the working directory for every subsequent build step. */
   workdir(dir: string): SandboxTemplate {
-    return new SandboxTemplate({ ...this.#state, workdir: dir });
+    return new SandboxTemplateRecipe({ ...this.#state, workdir: dir });
   }
 
-  /** Builds the template server-side, resolving only once it is READY. */
   async build(options: TemplateBuildOptions = {}): Promise<SandboxTemplate> {
     const engine = engineFromOptions(options);
-    await engine.buildTemplateUntilReady(this[COMPILE]());
+    await engine.buildTemplateUntilReady(this.compile());
     return this;
   }
 
-  /** @internal compiled instructions, read by `Sandbox.create`. */
-  [COMPILE](): string[] {
+  compile(): string[] {
     return [...this.#state.instructions];
   }
 
   #append(command: string): SandboxTemplate {
     const instruction = compile(command, this.#state.env, this.#state.workdir);
-    return new SandboxTemplate({
+    return new SandboxTemplateRecipe({
       ...this.#state,
       instructions: [...this.#state.instructions, instruction],
     });
   }
 }
 
-/**
- * Folds accumulated env + active workdir into a single instruction. Each
- * instruction is a fresh shell server-side, so exports and `cd` are re-applied
- * per step; the workdir is created (`mkdir -p`) so `cd` always succeeds.
- */
 function compile(
   command: string,
   env: ReadonlyArray<readonly [string, string]>,
@@ -113,7 +114,6 @@ function upsertEnv(
   return next;
 }
 
-/** POSIX single-quote escaping so values with spaces/quotes survive the shell. */
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }

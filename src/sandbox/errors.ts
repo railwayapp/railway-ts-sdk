@@ -42,7 +42,7 @@ export class SandboxTemplateBuildError extends RailwayError {
   }
 }
 
-/** A readiness wait exceeded the time ceiling. */
+/** A readiness wait timed out. */
 export class SandboxTimeoutError extends RailwayError {
   readonly resource: "sandbox" | "template";
   readonly id: string;

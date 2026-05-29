@@ -43,7 +43,6 @@ import type {
   SandboxTemplateInfo,
 } from "./types.js";
 
-/** Mirrors the server exec timeout cap. Not a public option. */
 const READINESS_TIMEOUT_MS = 5 * 60_000;
 const POLL_INITIAL_DELAY_MS = 500;
 const POLL_MAX_DELAY_MS = 5_000;
@@ -60,8 +59,7 @@ export interface SandboxOptions extends RailwayClientConfig {
 }
 
 /**
- * Binds resolved credentials + environment to the sandbox GraphQL operations.
- * Never exported as a public noun — `Sandbox` is the only thing callers hold.
+ * Binds resolved credentials and environment to sandbox GraphQL operations.
  */
 export class SandboxEngine {
   readonly #config: SandboxEngineConfig;
@@ -124,7 +122,6 @@ export class SandboxEngine {
     return data.sandboxTemplate;
   }
 
-  /** Builds the template if needed and resolves only once it is READY. Idempotent. */
   async buildTemplateUntilReady(
     instructions: readonly string[],
   ): Promise<SandboxTemplateInfo> {
@@ -190,11 +187,6 @@ export class SandboxEngine {
     return info;
   }
 
-  /**
-   * Polls `args.poll` with exponential backoff until ready, throwing on a
-   * terminal state or once the readiness ceiling is hit. Shared by both the
-   * template → READY and sandbox → RUNNING waits.
-   */
   async #pollUntilReady<T>(args: {
     poll: () => Promise<T>;
     isReady: (value: T) => boolean;

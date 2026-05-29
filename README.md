@@ -97,26 +97,25 @@ const base = Sandbox.template()
   .withPackages("ffmpeg")
   .workdir("/app");
 
-// Same call whether the template is cold (builds, then forks) or warm (just forks).
 const sandbox = await Sandbox.create(base);
 await sandbox.exec("ffmpeg -version");
 ```
 
 A `SandboxTemplate` is a **fluent, immutable recipe** — every step returns a new
-template, so a base can branch into variants without mutation surprises. It is a pure
-value and does no network until it is built.
+template, so a base can branch into variants without mutation surprises. It is sent to
+Railway only when you build it or create a sandbox from it.
 
 - `.run(command)` — a raw build step.
 - `.withPackages(...names)` — install Debian packages.
 - `.withEnv({ KEY: "value" })` — set environment variables for later steps.
 - `.workdir(dir)` — set the working directory for later steps.
-- `.build(options?)` — build the template ahead of time (idempotent; cheap when warm),
-  so later `create` calls just fork. `Sandbox.create(template)` builds for you, so this
-  is only needed to pre-warm.
+- `.build(options?)` — build the template ahead of time, so later `create` calls can
+  fork from the cached build. `Sandbox.create(template)` builds for you, so this is
+  only needed to pre-warm.
 
 Obtain a template with `Sandbox.template()`; the constructor is private. Building throws
 `SandboxTemplateBuildError` on a failed build and `SandboxTimeoutError` if readiness
-exceeds the internal ceiling.
+exceeds the 5-minute timeout.
 
 ## Configuration
 
@@ -159,7 +158,8 @@ All errors extend `RailwayError`:
 - `SandboxTemplateBuildError` — a template build finished `FAILED`. Carries
   `.templateId` and `.environmentId`.
 - `SandboxTimeoutError` — a readiness wait (template → `READY` or sandbox → `RUNNING`)
-  exceeded the time ceiling. Carries `.resource`, `.id`, `.lastStatus`, and `.timeoutMs`.
+  exceeded the 5-minute timeout. Carries `.resource`, `.id`, `.lastStatus`, and
+  `.timeoutMs`.
 
 ## License
 

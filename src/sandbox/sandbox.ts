@@ -3,8 +3,12 @@ import {
   type SandboxEngine,
 } from "./engine.js";
 import { SandboxNotFoundError } from "./errors.js";
-import { COMPILE } from "./internal.js";
-import { SandboxTemplate } from "./template.js";
+import {
+  compileSandboxTemplate,
+  createSandboxTemplate,
+  isSandboxTemplate,
+  type SandboxTemplate,
+} from "./template.js";
 import type {
   ConnectOptions,
   CreateOptions,
@@ -54,9 +58,9 @@ export class Sandbox implements AsyncDisposable {
     return this.#info.createdAt;
   }
 
-  /** A reusable, immutable template recipe. Pure value — no network until built. */
+  /** Return a new immutable sandbox template. */
   static template(): SandboxTemplate {
-    return SandboxTemplate.blank();
+    return createSandboxTemplate();
   }
 
   static create(
@@ -68,9 +72,9 @@ export class Sandbox implements AsyncDisposable {
     sourceOrOptions: SandboxTemplate | CreateOptions = {},
     maybeOptions: CreateOptions = {},
   ): Promise<Sandbox> {
-    if (sourceOrOptions instanceof SandboxTemplate) {
+    if (isSandboxTemplate(sourceOrOptions)) {
       const engine = engineFromOptions(maybeOptions);
-      const instructions = sourceOrOptions[COMPILE]();
+      const instructions = compileSandboxTemplate(sourceOrOptions);
       await engine.buildTemplateUntilReady(instructions);
       const info = await engine.create(maybeOptions, instructions);
       return new Sandbox(engine, info);

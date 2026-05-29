@@ -7,7 +7,7 @@ import {
   SandboxTemplateBuildError,
   SandboxTimeoutError,
 } from "../src/index.js";
-import { COMPILE } from "../src/sandbox/internal.js";
+import { compileSandboxTemplate } from "../src/sandbox/template.js";
 import {
   clearRailwayEnv,
   createFetchMock,
@@ -231,7 +231,7 @@ describe("Sandbox.create readiness", () => {
     await expect(promise).rejects.toBeInstanceOf(SandboxFailedError);
   });
 
-  it("throws SandboxTimeoutError past the ceiling", async () => {
+  it("throws SandboxTimeoutError after the readiness timeout", async () => {
     const mock = createFetchMock([
       { data: { sandboxCreate: sandboxInfo({ status: "CREATING" }) } },
       ...manyResponses(200, { data: { sandbox: sandboxInfo({ status: "CREATING" }) } }),
@@ -252,8 +252,8 @@ describe("SandboxTemplate", () => {
     const withRun = base.run("echo hi");
 
     expect(withRun).not.toBe(base);
-    expect(base[COMPILE]()).toEqual([]);
-    expect(withRun[COMPILE]()).toEqual(["echo hi"]);
+    expect(compileSandboxTemplate(base)).toEqual([]);
+    expect(compileSandboxTemplate(withRun)).toEqual(["echo hi"]);
   });
 
   it("folds env + workdir into each subsequent command", () => {
@@ -262,20 +262,24 @@ describe("SandboxTemplate", () => {
       .workdir("/app")
       .run("npm install");
 
-    expect(tpl[COMPILE]()).toEqual([
+    expect(compileSandboxTemplate(tpl)).toEqual([
       "export K='v' && mkdir -p '/app' && cd '/app' && npm install",
     ]);
   });
 
   it("compiles withPackages to an apt install", () => {
-    expect(Sandbox.template().withPackages("ffmpeg", "git")[COMPILE]()).toEqual([
+    expect(
+      compileSandboxTemplate(Sandbox.template().withPackages("ffmpeg", "git")),
+    ).toEqual([
       "apt-get update && apt-get install -y --no-install-recommends ffmpeg git",
     ]);
   });
 
   it("escapes shell-special env values", () => {
     expect(
-      Sandbox.template().withEnv({ MSG: "a'b c" }).run("echo $MSG")[COMPILE](),
+      compileSandboxTemplate(
+        Sandbox.template().withEnv({ MSG: "a'b c" }).run("echo $MSG"),
+      ),
     ).toEqual([`export MSG='a'\\''b c' && echo $MSG`]);
   });
 });
@@ -284,7 +288,7 @@ describe("SandboxTemplate.build", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  it("resolves immediately on a warm template", async () => {
+  it("resolves immediately when the template is already READY", async () => {
     const mock = createFetchMock([
       { data: { sandboxTemplateBuild: templateInfo({ status: "READY" }) } },
     ]);
@@ -305,7 +309,7 @@ describe("SandboxTemplate.build", () => {
     });
   });
 
-  it("polls a cold build until READY", async () => {
+  it("polls a template build until READY", async () => {
     const mock = createFetchMock([
       { data: { sandboxTemplateBuild: templateInfo({ status: "BUILDING" }) } },
       { data: { sandboxTemplate: templateInfo({ status: "BUILDING" }) } },
@@ -337,7 +341,7 @@ describe("SandboxTemplate.build", () => {
     await expect(promise).rejects.toBeInstanceOf(SandboxTemplateBuildError);
   });
 
-  it("throws SandboxTimeoutError past the ceiling", async () => {
+  it("throws SandboxTimeoutError after the readiness timeout", async () => {
     const mock = createFetchMock([
       { data: { sandboxTemplateBuild: templateInfo({ status: "BUILDING" }) } },
       ...manyResponses(200, {
