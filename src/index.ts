@@ -3,19 +3,19 @@ export {
   type RailwayClientConfig,
 } from "./core/config.js";
 export {
+  RailwayAuthError,
   RailwayError,
   RailwayGraphQLError,
   type RailwayGraphQLErrorItem,
 } from "./core/errors.js";
 export {
   Sandbox,
-  SandboxClient,
-  SandboxInstance,
-  type SandboxClientConfig,
-  type SandboxConfig,
-  type SandboxCreateOptions,
-  type SandboxExecOptions,
-  type SandboxExecResult,
-  type SandboxSnapshot,
+  SandboxNotFoundError,
+  type ConnectOptions,
+  type CreateOptions,
+  type ExecOptions,
+  type ExecResult,
+  type ListOptions,
+  type SandboxInfo,
   type SandboxStatus,
 } from "./sandbox/index.js";

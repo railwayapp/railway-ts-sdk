@@ -12,6 +12,17 @@ export class RailwayError extends Error {
   }
 }
 
+export class RailwayAuthError extends RailwayError {
+  readonly variable: string;
+
+  constructor(variable: string) {
+    super(
+      `Missing Railway credential. Set ${variable} or pass it explicitly.`,
+    );
+    this.variable = variable;
+  }
+}
+
 export class RailwayGraphQLError extends RailwayError {
   readonly status: number;
   readonly errors: readonly RailwayGraphQLErrorItem[];
