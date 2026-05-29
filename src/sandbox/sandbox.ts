@@ -18,7 +18,8 @@ import type {
 /**
  * A live Railway sandbox. There is no separate client: a sandbox always comes
  * from somewhere — nothing (`Sandbox.create`), an id (`Sandbox.connect`), or a
- * reusable base (future). The constructor is private; use the static factories.
+ * reusable base (`Sandbox.template()`). The constructor is private; use the
+ * static factories.
  */
 export class Sandbox implements AsyncDisposable {
   readonly #engine: SandboxEngine;

@@ -14,13 +14,15 @@ export class SandboxNotFoundError extends RailwayError {
   }
 }
 
-/** A sandbox reached a terminal failure state (FAILED/DESTROYED) before becoming RUNNING. */
+/** A sandbox reached FAILED/DESTROYING/DESTROYED before becoming RUNNING. */
 export class SandboxFailedError extends RailwayError {
   readonly id: string;
   readonly status: SandboxStatus;
 
   constructor(args: { id: string; status: SandboxStatus }) {
-    super(`Sandbox "${args.id}" entered terminal state "${args.status}" before becoming ready.`);
+    super(
+      `Sandbox "${args.id}" entered terminal state "${args.status}" before becoming ready.`,
+    );
     this.id = args.id;
     this.status = args.status;
   }
@@ -40,7 +42,7 @@ export class SandboxTemplateBuildError extends RailwayError {
   }
 }
 
-/** A readiness wait (template → READY or sandbox → RUNNING) exceeded the time ceiling. */
+/** A readiness wait exceeded the time ceiling. */
 export class SandboxTimeoutError extends RailwayError {
   readonly resource: "sandbox" | "template";
   readonly id: string;
@@ -54,7 +56,8 @@ export class SandboxTimeoutError extends RailwayError {
     timeoutMs: number;
   }) {
     super(
-      `Timed out after ${args.timeoutMs}ms waiting for ${args.resource} "${args.id}" to become ready (last status: ${args.lastStatus}).`,
+      `Timed out after ${args.timeoutMs}ms waiting for ${args.resource} "${args.id}" ` +
+        `to become ready (last status: ${args.lastStatus}).`,
     );
     this.resource = args.resource;
     this.id = args.id;

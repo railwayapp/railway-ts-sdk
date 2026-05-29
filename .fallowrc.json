@@ -10,9 +10,20 @@
     "railway"
   ],
   "usedClassMembers": [
-    "exec",
+    "build",
+    "createdAt",
     "delete",
-    "toJSON"
+    "destroy",
+    "exec",
+    "idleTimeoutMinutes",
+    "refresh",
+    "region",
+    "run",
+    "status",
+    "toJSON",
+    "withEnv",
+    "withPackages",
+    "workdir"
   ],
   "ignorePatterns": [
     "src/generated/graphql.ts"

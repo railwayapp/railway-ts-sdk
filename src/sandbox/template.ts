@@ -14,9 +14,9 @@ const EMPTY_STATE: TemplateState = { instructions: [], env: [] };
 
 /**
  * A fluent, immutable recipe for a server-side sandbox base. Every builder step
- * returns a NEW template — nothing mutates in place — so a base can branch into
- * variants safely. Obtain one with `Sandbox.template()`; it is a pure value and
- * does no network until `build()` or `Sandbox.create(template)`.
+ * returns a new template, so a base can branch into variants safely. Obtain one
+ * with `Sandbox.template()`; it is a pure value and does no network until
+ * `build()` or `Sandbox.create(template)`.
  *
  * Each instruction runs in its own shell server-side, so `env`/`workdir` do not
  * persist between instructions — they are folded into every subsequent command.
@@ -60,7 +60,7 @@ export class SandboxTemplate {
     return new SandboxTemplate({ ...this.#state, workdir: dir });
   }
 
-  /** Builds the template server-side, resolving only once it is READY. Returns itself for chaining. */
+  /** Builds the template server-side, resolving only once it is READY. */
   async build(options: TemplateBuildOptions = {}): Promise<SandboxTemplate> {
     const engine = engineFromOptions(options);
     await engine.buildTemplateUntilReady(this[COMPILE]());

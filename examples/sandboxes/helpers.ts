@@ -12,6 +12,8 @@ export async function runExample(example: () => Promise<void>): Promise<void> {
 }
 
 function formatError(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+
   if (error instanceof RailwayAuthError) {
     return `${error.message} Copy .env.example to .env first.`;
   }
@@ -20,10 +22,10 @@ function formatError(error: unknown): string {
     return `Railway GraphQL error: ${error.message}`;
   }
 
-  if (!(error instanceof Error)) {
-    return String(error);
-  }
+  return formatGenericError(error);
+}
 
+function formatGenericError(error: Error): string {
   if (hasErrorCode(error.cause, "SELF_SIGNED_CERT_IN_CHAIN")) {
     return `${error.message}: self-signed certificate in chain. Run examples with mise so Node uses the project CA settings.`;
   }

@@ -14,7 +14,5 @@ export type {
   ListOptions,
   SandboxInfo,
   SandboxStatus,
-  SandboxTemplateInfo,
-  SandboxTemplateStatus,
   TemplateBuildOptions,
 } from "./types.js";

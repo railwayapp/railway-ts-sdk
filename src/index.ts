@@ -22,7 +22,5 @@ export {
   type SandboxInfo,
   type SandboxStatus,
   type SandboxTemplate,
-  type SandboxTemplateInfo,
-  type SandboxTemplateStatus,
   type TemplateBuildOptions,
 } from "./sandbox/index.js";

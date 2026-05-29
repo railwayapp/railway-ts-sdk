@@ -1,6 +1,7 @@
 import { vi } from "vitest";
 
-import type { SandboxInfo, SandboxTemplateInfo } from "../src/index.js";
+import type { SandboxInfo } from "../src/index.js";
+import type { SandboxTemplateInfo } from "../src/sandbox/types.js";
 
 /** Neutralizes ambient RAILWAY_* env vars so tests resolve config deterministically. */
 export function clearRailwayEnv(): void {

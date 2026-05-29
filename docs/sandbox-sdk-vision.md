@@ -223,17 +223,18 @@ One verb covers every way to start a sandbox. `create()` with no source is the b
 box; `create(source)` starts from a reusable base.
 
 ```ts
+const fromTemplate = await Sandbox.create(base); // live today: a SandboxTemplate value
+
 // FUTURE
-const fromTemplate = await Sandbox.create(base);                 // a SandboxTemplate value
-const forked = await sandbox.fork();                             // == Sandbox.create(sandbox)
-const fromImage = await Sandbox.create({ image: "ubuntu:24.04" }); // an explicit registry image
+const forked = await sandbox.fork(); // == Sandbox.create(sandbox)
+const fromImage = await Sandbox.create({ image: "ubuntu:24.04" });
 ```
 
-`create` accepts a `SandboxTemplate` or a running `Sandbox` as a **value**, or an
-explicit `{ image }` object. There is no bare-string source, so there is never any
-guessing between "a base name" and "an image tag" — the source's type says what it is.
-`sandbox.fork()` is sugar for `Sandbox.create(this)`, giving the live-environment fork
-its own obvious home.
+Today, `create` accepts a `SandboxTemplate`. Future sources are a running `Sandbox`
+value or an explicit `{ image }` object. There is no bare-string source, so there is
+never any guessing between "a base name" and "an image tag" — the source's type says
+what it is. `sandbox.fork()` is sugar for `Sandbox.create(this)`, giving the
+live-environment fork its own obvious home.
 
 ---
 
@@ -272,7 +273,7 @@ All SDK errors extend `RailwayError`:
 | `RailwayAuthError` | A required credential (`token` / `environmentId`) could not be resolved. Carries `.variable`. |
 | `RailwayGraphQLError` | The Railway API returned an error. Carries `.status`, `.errors`, `.responseBody`. |
 | `SandboxNotFoundError` | `connect` / `refresh` could not find the sandbox in the environment. Carries `.id`, `.environmentId`. |
-| `SandboxFailedError` | A sandbox reached a terminal state (`FAILED`/`DESTROYED`) before becoming `RUNNING` during `create`. Carries `.id`, `.status`. |
+| `SandboxFailedError` | A sandbox reached a terminal state (`FAILED`, `DESTROYING`, or `DESTROYED`) before becoming `RUNNING` during `create`. Carries `.id`, `.status`. |
 | `SandboxTemplateBuildError` | A template build finished `FAILED`. Carries `.templateId`, `.environmentId`. |
 | `SandboxTimeoutError` | A readiness wait (template → `READY` or sandbox → `RUNNING`) exceeded the 5-minute ceiling. Carries `.resource`, `.id`, `.lastStatus`, `.timeoutMs`. |
 | `SandboxFileNotFoundError` / `SandboxFileTooLargeError` _(future)_ | File operations. |
@@ -321,8 +322,6 @@ import {
   type SandboxInfo,
   type SandboxStatus,
   type SandboxTemplate,
-  type SandboxTemplateInfo,
-  type SandboxTemplateStatus,
   type TemplateBuildOptions,
   type RailwayClientConfig,
   type RailwayGraphQLErrorItem,

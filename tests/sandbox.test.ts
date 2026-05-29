@@ -36,6 +36,11 @@ async function createWithDestroyMock(): Promise<{
   return { sandbox, calls: mock.calls };
 }
 
+function silenceExpectedRejection<T>(promise: Promise<T>): Promise<T> {
+  promise.catch(() => {});
+  return promise;
+}
+
 describe("Sandbox.create", () => {
   it("creates sandboxes in the configured environment", async () => {
     const mock = createFetchMock([{ data: { sandboxCreate: sandboxInfo() } }]);
@@ -218,8 +223,9 @@ describe("Sandbox.create readiness", () => {
       { data: { sandbox: sandboxInfo({ status: "FAILED" }) } },
     ]);
 
-    const promise = Sandbox.create({ ...auth, fetch: mock.fetch });
-    promise.catch(() => {});
+    const promise = silenceExpectedRejection(
+      Sandbox.create({ ...auth, fetch: mock.fetch }),
+    );
     await vi.advanceTimersByTimeAsync(5 * 60_000);
 
     await expect(promise).rejects.toBeInstanceOf(SandboxFailedError);
@@ -231,8 +237,9 @@ describe("Sandbox.create readiness", () => {
       ...manyResponses(200, { data: { sandbox: sandboxInfo({ status: "CREATING" }) } }),
     ]);
 
-    const promise = Sandbox.create({ ...auth, fetch: mock.fetch });
-    promise.catch(() => {});
+    const promise = silenceExpectedRejection(
+      Sandbox.create({ ...auth, fetch: mock.fetch }),
+    );
     await vi.advanceTimersByTimeAsync(6 * 60_000);
 
     await expect(promise).rejects.toBeInstanceOf(SandboxTimeoutError);
@@ -274,6 +281,9 @@ describe("SandboxTemplate", () => {
 });
 
 describe("SandboxTemplate.build", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
   it("resolves immediately on a warm template", async () => {
     const mock = createFetchMock([
       { data: { sandboxTemplateBuild: templateInfo({ status: "READY" }) } },
@@ -296,62 +306,51 @@ describe("SandboxTemplate.build", () => {
   });
 
   it("polls a cold build until READY", async () => {
-    vi.useFakeTimers();
-    try {
-      const mock = createFetchMock([
-        { data: { sandboxTemplateBuild: templateInfo({ status: "BUILDING" }) } },
-        { data: { sandboxTemplate: templateInfo({ status: "BUILDING" }) } },
-        { data: { sandboxTemplate: templateInfo({ status: "READY" }) } },
-      ]);
+    const mock = createFetchMock([
+      { data: { sandboxTemplateBuild: templateInfo({ status: "BUILDING" }) } },
+      { data: { sandboxTemplate: templateInfo({ status: "BUILDING" }) } },
+      { data: { sandboxTemplate: templateInfo({ status: "READY" }) } },
+    ]);
 
-      const promise = Sandbox.template().run("echo hi").build({ ...auth, fetch: mock.fetch });
-      await vi.advanceTimersByTimeAsync(5 * 60_000);
-      await promise;
+    const promise = Sandbox.template()
+      .run("echo hi")
+      .build({ ...auth, fetch: mock.fetch });
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    await promise;
 
-      expect(mock.calls).toHaveLength(3);
-      expect(mock.calls[1]?.body.query).toContain("query RailwaySandboxTemplate");
-      expect(mock.calls[2]?.body.query).toContain("query RailwaySandboxTemplate");
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(mock.calls).toHaveLength(3);
+    expect(mock.calls[1]?.body.query).toContain("query RailwaySandboxTemplate");
+    expect(mock.calls[2]?.body.query).toContain("query RailwaySandboxTemplate");
   });
 
   it("throws SandboxTemplateBuildError on FAILED", async () => {
-    vi.useFakeTimers();
-    try {
-      const mock = createFetchMock([
-        { data: { sandboxTemplateBuild: templateInfo({ status: "BUILDING" }) } },
-        { data: { sandboxTemplate: templateInfo({ status: "FAILED" }) } },
-      ]);
+    const mock = createFetchMock([
+      { data: { sandboxTemplateBuild: templateInfo({ status: "BUILDING" }) } },
+      { data: { sandboxTemplate: templateInfo({ status: "FAILED" }) } },
+    ]);
 
-      const promise = Sandbox.template().run("false").build({ ...auth, fetch: mock.fetch });
-      promise.catch(() => {});
-      await vi.advanceTimersByTimeAsync(5 * 60_000);
+    const promise = silenceExpectedRejection(
+      Sandbox.template().run("false").build({ ...auth, fetch: mock.fetch }),
+    );
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
 
-      await expect(promise).rejects.toBeInstanceOf(SandboxTemplateBuildError);
-    } finally {
-      vi.useRealTimers();
-    }
+    await expect(promise).rejects.toBeInstanceOf(SandboxTemplateBuildError);
   });
 
   it("throws SandboxTimeoutError past the ceiling", async () => {
-    vi.useFakeTimers();
-    try {
-      const mock = createFetchMock([
-        { data: { sandboxTemplateBuild: templateInfo({ status: "BUILDING" }) } },
-        ...manyResponses(200, {
-          data: { sandboxTemplate: templateInfo({ status: "BUILDING" }) },
-        }),
-      ]);
+    const mock = createFetchMock([
+      { data: { sandboxTemplateBuild: templateInfo({ status: "BUILDING" }) } },
+      ...manyResponses(200, {
+        data: { sandboxTemplate: templateInfo({ status: "BUILDING" }) },
+      }),
+    ]);
 
-      const promise = Sandbox.template().run("sleep 1").build({ ...auth, fetch: mock.fetch });
-      promise.catch(() => {});
-      await vi.advanceTimersByTimeAsync(6 * 60_000);
+    const promise = silenceExpectedRejection(
+      Sandbox.template().run("sleep 1").build({ ...auth, fetch: mock.fetch }),
+    );
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
 
-      await expect(promise).rejects.toBeInstanceOf(SandboxTimeoutError);
-    } finally {
-      vi.useRealTimers();
-    }
+    await expect(promise).rejects.toBeInstanceOf(SandboxTimeoutError);
   });
 });
 

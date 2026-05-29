@@ -153,8 +153,9 @@ All errors extend `RailwayError`:
   `.errors`, and `.responseBody`.
 - `SandboxNotFoundError` — `connect` or `refresh` could not find the sandbox. Carries
   `.id` and `.environmentId`.
-- `SandboxFailedError` — a sandbox reached a terminal state (`FAILED`/`DESTROYED`)
-  before becoming `RUNNING` during `create`. Carries `.id` and `.status`.
+- `SandboxFailedError` — a sandbox reached a terminal state (`FAILED`, `DESTROYING`,
+  or `DESTROYED`) before becoming `RUNNING` during `create`. Carries `.id` and
+  `.status`.
 - `SandboxTemplateBuildError` — a template build finished `FAILED`. Carries
   `.templateId` and `.environmentId`.
 - `SandboxTimeoutError` — a readiness wait (template → `READY` or sandbox → `RUNNING`)

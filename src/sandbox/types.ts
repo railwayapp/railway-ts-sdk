@@ -9,7 +9,6 @@ export type SandboxStatus = RailwaySandboxFieldsFragment["status"];
 export type ExecResult = RailwaySandboxExecMutation["sandboxExec"];
 export type SandboxInfo = RailwaySandboxFieldsFragment;
 
-export type SandboxTemplateStatus = RailwaySandboxTemplateFieldsFragment["status"];
 export type SandboxTemplateInfo = RailwaySandboxTemplateFieldsFragment;
 
 export interface CreateOptions extends RailwayClientConfig {

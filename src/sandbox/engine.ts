@@ -43,11 +43,10 @@ import type {
   SandboxTemplateInfo,
 } from "./types.js";
 
-/** Readiness wait ceiling — mirrors the server exec timeout cap. Not a public option. */
-const READY_TIMEOUT_MS = 5 * 60_000;
+/** Mirrors the server exec timeout cap. Not a public option. */
+const READINESS_TIMEOUT_MS = 5 * 60_000;
 const POLL_INITIAL_DELAY_MS = 500;
 const POLL_MAX_DELAY_MS = 5_000;
-const POLL_BACKOFF_FACTOR = 2;
 
 const sleep = (ms: number): Promise<void> =>
   new Promise(resolve => setTimeout(resolve, ms));
@@ -97,12 +96,12 @@ export class SandboxEngine {
     return this.#waitForRunning(data.sandboxCreate);
   }
 
-  async buildTemplate(input: {
-    instructions: readonly string[];
-  }): Promise<SandboxTemplateInfo> {
+  async buildTemplate(
+    instructions: readonly string[],
+  ): Promise<SandboxTemplateInfo> {
     const variables: RailwaySandboxTemplateBuildMutationVariables = {
       environmentId: this.#config.environmentId,
-      input: { instructions: [...input.instructions] },
+      input: { instructions: [...instructions] },
     };
     const data = await requestGraphQL<
       RailwaySandboxTemplateBuildMutation,
@@ -129,7 +128,7 @@ export class SandboxEngine {
   async buildTemplateUntilReady(
     instructions: readonly string[],
   ): Promise<SandboxTemplateInfo> {
-    const built = await this.buildTemplate({ instructions });
+    const built = await this.buildTemplate(instructions);
     if (built.status === "READY") return built;
     if (built.status === "FAILED") {
       throw new SandboxTemplateBuildError({
@@ -153,7 +152,7 @@ export class SandboxEngine {
           resource: "template",
           id: template.id,
           lastStatus: template.status,
-          timeoutMs: READY_TIMEOUT_MS,
+          timeoutMs: READINESS_TIMEOUT_MS,
         });
       },
     });
@@ -177,7 +176,7 @@ export class SandboxEngine {
           resource: "sandbox",
           id: info.id,
           lastStatus: info.status,
-          timeoutMs: READY_TIMEOUT_MS,
+          timeoutMs: READINESS_TIMEOUT_MS,
         });
       },
     });
@@ -211,8 +210,8 @@ export class SandboxEngine {
       last = await args.poll();
       if (args.isReady(last)) return last;
       if (args.isTerminal(last)) return args.onTerminal(last);
-      delay = Math.min(delay * POLL_BACKOFF_FACTOR, POLL_MAX_DELAY_MS);
-    } while (Date.now() - start < READY_TIMEOUT_MS);
+      delay = Math.min(delay * 2, POLL_MAX_DELAY_MS);
+    } while (Date.now() - start < READINESS_TIMEOUT_MS);
     return args.onTimeout(last);
   }
 
