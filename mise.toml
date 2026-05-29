@@ -52,9 +52,9 @@ depends = ["typecheck", "test", "build"]
 
 [tasks.example]
 description = "Run the default manual example using .env credentials"
-depends = ["example:create-exec-delete"]
+depends = ["example:quickstart"]
 
-[tasks."example:create-exec-delete"]
-description = "Create a sandbox, exec a command, then delete it using .env credentials"
-run = "pnpm exec tsx examples/sandboxes/create-exec-delete.ts"
+[tasks."example:quickstart"]
+description = "Create a sandbox, exec a command, then destroy it using .env credentials"
+run = "pnpm exec tsx examples/sandboxes/quickstart.ts"
 

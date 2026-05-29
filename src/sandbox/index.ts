@@ -1,11 +1,11 @@
-export { Sandbox, Sandbox as SandboxClient } from "./client.js";
-export { SandboxInstance } from "./instance.js";
+export { Sandbox } from "./sandbox.js";
+export { SandboxNotFoundError } from "./errors.js";
 export type {
-  SandboxClientConfig,
-  SandboxConfig,
-  SandboxCreateOptions,
-  SandboxExecOptions,
-  SandboxExecResult,
-  SandboxSnapshot,
+  ConnectOptions,
+  CreateOptions,
+  ExecOptions,
+  ExecResult,
+  ListOptions,
+  SandboxInfo,
   SandboxStatus,
 } from "./types.js";

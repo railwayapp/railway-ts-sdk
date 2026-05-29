@@ -7,6 +7,38 @@ fragment RailwaySandboxFields on Sandbox {
   createdAt
 }
 
+query RailwaySandbox($environmentId: String!, $id: String!) {
+  sandbox(environmentId: $environmentId, id: $id) {
+    ...RailwaySandboxFields
+  }
+}
+
+query RailwaySandboxes(
+  $environmentId: String!
+  $first: Int
+  $after: String
+  $before: String
+  $last: Int
+) {
+  sandboxes(
+    environmentId: $environmentId
+    first: $first
+    after: $after
+    before: $before
+    last: $last
+  ) {
+    edges {
+      node {
+        ...RailwaySandboxFields
+      }
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+
 mutation RailwaySandboxCreate($input: SandboxCreateInput!) {
   sandboxCreate(input: $input) {
     ...RailwaySandboxFields

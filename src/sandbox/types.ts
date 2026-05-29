@@ -4,29 +4,25 @@ import type {
   RailwaySandboxFieldsFragment,
 } from "../generated/graphql.js";
 
-export interface SandboxConfig extends RailwayClientConfig {
-  environmentId: string;
-}
-
-export type SandboxClientConfig = SandboxConfig;
-
 export type SandboxStatus = RailwaySandboxFieldsFragment["status"];
-export type SandboxExecResult = RailwaySandboxExecMutation["sandboxExec"];
-export type SandboxSnapshot = RailwaySandboxFieldsFragment;
+export type ExecResult = RailwaySandboxExecMutation["sandboxExec"];
+export type SandboxInfo = RailwaySandboxFieldsFragment;
 
-export interface SandboxCreateOptions {
+export interface CreateOptions extends RailwayClientConfig {
+  environmentId?: string;
   idleTimeoutMinutes?: number;
 }
 
-export interface SandboxExecOptions {
-  timeoutSec?: number;
+export interface ConnectOptions extends RailwayClientConfig {
+  environmentId?: string;
 }
 
-export interface SandboxInstanceOperations {
-  exec: (
-    id: string,
-    command: string,
-    options: SandboxExecOptions,
-  ) => Promise<SandboxExecResult>;
-  delete: (id: string) => Promise<import("./instance.js").SandboxInstance | null>;
+export interface ListOptions extends RailwayClientConfig {
+  environmentId?: string;
+  first?: number;
+  after?: string;
+}
+
+export interface ExecOptions {
+  timeoutSec?: number;
 }

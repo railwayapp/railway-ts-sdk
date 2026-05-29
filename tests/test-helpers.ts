@@ -1,4 +1,13 @@
-import type { SandboxSnapshot } from "../src/index.js";
+import { vi } from "vitest";
+
+import type { SandboxInfo } from "../src/index.js";
+
+/** Neutralizes ambient RAILWAY_* env vars so tests resolve config deterministically. */
+export function clearRailwayEnv(): void {
+  vi.stubEnv("RAILWAY_API_TOKEN", "");
+  vi.stubEnv("RAILWAY_ENVIRONMENT_ID", "");
+  vi.stubEnv("RAILWAY_GRAPHQL_ENDPOINT", "");
+}
 
 export interface FetchCall {
   input: string | URL | Request;
@@ -33,9 +42,7 @@ export function createFetchMock(responses: unknown[]): {
   return { fetch: fetchMock, calls };
 }
 
-export function sandboxSnapshot(
-  overrides: Partial<SandboxSnapshot> = {},
-): SandboxSnapshot {
+export function sandboxInfo(overrides: Partial<SandboxInfo> = {}): SandboxInfo {
   return {
     id: "sandbox_123",
     status: "RUNNING",

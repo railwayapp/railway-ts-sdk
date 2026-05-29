@@ -1,17 +1,6 @@
 import "dotenv/config";
 
-import type { SandboxConfig } from "../../src/index.ts";
-import { RailwayGraphQLError } from "../../src/index.ts";
-
-export function sandboxConfigFromEnv(): SandboxConfig {
-  const endpoint = process.env.RAILWAY_GRAPHQL_ENDPOINT;
-
-  return {
-    token: requiredEnv("RAILWAY_API_TOKEN"),
-    environmentId: requiredEnv("RAILWAY_ENVIRONMENT_ID"),
-    ...(endpoint ? { endpoint } : {}),
-  };
-}
+import { RailwayAuthError, RailwayGraphQLError } from "../../src/index.ts";
 
 export async function runExample(example: () => Promise<void>): Promise<void> {
   try {
@@ -22,14 +11,11 @@ export async function runExample(example: () => Promise<void>): Promise<void> {
   }
 }
 
-function requiredEnv(name: string): string {
-  const value = process.env[name];
-  if (!value)
-    throw new Error(`Missing ${name}. Copy .env.example to .env first.`);
-  return value;
-}
-
 function formatError(error: unknown): string {
+  if (error instanceof RailwayAuthError) {
+    return `${error.message} Copy .env.example to .env first.`;
+  }
+
   if (error instanceof RailwayGraphQLError) {
     return `Railway GraphQL error: ${error.message}`;
   }

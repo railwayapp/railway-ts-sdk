@@ -32,7 +32,7 @@ Local examples live under `examples/<domain>/`, use `.env`, and may call Railway
 ```bash
 cp .env.example .env
 # fill credentials
-mise run example:create-exec-delete
+mise run example:quickstart
 ```
 
 Unit tests must stay offline and must not call Railway.
