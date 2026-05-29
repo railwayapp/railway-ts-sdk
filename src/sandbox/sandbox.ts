@@ -3,6 +3,12 @@ import {
   type SandboxEngine,
 } from "./engine.js";
 import { SandboxNotFoundError } from "./errors.js";
+import {
+  compileSandboxTemplate,
+  createSandboxTemplate,
+  isSandboxTemplate,
+  type SandboxTemplate,
+} from "./template.js";
 import type {
   ConnectOptions,
   CreateOptions,
@@ -16,7 +22,8 @@ import type {
 /**
  * A live Railway sandbox. There is no separate client: a sandbox always comes
  * from somewhere — nothing (`Sandbox.create`), an id (`Sandbox.connect`), or a
- * reusable base (future). The constructor is private; use the static factories.
+ * reusable base (`Sandbox.template()`). The constructor is private; use the
+ * static factories.
  */
 export class Sandbox implements AsyncDisposable {
   readonly #engine: SandboxEngine;
@@ -51,9 +58,30 @@ export class Sandbox implements AsyncDisposable {
     return this.#info.createdAt;
   }
 
-  static async create(options: CreateOptions = {}): Promise<Sandbox> {
-    const engine = engineFromOptions(options);
-    const info = await engine.create(options);
+  /** Return a new immutable sandbox template. */
+  static template(): SandboxTemplate {
+    return createSandboxTemplate();
+  }
+
+  static create(
+    template: SandboxTemplate,
+    options?: CreateOptions,
+  ): Promise<Sandbox>;
+  static create(options?: CreateOptions): Promise<Sandbox>;
+  static async create(
+    sourceOrOptions: SandboxTemplate | CreateOptions = {},
+    maybeOptions: CreateOptions = {},
+  ): Promise<Sandbox> {
+    if (isSandboxTemplate(sourceOrOptions)) {
+      const engine = engineFromOptions(maybeOptions);
+      const instructions = compileSandboxTemplate(sourceOrOptions);
+      await engine.buildTemplateUntilReady(instructions);
+      const info = await engine.create(maybeOptions, instructions);
+      return new Sandbox(engine, info);
+    }
+
+    const engine = engineFromOptions(sourceOrOptions);
+    const info = await engine.create(sourceOrOptions);
     return new Sandbox(engine, info);
   }
 

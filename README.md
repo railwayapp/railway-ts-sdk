@@ -32,8 +32,12 @@ await sandbox.destroy();
 private. A sandbox always comes from somewhere:
 
 - `Sandbox.create(options?)` — provision a new sandbox.
+- `Sandbox.create(template, options?)` — provision from a reusable template (see [Templates](#templates)).
 - `Sandbox.connect(id, options?)` — reattach to an existing sandbox by id.
 - `Sandbox.list(options?)` — list sandboxes in the environment.
+
+`create` resolves only once the sandbox is `RUNNING`, so the sandbox you receive is
+ready to `exec` against — there is no readiness wait to manage yourself.
 
 ## Running commands
 
@@ -79,6 +83,40 @@ await sandbox.exec("pytest");
 
 `sandbox.destroy()` is always available for explicit teardown.
 
+## Templates
+
+A template is a reusable base: an ordered list of build steps (system packages, env,
+a working directory, raw commands) that Railway builds once, content-addresses, and
+caches. Creating a sandbox from a template forks that cached build instead of starting
+from scratch.
+
+```ts
+import { Sandbox } from "railway";
+
+const base = Sandbox.template()
+  .withPackages("ffmpeg")
+  .workdir("/app");
+
+const sandbox = await Sandbox.create(base);
+await sandbox.exec("ffmpeg -version");
+```
+
+A `SandboxTemplate` is a **fluent, immutable recipe** — every step returns a new
+template, so a base can branch into variants without mutation surprises. It is sent to
+Railway only when you build it or create a sandbox from it.
+
+- `.run(command)` — a raw build step.
+- `.withPackages(...names)` — install Debian packages.
+- `.withEnv({ KEY: "value" })` — set environment variables for later steps.
+- `.workdir(dir)` — set the working directory for later steps.
+- `.build(options?)` — build the template ahead of time, so later `create` calls can
+  fork from the cached build. `Sandbox.create(template)` builds for you, so this is
+  only needed to pre-warm.
+
+Obtain a template with `Sandbox.template()`; the constructor is private. Building throws
+`SandboxTemplateBuildError` on a failed build and `SandboxTimeoutError` if readiness
+exceeds the 5-minute timeout.
+
 ## Configuration
 
 `token`, `environmentId`, and `endpoint` each resolve in order: an explicit option,
@@ -114,6 +152,14 @@ All errors extend `RailwayError`:
   `.errors`, and `.responseBody`.
 - `SandboxNotFoundError` — `connect` or `refresh` could not find the sandbox. Carries
   `.id` and `.environmentId`.
+- `SandboxFailedError` — a sandbox reached a terminal state (`FAILED`, `DESTROYING`,
+  or `DESTROYED`) before becoming `RUNNING` during `create`. Carries `.id` and
+  `.status`.
+- `SandboxTemplateBuildError` — a template build finished `FAILED`. Carries
+  `.templateId` and `.environmentId`.
+- `SandboxTimeoutError` — a readiness wait (template → `READY` or sandbox → `RUNNING`)
+  exceeded the 5-minute timeout. Carries `.resource`, `.id`, `.lastStatus`, and
+  `.timeoutMs`.
 
 ## License
 

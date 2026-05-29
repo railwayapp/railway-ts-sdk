@@ -1926,6 +1926,7 @@ export type EdgeCachingConfig = {
   defaultTtlSeconds: Scalars['Int']['output'];
   htmlCaching: Scalars['String']['output'];
   mode: Scalars['String']['output'];
+  purgeOnDeploy: PurgeOnDeploy;
   staleWhileRevalidate: StaleWhileRevalidateConfig;
 };
 
@@ -1933,6 +1934,7 @@ export type EdgeCachingConfigInput = {
   defaultTtlSeconds?: InputMaybe<Scalars['Int']['input']>;
   htmlCaching?: InputMaybe<Scalars['String']['input']>;
   mode?: InputMaybe<Scalars['String']['input']>;
+  purgeOnDeploy?: InputMaybe<PurgeOnDeploy>;
   staleWhileRevalidate?: InputMaybe<StaleWhileRevalidateInput>;
 };
 
@@ -1941,6 +1943,8 @@ export type EdgeConfig = {
   caching?: Maybe<EdgeCachingConfig>;
   enabled: Scalars['Boolean']['output'];
   id: Scalars['String']['output'];
+  purgeEpoch: Scalars['Int']['output'];
+  purgeEpochByKind: Scalars['JSON']['output'];
 };
 
 export type EdgeConfigInput = {
@@ -4347,6 +4351,8 @@ export type Mutation = {
   projectUpdate: Project;
   /** Deletes a ProviderAuth. */
   providerAuthRemove: Scalars['Boolean']['output'];
+  /** Purges the CDN cache for a service. Bumps the edge config's purge epoch so every edge node treats prior cached entries as stale on next request. Idempotent; returns true even if CDN is disabled for the service. */
+  purgeServiceCache: Scalars['Boolean']['output'];
   /** Register an Expo push notification token for the current user */
   pushTokenRegister: Scalars['Boolean']['output'];
   /** Unregister an Expo push notification token for the current user */
@@ -4409,6 +4415,8 @@ export type Mutation = {
   sandboxDestroy?: Maybe<Sandbox>;
   /** Execute a command inside a running sandbox. */
   sandboxExec: SandboxExecResult;
+  /** Build (or return) a content-addressed sandbox template. Idempotent and non-blocking: starts the build if needed and returns immediately; poll `sandboxTemplate` until READY. */
+  sandboxTemplateBuild: SandboxTemplate;
   /** Send a notification email to user when bounty is won */
   sendBountyWonEmail: Scalars['Boolean']['output'];
   /** Send a community thread notification email */
@@ -6225,6 +6233,11 @@ export type MutationProviderAuthRemoveArgs = {
 };
 
 
+export type MutationPurgeServiceCacheArgs = {
+  input: PurgeServiceCacheInput;
+};
+
+
 export type MutationPushTokenRegisterArgs = {
   token: Scalars['String']['input'];
 };
@@ -6408,6 +6421,12 @@ export type MutationSandboxExecArgs = {
   environmentId: Scalars['String']['input'];
   id: Scalars['String']['input'];
   timeoutSec?: InputMaybe<Scalars['Int']['input']>;
+};
+
+
+export type MutationSandboxTemplateBuildArgs = {
+  environmentId: Scalars['String']['input'];
+  input: SandboxTemplateInput;
 };
 
 
@@ -9119,6 +9138,21 @@ export type PublicStatsEvent = {
   value: Scalars['BigInt']['output'];
 };
 
+export type PurgeCacheScope =
+  | 'ALL'
+  | 'HTML';
+
+export type PurgeOnDeploy =
+  | 'ALL'
+  | 'HTML'
+  | 'OFF';
+
+export type PurgeServiceCacheInput = {
+  environmentId: Scalars['String']['input'];
+  scope: PurgeCacheScope;
+  serviceId: Scalars['String']['input'];
+};
+
 export type Query = {
   __typename?: 'Query';
   /**
@@ -9611,6 +9645,8 @@ export type Query = {
   resourceAccess: ResourceAccess;
   /** Get a sandbox by id. */
   sandbox?: Maybe<Sandbox>;
+  /** Get the status of a sandbox template by its content-addressed id. Cheap and side-effect-free; poll this until READY. */
+  sandboxTemplate: SandboxTemplate;
   /** List sandboxes in an environment. */
   sandboxes: QuerySandboxesConnection;
   /** Search published templates by name or description */
@@ -11079,6 +11115,12 @@ export type QueryResourceAccessArgs = {
 export type QuerySandboxArgs = {
   environmentId: Scalars['String']['input'];
   id: Scalars['String']['input'];
+};
+
+
+export type QuerySandboxTemplateArgs = {
+  environmentId: Scalars['String']['input'];
+  id: Scalars['ID']['input'];
 };
 
 
@@ -12764,6 +12806,7 @@ export type Sandbox = {
 export type SandboxCreateInput = {
   environmentId: Scalars['String']['input'];
   idleTimeoutMinutes?: InputMaybe<Scalars['Int']['input']>;
+  template?: InputMaybe<SandboxTemplateInput>;
 };
 
 export type SandboxExecResult = {
@@ -12781,6 +12824,24 @@ export type SandboxStatus =
   | 'DESTROYING'
   | 'FAILED'
   | 'RUNNING';
+
+export type SandboxTemplate = {
+  __typename?: 'SandboxTemplate';
+  environmentId: Scalars['String']['output'];
+  id: Scalars['ID']['output'];
+  status: SandboxTemplateStatus;
+};
+
+export type SandboxTemplateInput = {
+  baseImageDigest?: InputMaybe<Scalars['String']['input']>;
+  instructions: Array<Scalars['String']['input']>;
+};
+
+export type SandboxTemplateStatus =
+  | 'BUILDING'
+  | 'FAILED'
+  | 'PENDING'
+  | 'READY';
 
 export type SendBountyWonEmailInput = {
   bountyAmount: Scalars['Float']['input'];
@@ -15355,9 +15416,30 @@ export type RailwaySandboxDestroyMutationVariables = Exact<{
 
 export type RailwaySandboxDestroyMutation = { __typename?: 'Mutation', sandboxDestroy?: { __typename?: 'Sandbox', id: string, status: SandboxStatus, environmentId: string, region: string, idleTimeoutMinutes?: number | null, createdAt: string } | null };
 
+export type RailwaySandboxTemplateFieldsFragment = { __typename?: 'SandboxTemplate', id: string, status: SandboxTemplateStatus, environmentId: string };
+
+export type RailwaySandboxTemplateBuildMutationVariables = Exact<{
+  environmentId: Scalars['String']['input'];
+  input: SandboxTemplateInput;
+}>;
+
+
+export type RailwaySandboxTemplateBuildMutation = { __typename?: 'Mutation', sandboxTemplateBuild: { __typename?: 'SandboxTemplate', id: string, status: SandboxTemplateStatus, environmentId: string } };
+
+export type RailwaySandboxTemplateQueryVariables = Exact<{
+  environmentId: Scalars['String']['input'];
+  id: Scalars['ID']['input'];
+}>;
+
+
+export type RailwaySandboxTemplateQuery = { __typename?: 'Query', sandboxTemplate: { __typename?: 'SandboxTemplate', id: string, status: SandboxTemplateStatus, environmentId: string } };
+
 export const RailwaySandboxFieldsFragmentDoc = {"kind":"Document","definitions":[{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"Sandbox"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}},{"kind":"Field","name":{"kind":"Name","value":"region"}},{"kind":"Field","name":{"kind":"Name","value":"idleTimeoutMinutes"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}}]}}]} as unknown as DocumentNode<RailwaySandboxFieldsFragment, unknown>;
+export const RailwaySandboxTemplateFieldsFragmentDoc = {"kind":"Document","definitions":[{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxTemplateFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"SandboxTemplate"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}}]}}]} as unknown as DocumentNode<RailwaySandboxTemplateFieldsFragment, unknown>;
 export const RailwaySandboxDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"RailwaySandbox"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"id"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandbox"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}},{"kind":"Argument","name":{"kind":"Name","value":"id"},"value":{"kind":"Variable","name":{"kind":"Name","value":"id"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"RailwaySandboxFields"}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"Sandbox"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}},{"kind":"Field","name":{"kind":"Name","value":"region"}},{"kind":"Field","name":{"kind":"Name","value":"idleTimeoutMinutes"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}}]}}]} as unknown as DocumentNode<RailwaySandboxQuery, RailwaySandboxQueryVariables>;
 export const RailwaySandboxesDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"RailwaySandboxes"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"first"}},"type":{"kind":"NamedType","name":{"kind":"Name","value":"Int"}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"after"}},"type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"before"}},"type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"last"}},"type":{"kind":"NamedType","name":{"kind":"Name","value":"Int"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxes"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}},{"kind":"Argument","name":{"kind":"Name","value":"first"},"value":{"kind":"Variable","name":{"kind":"Name","value":"first"}}},{"kind":"Argument","name":{"kind":"Name","value":"after"},"value":{"kind":"Variable","name":{"kind":"Name","value":"after"}}},{"kind":"Argument","name":{"kind":"Name","value":"before"},"value":{"kind":"Variable","name":{"kind":"Name","value":"before"}}},{"kind":"Argument","name":{"kind":"Name","value":"last"},"value":{"kind":"Variable","name":{"kind":"Name","value":"last"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"edges"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"node"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"RailwaySandboxFields"}}]}}]}},{"kind":"Field","name":{"kind":"Name","value":"pageInfo"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"hasNextPage"}},{"kind":"Field","name":{"kind":"Name","value":"endCursor"}}]}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"Sandbox"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}},{"kind":"Field","name":{"kind":"Name","value":"region"}},{"kind":"Field","name":{"kind":"Name","value":"idleTimeoutMinutes"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}}]}}]} as unknown as DocumentNode<RailwaySandboxesQuery, RailwaySandboxesQueryVariables>;
 export const RailwaySandboxCreateDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"RailwaySandboxCreate"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"SandboxCreateInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxCreate"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"RailwaySandboxFields"}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"Sandbox"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}},{"kind":"Field","name":{"kind":"Name","value":"region"}},{"kind":"Field","name":{"kind":"Name","value":"idleTimeoutMinutes"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}}]}}]} as unknown as DocumentNode<RailwaySandboxCreateMutation, RailwaySandboxCreateMutationVariables>;
 export const RailwaySandboxExecDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"RailwaySandboxExec"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"id"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"command"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"timeoutSec"}},"type":{"kind":"NamedType","name":{"kind":"Name","value":"Int"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxExec"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"id"},"value":{"kind":"Variable","name":{"kind":"Name","value":"id"}}},{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}},{"kind":"Argument","name":{"kind":"Name","value":"command"},"value":{"kind":"Variable","name":{"kind":"Name","value":"command"}}},{"kind":"Argument","name":{"kind":"Name","value":"timeoutSec"},"value":{"kind":"Variable","name":{"kind":"Name","value":"timeoutSec"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"exitCode"}},{"kind":"Field","name":{"kind":"Name","value":"stdout"}},{"kind":"Field","name":{"kind":"Name","value":"stderr"}},{"kind":"Field","name":{"kind":"Name","value":"truncated"}},{"kind":"Field","name":{"kind":"Name","value":"timedOut"}}]}}]}}]} as unknown as DocumentNode<RailwaySandboxExecMutation, RailwaySandboxExecMutationVariables>;
 export const RailwaySandboxDestroyDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"RailwaySandboxDestroy"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"id"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxDestroy"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"id"},"value":{"kind":"Variable","name":{"kind":"Name","value":"id"}}},{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"RailwaySandboxFields"}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"Sandbox"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}},{"kind":"Field","name":{"kind":"Name","value":"region"}},{"kind":"Field","name":{"kind":"Name","value":"idleTimeoutMinutes"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}}]}}]} as unknown as DocumentNode<RailwaySandboxDestroyMutation, RailwaySandboxDestroyMutationVariables>;
+export const RailwaySandboxTemplateBuildDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"RailwaySandboxTemplateBuild"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"SandboxTemplateInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxTemplateBuild"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}},{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"RailwaySandboxTemplateFields"}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxTemplateFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"SandboxTemplate"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}}]}}]} as unknown as DocumentNode<RailwaySandboxTemplateBuildMutation, RailwaySandboxTemplateBuildMutationVariables>;
+export const RailwaySandboxTemplateDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"RailwaySandboxTemplate"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"id"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"ID"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxTemplate"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}},{"kind":"Argument","name":{"kind":"Name","value":"id"},"value":{"kind":"Variable","name":{"kind":"Name","value":"id"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"RailwaySandboxTemplateFields"}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxTemplateFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"SandboxTemplate"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}}]}}]} as unknown as DocumentNode<RailwaySandboxTemplateQuery, RailwaySandboxTemplateQueryVariables>;

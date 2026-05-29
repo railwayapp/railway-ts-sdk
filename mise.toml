@@ -58,3 +58,7 @@ depends = ["example:quickstart"]
 description = "Create a sandbox, exec a command, then destroy it using .env credentials"
 run = "pnpm exec tsx examples/sandboxes/quickstart.ts"
 
+[tasks."example:template"]
+description = "Create a sandbox from a template, then destroy it using .env credentials"
+run = "pnpm exec tsx examples/sandboxes/template.ts"
+

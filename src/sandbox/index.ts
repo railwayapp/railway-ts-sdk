@@ -1,5 +1,11 @@
 export { Sandbox } from "./sandbox.js";
-export { SandboxNotFoundError } from "./errors.js";
+export {
+  SandboxFailedError,
+  SandboxNotFoundError,
+  SandboxTemplateBuildError,
+  SandboxTimeoutError,
+} from "./errors.js";
+export type { SandboxTemplate } from "./template.js";
 export type {
   ConnectOptions,
   CreateOptions,
@@ -8,4 +14,5 @@ export type {
   ListOptions,
   SandboxInfo,
   SandboxStatus,
+  TemplateBuildOptions,
 } from "./types.js";

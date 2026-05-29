@@ -1,10 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { Sandbox, SandboxNotFoundError } from "../src/index.js";
+import {
+  Sandbox,
+  SandboxFailedError,
+  SandboxNotFoundError,
+  SandboxTemplateBuildError,
+  SandboxTimeoutError,
+} from "../src/index.js";
+import { compileSandboxTemplate } from "../src/sandbox/template.js";
 import {
   clearRailwayEnv,
   createFetchMock,
+  manyResponses,
   sandboxInfo,
+  templateInfo,
   type FetchCall,
 } from "./test-helpers.js";
 
@@ -25,6 +34,11 @@ async function createWithDestroyMock(): Promise<{
   ]);
   const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch });
   return { sandbox, calls: mock.calls };
+}
+
+function silenceExpectedRejection<T>(promise: Promise<T>): Promise<T> {
+  promise.catch(() => {});
+  return promise;
 }
 
 describe("Sandbox.create", () => {
@@ -100,17 +114,19 @@ describe("sandbox instance", () => {
   });
 
   it("refreshes status in place", async () => {
+    // create resolves at RUNNING (no poll), so the next response is the refresh read.
     const mock = createFetchMock([
-      { data: { sandboxCreate: sandboxInfo({ status: "CREATING" }) } },
-      { data: { sandbox: sandboxInfo({ status: "RUNNING" }) } },
+      { data: { sandboxCreate: sandboxInfo() } },
+      { data: { sandbox: sandboxInfo({ status: "DESTROYING" }) } },
     ]);
 
     const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch });
-    expect(sandbox.status).toBe("CREATING");
+    expect(sandbox.status).toBe("RUNNING");
 
     await sandbox.refresh();
 
-    expect(sandbox.status).toBe("RUNNING");
+    expect(sandbox.status).toBe("DESTROYING");
+    expect(mock.calls).toHaveLength(2);
     expect(mock.calls[1]?.body.query).toContain("query RailwaySandbox");
     expect(mock.calls[1]?.body.variables).toEqual({
       id: "sandbox_123",
@@ -175,6 +191,197 @@ describe("Sandbox.list", () => {
     expect(mock.calls[0]?.body.variables).toEqual({
       environmentId: "environment_123",
       first: 50,
+    });
+  });
+});
+
+describe("Sandbox.create readiness", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("polls until the sandbox is RUNNING", async () => {
+    const mock = createFetchMock([
+      { data: { sandboxCreate: sandboxInfo({ status: "CREATING" }) } },
+      { data: { sandbox: sandboxInfo({ status: "CREATING" }) } },
+      { data: { sandbox: sandboxInfo({ status: "RUNNING" }) } },
+    ]);
+
+    const promise = Sandbox.create({ ...auth, fetch: mock.fetch });
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    const sandbox = await promise;
+
+    expect(sandbox.status).toBe("RUNNING");
+    expect(mock.calls).toHaveLength(3);
+    expect(mock.calls[0]?.body.query).toContain("mutation RailwaySandboxCreate");
+    expect(mock.calls[1]?.body.query).toContain("query RailwaySandbox");
+    expect(mock.calls[2]?.body.query).toContain("query RailwaySandbox");
+  });
+
+  it("throws SandboxFailedError on a terminal state", async () => {
+    const mock = createFetchMock([
+      { data: { sandboxCreate: sandboxInfo({ status: "CREATING" }) } },
+      { data: { sandbox: sandboxInfo({ status: "FAILED" }) } },
+    ]);
+
+    const promise = silenceExpectedRejection(
+      Sandbox.create({ ...auth, fetch: mock.fetch }),
+    );
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+
+    await expect(promise).rejects.toBeInstanceOf(SandboxFailedError);
+  });
+
+  it("throws SandboxTimeoutError after the readiness timeout", async () => {
+    const mock = createFetchMock([
+      { data: { sandboxCreate: sandboxInfo({ status: "CREATING" }) } },
+      ...manyResponses(200, { data: { sandbox: sandboxInfo({ status: "CREATING" }) } }),
+    ]);
+
+    const promise = silenceExpectedRejection(
+      Sandbox.create({ ...auth, fetch: mock.fetch }),
+    );
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+
+    await expect(promise).rejects.toBeInstanceOf(SandboxTimeoutError);
+  });
+});
+
+describe("SandboxTemplate", () => {
+  it("builders return new immutable instances", () => {
+    const base = Sandbox.template();
+    const withRun = base.run("echo hi");
+
+    expect(withRun).not.toBe(base);
+    expect(compileSandboxTemplate(base)).toEqual([]);
+    expect(compileSandboxTemplate(withRun)).toEqual(["echo hi"]);
+  });
+
+  it("folds env + workdir into each subsequent command", () => {
+    const tpl = Sandbox.template()
+      .withEnv({ K: "v" })
+      .workdir("/app")
+      .run("npm install");
+
+    expect(compileSandboxTemplate(tpl)).toEqual([
+      "export K='v' && mkdir -p '/app' && cd '/app' && npm install",
+    ]);
+  });
+
+  it("compiles withPackages to an apt install", () => {
+    expect(
+      compileSandboxTemplate(Sandbox.template().withPackages("ffmpeg", "git")),
+    ).toEqual([
+      "apt-get update && apt-get install -y --no-install-recommends ffmpeg git",
+    ]);
+  });
+
+  it("escapes shell-special env values", () => {
+    expect(
+      compileSandboxTemplate(
+        Sandbox.template().withEnv({ MSG: "a'b c" }).run("echo $MSG"),
+      ),
+    ).toEqual([`export MSG='a'\\''b c' && echo $MSG`]);
+  });
+});
+
+describe("SandboxTemplate.build", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("resolves immediately when the template is already READY", async () => {
+    const mock = createFetchMock([
+      { data: { sandboxTemplateBuild: templateInfo({ status: "READY" }) } },
+    ]);
+
+    const base = Sandbox.template().withPackages("ffmpeg");
+    const built = await base.build({ ...auth, fetch: mock.fetch });
+
+    expect(built).toBe(base);
+    expect(mock.calls).toHaveLength(1);
+    expect(mock.calls[0]?.body.query).toContain("mutation RailwaySandboxTemplateBuild");
+    expect(mock.calls[0]?.body.variables).toEqual({
+      environmentId: "environment_123",
+      input: {
+        instructions: [
+          "apt-get update && apt-get install -y --no-install-recommends ffmpeg",
+        ],
+      },
+    });
+  });
+
+  it("polls a template build until READY", async () => {
+    const mock = createFetchMock([
+      { data: { sandboxTemplateBuild: templateInfo({ status: "BUILDING" }) } },
+      { data: { sandboxTemplate: templateInfo({ status: "BUILDING" }) } },
+      { data: { sandboxTemplate: templateInfo({ status: "READY" }) } },
+    ]);
+
+    const promise = Sandbox.template()
+      .run("echo hi")
+      .build({ ...auth, fetch: mock.fetch });
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    await promise;
+
+    expect(mock.calls).toHaveLength(3);
+    expect(mock.calls[1]?.body.query).toContain("query RailwaySandboxTemplate");
+    expect(mock.calls[2]?.body.query).toContain("query RailwaySandboxTemplate");
+  });
+
+  it("throws SandboxTemplateBuildError on FAILED", async () => {
+    const mock = createFetchMock([
+      { data: { sandboxTemplateBuild: templateInfo({ status: "BUILDING" }) } },
+      { data: { sandboxTemplate: templateInfo({ status: "FAILED" }) } },
+    ]);
+
+    const promise = silenceExpectedRejection(
+      Sandbox.template().run("false").build({ ...auth, fetch: mock.fetch }),
+    );
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+
+    await expect(promise).rejects.toBeInstanceOf(SandboxTemplateBuildError);
+  });
+
+  it("throws SandboxTimeoutError after the readiness timeout", async () => {
+    const mock = createFetchMock([
+      { data: { sandboxTemplateBuild: templateInfo({ status: "BUILDING" }) } },
+      ...manyResponses(200, {
+        data: { sandboxTemplate: templateInfo({ status: "BUILDING" }) },
+      }),
+    ]);
+
+    const promise = silenceExpectedRejection(
+      Sandbox.template().run("sleep 1").build({ ...auth, fetch: mock.fetch }),
+    );
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+
+    await expect(promise).rejects.toBeInstanceOf(SandboxTimeoutError);
+  });
+});
+
+describe("Sandbox.create(template)", () => {
+  it("builds then forks, resolving at RUNNING", async () => {
+    const mock = createFetchMock([
+      { data: { sandboxTemplateBuild: templateInfo({ status: "READY" }) } },
+      { data: { sandboxCreate: sandboxInfo() } },
+    ]);
+
+    const base = Sandbox.template().withPackages("ffmpeg").workdir("/app").run("true");
+    const sandbox = await Sandbox.create(base, { ...auth, fetch: mock.fetch });
+
+    expect(sandbox.status).toBe("RUNNING");
+    expect(mock.calls).toHaveLength(2);
+    expect(mock.calls[0]?.body.query).toContain("mutation RailwaySandboxTemplateBuild");
+    expect(mock.calls[1]?.body.query).toContain("mutation RailwaySandboxCreate");
+    expect(mock.calls[1]?.body.variables).toMatchObject({
+      input: {
+        environmentId: "environment_123",
+        template: {
+          instructions: [
+            "apt-get update && apt-get install -y --no-install-recommends ffmpeg",
+            "mkdir -p '/app' && cd '/app' && true",
+          ],
+        },
+      },
     });
   });
 });

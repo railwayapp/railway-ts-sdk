@@ -185,27 +185,31 @@ Planned surface: `read` / `readText` / `write` / `list` / `info` / `exists` /
 
 ---
 
-## 9. Templates: reusable bases _(future)_
+## 9. Templates: reusable bases
 
 The centerpiece of the vision. You rarely want a blank box — you want _your_
 environment (a runtime, system packages, your code) and you want to stamp sandboxes
 from it instantly.
 
 A `SandboxTemplate` is a **fluent, immutable recipe**. Every step returns a new
-template, so a base can branch into variants without mutation surprises.
+template, so a base can branch into variants without mutation surprises. It is sent to
+Railway only when you build it or create a sandbox from it.
 
 ```ts
-// FUTURE
-const base = Sandbox.template("node:20")
+const base = Sandbox.template()
   .withPackages("build-essential", "ffmpeg")
   .workdir("/app");
 
 const withUv = base.run("pip install uv"); // branches; `base` is untouched
+
+const sandbox = await Sandbox.create(base);
 ```
 
-Node-first sugar (`withNode`, `withPython`, `withPackages`, `withEnv`, `workdir`,
-`copy`) keeps the common case to one line; `.run("…")` is the raw escape hatch for any
-build step; `.toDockerfile()` prints exactly what will be built, for transparency.
+Available today: `.run("…")` (the raw escape hatch), `.withPackages(…)`,
+`.withEnv(…)`, `.workdir(…)`, and `template.build()`. Builds run server-side on the
+default base image, content-addressed and cached. Reserved for later: custom base
+images (`Sandbox.template("node:20")`), more node-first sugar (`withNode`,
+`withPython`, `copy`), and `.toDockerfile()` transparency.
 
 > The types are named `SandboxTemplate` / `SandboxBase` — never a bare `Template` —
 > because the broader `railway` SDK will also wrap Railway's project-template system,
@@ -219,17 +223,18 @@ One verb covers every way to start a sandbox. `create()` with no source is the b
 box; `create(source)` starts from a reusable base.
 
 ```ts
+const fromTemplate = await Sandbox.create(base);
+
 // FUTURE
-const fromTemplate = await Sandbox.create(base);                 // a SandboxTemplate value
-const forked = await sandbox.fork();                             // == Sandbox.create(sandbox)
-const fromImage = await Sandbox.create({ image: "ubuntu:24.04" }); // an explicit registry image
+const forked = await sandbox.fork(); // equivalent to Sandbox.create(sandbox)
+const fromImage = await Sandbox.create({ image: "ubuntu:24.04" });
 ```
 
-`create` accepts a `SandboxTemplate` or a running `Sandbox` as a **value**, or an
-explicit `{ image }` object. There is no bare-string source, so there is never any
-guessing between "a base name" and "an image tag" — the source's type says what it is.
-`sandbox.fork()` is sugar for `Sandbox.create(this)`, giving the live-environment fork
-its own obvious home.
+Today, `create` accepts a `SandboxTemplate`. Future sources are a running `Sandbox`
+value or an explicit `{ image }` object. There is no bare-string source, so there is
+never any guessing between "a base name" and "an image tag" — the source's type says
+what it is. `sandbox.fork()` is sugar for `Sandbox.create(this)`, giving the
+live-environment fork its own obvious home.
 
 ---
 
@@ -268,6 +273,9 @@ All SDK errors extend `RailwayError`:
 | `RailwayAuthError` | A required credential (`token` / `environmentId`) could not be resolved. Carries `.variable`. |
 | `RailwayGraphQLError` | The Railway API returned an error. Carries `.status`, `.errors`, `.responseBody`. |
 | `SandboxNotFoundError` | `connect` / `refresh` could not find the sandbox in the environment. Carries `.id`, `.environmentId`. |
+| `SandboxFailedError` | A sandbox reached a terminal state (`FAILED`, `DESTROYING`, or `DESTROYED`) before becoming `RUNNING` during `create`. Carries `.id`, `.status`. |
+| `SandboxTemplateBuildError` | A template build finished `FAILED`. Carries `.templateId`, `.environmentId`. |
+| `SandboxTimeoutError` | A readiness wait (template → `READY` or sandbox → `RUNNING`) exceeded the 5-minute timeout. Carries `.resource`, `.id`, `.lastStatus`, `.timeoutMs`. |
 | `SandboxFileNotFoundError` / `SandboxFileTooLargeError` _(future)_ | File operations. |
 
 ---
@@ -285,7 +293,7 @@ that shipping it flips on a network call — never a breaking type change.
 | Env-resolved config + `RailwayAuthError` | **Live** |
 | `Sandbox.connect(id)` / `Sandbox.list()` / `sandbox.refresh()` | **Live** |
 | `sandbox.files.*` | Future |
-| `Sandbox.template()` / `SandboxTemplate` / `create(template)` | Future |
+| `Sandbox.template()` / `SandboxTemplate` / `create(template)` | **Live** |
 | `sandbox.fork()` / `create(sandbox)` / `create({ image })` | Future |
 | `sandbox.expose(port)` / `unexpose` / `exposedPorts` | Future |
 | `exec` streaming (`{ stream }`) and background (`{ background }`) | Future |
@@ -302,6 +310,9 @@ import {
   RailwayAuthError,
   RailwayGraphQLError,
   SandboxNotFoundError,
+  SandboxFailedError,
+  SandboxTemplateBuildError,
+  SandboxTimeoutError,
   DEFAULT_RAILWAY_GRAPHQL_ENDPOINT,
   type CreateOptions,
   type ConnectOptions,
@@ -310,6 +321,8 @@ import {
   type ExecResult,
   type SandboxInfo,
   type SandboxStatus,
+  type SandboxTemplate,
+  type TemplateBuildOptions,
   type RailwayClientConfig,
   type RailwayGraphQLErrorItem,
 } from "railway";
@@ -317,9 +330,11 @@ import {
 
 ```ts
 class Sandbox {
+  static create(template: SandboxTemplate, options?: CreateOptions): Promise<Sandbox>;
   static create(options?: CreateOptions): Promise<Sandbox>;
   static connect(id: string, options?: ConnectOptions): Promise<Sandbox>;
   static list(options?: ListOptions): Promise<SandboxInfo[]>;
+  static template(): SandboxTemplate;
 
   readonly id: string;
   readonly status: SandboxStatus;
@@ -333,5 +348,13 @@ class Sandbox {
   refresh(): Promise<this>;
   [Symbol.asyncDispose](): Promise<void>;
   toJSON(): SandboxInfo;
+}
+
+interface SandboxTemplate {
+  run(command: string): SandboxTemplate;
+  withPackages(...packages: string[]): SandboxTemplate;
+  withEnv(vars: Record<string, string>): SandboxTemplate;
+  workdir(dir: string): SandboxTemplate;
+  build(options?: TemplateBuildOptions): Promise<SandboxTemplate>;
 }
 ```
