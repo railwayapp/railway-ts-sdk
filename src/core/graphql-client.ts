@@ -6,6 +6,7 @@ import {
   RailwayGraphQLError,
   type RailwayGraphQLErrorItem,
 } from "./errors.js";
+import { USER_AGENT } from "./version.js";
 
 interface GraphQLResponse<TResult> {
   data?: TResult;
@@ -23,6 +24,7 @@ export async function requestGraphQL<TResult, TVariables>(
       Accept: "application/json",
       Authorization: `Bearer ${config.token}`,
       "Content-Type": "application/json",
+      "User-Agent": USER_AGENT,
     },
     body: JSON.stringify({
       query: print(document as DocumentNode),
