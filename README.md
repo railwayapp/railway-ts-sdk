@@ -11,9 +11,6 @@ TypeScript SDK for Railway. Create sandboxes, run commands in them, and tear the
 npm install railway
 ```
 
-Requires Node.js 22+ (for `await using`). Works in any runtime with `fetch`; pass a
-`fetch` implementation explicitly where there is no global.
-
 ## Quick start
 
 ```ts
@@ -28,21 +25,19 @@ console.log(stdout);
 await sandbox.destroy();
 ```
 
-`Sandbox` _is_ the sandbox — there is no separate client, and the constructor is
-private. A sandbox always comes from somewhere:
+Sandboxes come from static factory methods:
 
-- `Sandbox.create(options?)` — provision a new sandbox.
-- `Sandbox.create(template, options?)` — provision from a reusable template (see [Templates](#templates)).
-- `Sandbox.connect(id, options?)` — reattach to an existing sandbox by id.
-- `Sandbox.list(options?)` — list sandboxes in the environment.
+- `Sandbox.create(options?)`: provision a new sandbox.
+- `Sandbox.create(template, options?)`: provision from a template (see [Templates](#templates)).
+- `Sandbox.connect(id, options?)`: reattach to an existing sandbox by id.
+- `Sandbox.list(options?)`: list sandboxes in the environment.
 
-`create` resolves only once the sandbox is `RUNNING`, so the sandbox you receive is
-ready to `exec` against — there is no readiness wait to manage yourself.
+`create` resolves once the sandbox is `RUNNING`, so it is ready to `exec` against.
 
 ## Running commands
 
 `exec` runs a command to completion and returns its result. It does not throw on a
-non-zero exit code — inspect `exitCode` instead.
+non-zero exit code; inspect `exitCode` instead.
 
 ```ts
 const result = await sandbox.exec("npm run build", { timeoutSec: 120 });
@@ -101,34 +96,31 @@ const sandbox = await Sandbox.create(base);
 await sandbox.exec("ffmpeg -version");
 ```
 
-A `SandboxTemplate` is a **fluent, immutable recipe** — every step returns a new
-template, so a base can branch into variants without mutation surprises. It is sent to
+A `SandboxTemplate` is immutable: every method returns a new template. It is sent to
 Railway only when you build it or create a sandbox from it.
 
-- `.run(command)` — a raw build step.
-- `.withPackages(...names)` — install Debian packages.
-- `.withEnv({ KEY: "value" })` — set environment variables for later steps.
-- `.workdir(dir)` — set the working directory for later steps.
-- `.build(options?)` — build the template ahead of time, so later `create` calls can
+- `.run(command)`: a raw build step.
+- `.withPackages(...names)`: install Debian packages.
+- `.withEnv({ KEY: "value" })`: set environment variables for later steps.
+- `.workdir(dir)`: set the working directory for later steps.
+- `.build(options?)`: build the template ahead of time, so later `create` calls can
   fork from the cached build. `Sandbox.create(template)` builds for you, so this is
   only needed to pre-warm.
 
-Obtain a template with `Sandbox.template()`; the constructor is private. Building throws
-`SandboxTemplateBuildError` on a failed build and `SandboxTimeoutError` if readiness
-exceeds the 5-minute timeout.
+Create a template with `Sandbox.template()`. Building throws `SandboxTemplateBuildError`
+on failure and `SandboxTimeoutError` if it exceeds the 5-minute timeout.
 
 ## Configuration
 
 `token`, `environmentId`, and `endpoint` each resolve in order: an explicit option,
-then an environment variable, then a default. Pass explicit values to override —
-including reading from a non-standard variable yourself.
+then an environment variable, then a default. Pass explicit values to override.
 
 | Option | Environment variable | Default |
 | --- | --- | --- |
 | `token` | `RAILWAY_API_TOKEN` | _(required)_ |
 | `environmentId` | `RAILWAY_ENVIRONMENT_ID` | _(required)_ |
 | `endpoint` | `RAILWAY_GRAPHQL_ENDPOINT` | `https://backboard.railway.com/graphql/v2` |
-| `fetch` | — | `globalThis.fetch` |
+| `fetch` | n/a | `globalThis.fetch` |
 
 ```ts
 const sandbox = await Sandbox.create({
@@ -140,26 +132,31 @@ const sandbox = await Sandbox.create({
 ```
 
 Environment variables are read only where a runtime exposes them, so the SDK is safe to
-import in the browser and edge runtimes — provide credentials explicitly there.
+import in the browser and edge runtimes; provide credentials explicitly there.
 
 ## Errors
 
 All errors extend `RailwayError`:
 
-- `RailwayAuthError` — a required credential (`token` / `environmentId`) could not be
+- `RailwayAuthError`: a required credential (`token` / `environmentId`) could not be
   resolved. Names the missing variable on `.variable`.
-- `RailwayGraphQLError` — the Railway API returned an error. Carries `.status`,
+- `RailwayGraphQLError`: the Railway API returned an error. Carries `.status`,
   `.errors`, and `.responseBody`.
-- `SandboxNotFoundError` — `connect` or `refresh` could not find the sandbox. Carries
+- `SandboxNotFoundError`: `connect` or `refresh` could not find the sandbox. Carries
   `.id` and `.environmentId`.
-- `SandboxFailedError` — a sandbox reached a terminal state (`FAILED`, `DESTROYING`,
+- `SandboxFailedError`: a sandbox reached a terminal state (`FAILED`, `DESTROYING`,
   or `DESTROYED`) before becoming `RUNNING` during `create`. Carries `.id` and
   `.status`.
-- `SandboxTemplateBuildError` — a template build finished `FAILED`. Carries
+- `SandboxTemplateBuildError`: a template build finished `FAILED`. Carries
   `.templateId` and `.environmentId`.
-- `SandboxTimeoutError` — a readiness wait (template → `READY` or sandbox → `RUNNING`)
+- `SandboxTimeoutError`: a readiness wait (template → `READY` or sandbox → `RUNNING`)
   exceeded the 5-minute timeout. Carries `.resource`, `.id`, `.lastStatus`, and
   `.timeoutMs`.
+
+## Requirements
+
+Node.js 22+ (for `await using`). Works in any runtime with a global `fetch`; pass a
+`fetch` implementation explicitly where there is none.
 
 ## License
 
