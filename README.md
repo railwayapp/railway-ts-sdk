@@ -4,6 +4,7 @@ TypeScript SDK for Railway. Create sandboxes, run commands in them, and tear the
 
 [![npm version](https://img.shields.io/npm/v/railway.svg)](https://www.npmjs.com/package/railway)
 [![license](https://img.shields.io/npm/l/railway.svg)](./LICENSE)
+[![CI](https://github.com/railwayapp/railway-ts-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/railwayapp/railway-ts-sdk/actions/workflows/ci.yml)
 
 ## Quick start
 
