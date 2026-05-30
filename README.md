@@ -5,13 +5,25 @@ TypeScript SDK for Railway. Create sandboxes, run commands in them, and tear the
 [![npm version](https://img.shields.io/npm/v/railway.svg)](https://www.npmjs.com/package/railway)
 [![license](https://img.shields.io/npm/l/railway.svg)](./LICENSE)
 
+## Quick start
+
+Scaffold a new project with the SDK preconfigured:
+
+```bash
+bun create railway
+# or: npm create railway@latest · pnpm create railway · yarn create railway
+```
+
+This generates a TypeScript project with starter code, a `.env.example` for your
+credentials, and reference docs for AI coding assistants.
+
 ## Installation
+
+To add the SDK to an existing project:
 
 ```bash
 npm install railway
 ```
-
-## Quick start
 
 ```ts
 import { Sandbox } from "railway";
