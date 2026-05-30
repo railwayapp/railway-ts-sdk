@@ -10,8 +10,7 @@ TypeScript SDK for Railway. Create sandboxes, run commands in them, and tear the
 Scaffold a new project with the SDK preconfigured:
 
 ```bash
-bun create railway
-# or: npm create railway@latest · pnpm create railway · yarn create railway
+bun create railway@latest
 ```
 
 This generates a TypeScript project with starter code, a `.env.example` for your
@@ -22,7 +21,7 @@ credentials, and reference docs for AI coding assistants.
 To add the SDK to an existing project:
 
 ```bash
-npm install railway
+bun add railway
 ```
 
 ```ts
