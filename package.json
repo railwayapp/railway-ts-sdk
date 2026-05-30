@@ -1,6 +1,6 @@
 {
   "name": "railway",
-  "version": "3.0.1",
+  "version": "3.0.3",
   "description": "TypeScript SDK for Railway.",
   "type": "module",
   "license": "MIT",
