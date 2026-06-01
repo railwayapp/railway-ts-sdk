@@ -8,7 +8,7 @@ import type { EnvironmentConfig } from "./schema.js";
 import type { RailwayAuthType } from "../core/config.js";
 
 export interface RailwayIacRunnerRequest {
-  command?: "evaluate" | "typegen" | "plan" | "stage" | "apply";
+  command?: "evaluate" | "typegen" | "current" | "plan" | "stage" | "apply";
   cwd?: string;
   file?: string;
   includeTypes?: boolean;
@@ -49,6 +49,18 @@ export interface RailwayIacTypegenResponse {
   diagnostics: RailwayIacRunnerDiagnostic[];
 }
 
+export interface RailwayIacCurrentResponse {
+  ok: boolean;
+  command: "current";
+  file: string;
+  mode: "real";
+  currentGraph?: RailwayGraph;
+  currentConfig?: EnvironmentConfig;
+  currentEnvironment?: Omit<CurrentEnvironmentResult, "config">;
+  graphTypes?: string;
+  diagnostics: RailwayIacRunnerDiagnostic[];
+}
+
 export interface RailwayIacPlanResponse {
   ok: boolean;
   command: "plan";
@@ -76,7 +88,7 @@ export interface RailwayIacApplyResponse extends Omit<RailwayIacStageResponse, "
   stagedPatchId?: string;
 }
 
-export type RailwayIacRunnerResponse = RailwayIacEvaluateResponse | RailwayIacTypegenResponse | RailwayIacPlanResponse | RailwayIacStageResponse | RailwayIacApplyResponse;
+export type RailwayIacRunnerResponse = RailwayIacEvaluateResponse | RailwayIacTypegenResponse | RailwayIacCurrentResponse | RailwayIacPlanResponse | RailwayIacStageResponse | RailwayIacApplyResponse;
 
 export async function runRailwayIac(request: RailwayIacRunnerRequest = {}): Promise<RailwayIacRunnerResponse> {
   const command = request.command ?? "evaluate";
@@ -108,6 +120,8 @@ export async function runRailwayIac(request: RailwayIacRunnerRequest = {}): Prom
       };
     }
 
+    if (command === "current") return await currentRailwayIac({ file: evaluated.file, desiredGraph: evaluated.graph, request, diagnostics });
+
     const planned = await planRailwayIac({ file: evaluated.file, desiredGraph: evaluated.graph, request, diagnostics });
     if (command === "plan") return planned;
 
@@ -132,12 +146,45 @@ export async function runRailwayIac(request: RailwayIacRunnerRequest = {}): Prom
   } catch (error) {
     return {
       ok: false,
-      command: command === "apply" ? "apply" : command === "stage" ? "stage" : command === "plan" ? "plan" : command === "typegen" ? "typegen" : "evaluate",
+      command: command === "apply" ? "apply" : command === "stage" ? "stage" : command === "plan" ? "plan" : command === "current" ? "current" : command === "typegen" ? "typegen" : "evaluate",
       file,
-      ...(command === "plan" || command === "stage" ? { mode: "real" as const } : {}),
+      ...(command === "plan" || command === "stage" || command === "current" ? { mode: "real" as const } : {}),
       diagnostics: [{ severity: "error", path: "", message: error instanceof Error ? error.message : String(error) }],
     } as RailwayIacRunnerResponse;
   }
+}
+
+async function currentRailwayIac({ file, desiredGraph, request, diagnostics }: {
+  file: string;
+  desiredGraph: RailwayGraph;
+  request: RailwayIacRunnerRequest;
+  diagnostics: RailwayIacRunnerDiagnostic[];
+}): Promise<RailwayIacCurrentResponse> {
+  const context = requireBackboardContext(request.backboard, "plan");
+  const client = new IacClient(clientConfig(context));
+  const current = await client.getCurrentEnvironment(
+    context.environmentId,
+    context.decryptVariables === undefined ? {} : { decryptVariables: context.decryptVariables },
+  );
+  const currentGraph = environmentConfigToGraph(current.config, {
+    projectName: current.projectName ?? desiredGraph.project.name,
+    serviceNamesById: current.serviceNamesById,
+    bucketNamesById: current.bucketNamesById,
+    customDomainsByServiceId: current.customDomainsByServiceId,
+  });
+  const { config: _config, ...currentEnvironment } = current;
+
+  return {
+    ok: diagnostics.every(diagnostic => diagnostic.severity !== "error"),
+    command: "current",
+    file,
+    mode: "real",
+    currentGraph,
+    currentConfig: current.config,
+    currentEnvironment,
+    ...(request.includeTypes ? { graphTypes: renderRailwayGraphTypes(currentGraph) } : {}),
+    diagnostics,
+  };
 }
 
 async function planRailwayIac({ file, desiredGraph, request, diagnostics }: {

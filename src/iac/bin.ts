@@ -12,8 +12,17 @@ async function main() {
   const response = await runRailwayIac(request);
   const pretty = request.pretty ?? true;
 
-  process.stdout.write(`${JSON.stringify(response, null, pretty ? 2 : 0)}\n`);
-  process.exit(response.ok ? 0 : 1);
+  await writeStdout(`${JSON.stringify(response, null, pretty ? 2 : 0)}\n`);
+  process.exitCode = response.ok ? 0 : 1;
+}
+
+async function writeStdout(payload: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    process.stdout.write(payload, error => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
 }
 
 async function readRequest(argv: string[]): Promise<RailwayIacRunnerRequest> {
@@ -37,7 +46,7 @@ function parseArgs(argv: string[]): RailwayIacRunnerRequest {
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]!;
-    if (arg === "evaluate" || arg === "typegen" || arg === "plan" || arg === "stage") {
+    if (arg === "evaluate" || arg === "typegen" || arg === "current" || arg === "plan" || arg === "stage" || arg === "apply") {
       parsed.command = arg;
       continue;
     }
@@ -83,6 +92,11 @@ function parseArgs(argv: string[]): RailwayIacRunnerRequest {
     if (arg === "--token") {
       const token = argv[++i];
       if (token) backboard.token = token;
+      continue;
+    }
+    if (arg === "--auth-type") {
+      const authType = argv[++i];
+      if (authType === "bearer" || authType === "project-token") backboard.authType = authType;
       continue;
     }
     if (arg === "--project-id") {
