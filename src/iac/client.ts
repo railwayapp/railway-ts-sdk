@@ -19,6 +19,7 @@ export interface CurrentEnvironmentResult {
   config: EnvironmentConfig;
   serviceNamesById: Record<string, string>;
   bucketNamesById: Record<string, string>;
+  customDomainsByServiceId: Record<string, Record<string, { port?: number }>>;
 }
 
 export interface StagedPatchResult {
@@ -26,6 +27,29 @@ export interface StagedPatchResult {
   status: string;
   patch: EnvironmentConfig;
   meta?: unknown;
+}
+
+export interface ChangeOperationResult {
+  kind: string;
+  path?: string | null;
+  summary?: string | null;
+  status: string;
+  outputs?: unknown;
+}
+
+export interface ChangeSetPreviewResult {
+  changeSet: RailwayChangeSet;
+  diagnostics: unknown[];
+  effects: unknown[];
+}
+
+export interface ChangeSetApplyResult {
+  id: string;
+  status: string;
+  changes: ChangeOperationResult[];
+  diagnostics: unknown[];
+  deploymentId?: string | null;
+  stagedPatchId?: string | null;
 }
 
 export interface ProjectService { id: string; name: string }
@@ -54,6 +78,7 @@ export class IacClient {
 
     const services = data.environment.projectId ? await this.getProjectServices(data.environment.projectId) : [];
     const buckets = data.environment.projectId ? await this.getProjectBuckets(data.environment.projectId) : [];
+    const customDomainsByServiceId = data.environment.projectId ? await this.getEnvironmentCustomDomains(data.environment.projectId, environmentId, services) : {};
     return {
       projectId: data.environment.projectId,
       projectName: undefined,
@@ -62,6 +87,7 @@ export class IacClient {
       config: data.environment.config ?? {},
       serviceNamesById: Object.fromEntries(services.map(service => [service.id, service.name])),
       bucketNamesById: Object.fromEntries(buckets.map(bucket => [bucket.id, bucket.name])),
+      customDomainsByServiceId,
     };
   }
 
@@ -84,6 +110,16 @@ export class IacClient {
       project(id: $projectId) { buckets(first: 1000) { edges { node { id name } } } }
     }`, { projectId });
     return data.project.buckets.edges.map(edge => edge.node);
+  }
+
+  async getEnvironmentCustomDomains(projectId: string, environmentId: string, services: ProjectService[]): Promise<Record<string, Record<string, { port?: number }>>> {
+    const entries = await Promise.all(services.map(async service => {
+      const data = await gql<{ domains: { customDomains: Array<{ domain: string; targetPort?: number | null }> } }, { projectId: string; environmentId: string; serviceId: string }>(this.#config, `query IacServiceDomains($projectId: String!, $environmentId: String!, $serviceId: String!) {
+        domains(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId) { customDomains { domain targetPort } }
+      }`, { projectId, environmentId, serviceId: service.id }).catch(() => ({ domains: { customDomains: [] } }));
+      return [service.id, Object.fromEntries(data.domains.customDomains.map(domain => [domain.domain, domain.targetPort == null ? {} : { port: domain.targetPort }]))] as const;
+    }));
+    return Object.fromEntries(entries.filter(([, domains]) => Object.keys(domains).length > 0));
   }
 
   async ensureGraphResources({ projectId, environmentId, graph, currentConfig }: {
@@ -119,11 +155,20 @@ export class IacClient {
     return data.environmentStageChanges;
   }
 
-  async stageChangeSet({ environmentId, changeSet, merge = true }: { environmentId: string; changeSet: RailwayChangeSet; merge?: boolean }): Promise<{ id: string; patch: EnvironmentConfig }> {
-    const data = await gql<{ environmentStageChangeSet: { id: string; patch: EnvironmentConfig } }, { environmentId: string; input: RailwayChangeSet; merge: boolean }>(this.#config, `mutation IacStageChangeSet($environmentId: String!, $input: JSON!, $merge: Boolean) {
-      environmentStageChangeSet(environmentId: $environmentId, input: $input, merge: $merge) { id patch }
-    }`, { environmentId, input: changeSet, merge });
-    return data.environmentStageChangeSet;
+  async previewChangeSet({ environmentId, changeSet }: { environmentId: string; changeSet: RailwayChangeSet }): Promise<ChangeSetPreviewResult> {
+    const data = await gql<{ environmentPreviewChangeSet: ChangeSetPreviewResult }, { environmentId: string; input: RailwayChangeSet }>(this.#config, `mutation IacPreviewChangeSet($environmentId: String!, $input: JSON!) {
+      environmentPreviewChangeSet(environmentId: $environmentId, input: $input) { changeSet diagnostics effects }
+    }`, { environmentId, input: changeSet });
+    return data.environmentPreviewChangeSet;
+  }
+
+  async applyChangeSet({ environmentId, changeSet, commitMessage }: { environmentId: string; changeSet: RailwayChangeSet; commitMessage?: string }): Promise<ChangeSetApplyResult> {
+    const variables: { environmentId: string; input: RailwayChangeSet; commitMessage?: string } = { environmentId, input: changeSet };
+    if (commitMessage !== undefined) variables.commitMessage = commitMessage;
+    const data = await gql<{ environmentApplyChangeSet: ChangeSetApplyResult }, typeof variables>(this.#config, `mutation IacApplyChangeSet($environmentId: String!, $input: JSON!, $commitMessage: String) {
+      environmentApplyChangeSet(environmentId: $environmentId, input: $input, commitMessage: $commitMessage) { id status deploymentId stagedPatchId diagnostics changes { kind path summary status outputs } }
+    }`, variables);
+    return data.environmentApplyChangeSet;
   }
 
   async commitStagedPatch({ environmentId, message, skipDeploys }: { environmentId: string; message?: string; skipDeploys?: boolean }): Promise<string> {
