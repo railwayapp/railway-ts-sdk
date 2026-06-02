@@ -279,8 +279,10 @@ function diffTopLevelField({ previous, resource, field, changes }: { previous: R
   const before = (previous as unknown as Record<string, unknown>)[field];
   const after = (resource as unknown as Record<string, unknown>)[field];
   if (field === "source" && previous.type === "database" && isEquivalentDatabaseSource(previous, after)) return;
-  if (stableStringify(normalizeForDiff(field, before)) === stableStringify(normalizeForDiff(field, after))) return;
-  changes.push(update(resource.address, field, before, after, summaryForField(resource, field, before, after), changedLeafPaths(before, after, field)));
+  const normalizedBefore = normalizeForDiff(field, before);
+  const normalizedAfter = normalizeForDiff(field, after);
+  if (stableStringify(normalizedBefore) === stableStringify(normalizedAfter)) return;
+  changes.push(update(resource.address, field, before, after, summaryForField(resource, field, normalizedBefore, normalizedAfter), changedLeafPaths(normalizedBefore, normalizedAfter, field)));
 }
 
 function summaryForField(resource: ResourceNode, field: string, before: unknown, after: unknown): string {
