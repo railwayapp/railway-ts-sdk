@@ -19,7 +19,8 @@ export type RailwayChange =
   | DeleteResourceChange
   | UpdateResourceChange
   | SetVariableChange
-  | DeleteVariableChange;
+  | DeleteVariableChange
+  | CreateDomainChange;
 
 export interface ChangeBase {
   kind: string;
@@ -47,6 +48,7 @@ export interface UpdateResourceChange extends ChangeBase {
   field: string;
   before: unknown;
   after: unknown;
+  details?: string[];
 }
 
 export interface SetVariableChange extends ChangeBase {
@@ -55,6 +57,7 @@ export interface SetVariableChange extends ChangeBase {
   variable: string;
   before?: VariableValue | undefined;
   after: VariableValue;
+  details?: string[];
 }
 
 export interface DeleteVariableChange extends ChangeBase {
@@ -62,6 +65,13 @@ export interface DeleteVariableChange extends ChangeBase {
   address: ResourceAddress;
   variable: string;
   previous: VariableValue;
+}
+
+export interface CreateDomainChange extends ChangeBase {
+  kind: "domain.create";
+  address: ResourceAddress;
+  domain: string;
+  targetPort?: number;
 }
 
 export interface ChangeDiagnostic {
@@ -99,9 +109,10 @@ export function diffGraphs({ current, desired }: { current: RailwayGraph; desire
     diffTopLevelField({ previous, resource, field: "source", changes });
     diffTopLevelField({ previous, resource, field: "build", changes });
     diffTopLevelField({ previous, resource, field: "deploy", changes });
-    diffTopLevelField({ previous, resource, field: "networking", changes });
-    diffTopLevelField({ previous, resource, field: "volumeMounts", changes });
+    diffNetworking({ previous, resource, changes });
+    if (resource.type !== "database") diffTopLevelField({ previous, resource, field: "volumeMounts", changes });
     diffTopLevelField({ previous, resource, field: "config", changes });
+    if (resource.type === "database") diffTopLevelField({ previous, resource, field: "defaultMountPath", changes });
   }
 
   for (const resource of current.resources) {
@@ -137,6 +148,10 @@ export function changeSetToGraph({ current, changeSet }: { current: RailwayGraph
 
     const resource = resources.get(change.address);
     if (!resource) continue;
+
+    if (change.kind === "domain.create") {
+      continue;
+    }
 
     if (change.kind === "resource.update") {
       (resource as unknown as Record<string, unknown>)[change.field] = structuredClone(change.after);
@@ -203,7 +218,7 @@ function diffVariables({ previous, resource, changes, resourcesByAddress }: { pr
   const before = "variables" in previous ? previous.variables ?? {} : {};
   const after = "variables" in resource ? resource.variables ?? {} : {};
   for (const [key, value] of Object.entries(after)) {
-    if (isUnknownImportedVariable(before[key])) continue;
+    if (isPreservedVariable(value) || isUnknownImportedVariable(before[key])) continue;
     if (stableStringify(normalizeVariableForDiff(before[key], resourcesByAddress)) === stableStringify(normalizeVariableForDiff(value, resourcesByAddress))) continue;
     changes.push({
       kind: "variable.set",
@@ -213,6 +228,7 @@ function diffVariables({ previous, resource, changes, resourcesByAddress }: { pr
       after: value,
       path: `resources.${resource.address}.variables.${key}`,
       summary: `${before[key] ? "Update" : "Set"} variable ${resource.name}.${key}`,
+      details: [`${resource.name}.${key} (${formatVariableDiffValue(before[key], resourcesByAddress)} → ${formatVariableDiffValue(value, resourcesByAddress)})`],
       severity: "safe",
       deployEffect: "deploy",
     });
@@ -232,21 +248,108 @@ function diffVariables({ previous, resource, changes, resourcesByAddress }: { pr
   }
 }
 
+function diffNetworking({ previous, resource, changes }: { previous: ResourceNode; resource: ResourceNode; changes: RailwayChange[] }) {
+  const before = "networking" in previous ? previous.networking : undefined;
+  const after = "networking" in resource ? resource.networking : undefined;
+  const beforeDomains = before?.customDomains ?? {};
+  const afterDomains = after?.customDomains ?? {};
+
+  for (const [domain, config] of Object.entries(afterDomains)) {
+    if (beforeDomains[domain]) continue;
+    changes.push({
+      kind: "domain.create",
+      address: resource.address,
+      domain,
+      ...(config?.port !== undefined && config.port !== null ? { targetPort: config.port } : {}),
+      path: `resources.${resource.address}.domains.${domain}`,
+      summary: `Create custom domain ${resource.name}.${domain}`,
+      severity: "safe",
+      deployEffect: "none",
+    });
+  }
+
+  const normalizedBefore = normalizeForDiff("networking", { ...before, customDomains: undefined, serviceDomains: undefined });
+  const normalizedAfter = normalizeForDiff("networking", { ...after, customDomains: undefined, serviceDomains: undefined });
+  if (stableStringify(normalizedBefore) !== stableStringify(normalizedAfter)) {
+    changes.push(update(resource.address, "networking", before, after, `Update ${resource.name} networking`));
+  }
+}
+
 function diffTopLevelField({ previous, resource, field, changes }: { previous: ResourceNode; resource: ResourceNode; field: string; changes: RailwayChange[] }) {
   const before = (previous as unknown as Record<string, unknown>)[field];
   const after = (resource as unknown as Record<string, unknown>)[field];
   if (field === "source" && previous.type === "database" && isEquivalentDatabaseSource(previous, after)) return;
   if (stableStringify(normalizeForDiff(field, before)) === stableStringify(normalizeForDiff(field, after))) return;
-  changes.push(update(resource.address, field, before, after, `Update ${resource.name} ${field}`));
+  changes.push(update(resource.address, field, before, after, summaryForField(resource, field, before, after), changedLeafPaths(before, after, field)));
 }
 
-function update(address: ResourceAddress, field: string, before: unknown, after: unknown, summary: string): UpdateResourceChange {
+function summaryForField(resource: ResourceNode, field: string, before: unknown, after: unknown): string {
+  const details = changedLeafPaths(before, after, field);
+  if (details.length > 0) {
+    const shown = details.slice(0, 3).map(detailPathForSummary).join(", ");
+    const remaining = details.length - 3;
+    return `Update ${resource.name} ${shown}${remaining > 0 ? ` and ${remaining} more` : ""}`;
+  }
+
+  if (field === "networking") {
+    const beforeDomains = Object.keys(((before as { customDomains?: Record<string, unknown> } | undefined)?.customDomains) ?? {});
+    const afterDomains = Object.keys(((after as { customDomains?: Record<string, unknown> } | undefined)?.customDomains) ?? {});
+    const created = afterDomains.filter(domain => !beforeDomains.includes(domain));
+    if (created.length === 1) return `Create custom domain ${resource.name}.${created[0]}`;
+    if (created.length > 1) return `Create ${created.length} custom domains for ${resource.name}`;
+  }
+  return `Update ${resource.name} ${field}`;
+}
+
+function detailPathForSummary(detail: string): string {
+  return detail.replace(/ \(.+\)$/, "");
+}
+
+function changedLeafPaths(before: unknown, after: unknown, prefix: string): string[] {
+  const beforeFlat = flattenForDiff(before);
+  const afterFlat = flattenForDiff(after);
+  const changed = [...new Set([...Object.keys(beforeFlat), ...Object.keys(afterFlat)])]
+    .filter(key => stableStringify(beforeFlat[key]) !== stableStringify(afterFlat[key]))
+    .sort();
+  return changed
+    .filter(key => key !== "" || changed.length === 1)
+    .filter(key => key === "" || !changed.some(other => other !== key && other.startsWith(`${key}.`)))
+    .map(key => {
+      const path = key ? `${prefix}.${key}` : prefix;
+      const beforeValue = beforeFlat[key];
+      const afterValue = afterFlat[key];
+      return `${friendlyPath(path)} (${formatDiffValue(beforeValue)} → ${formatDiffValue(afterValue)})`;
+    });
+}
+
+function friendlyPath(path: string): string {
+  const region = /^deploy\.multiRegionConfig\.([^.]+)\.numReplicas$/.exec(path);
+  if (region) return `regions.${region[1]}`;
+  return path;
+}
+
+function formatDiffValue(value: unknown): string {
+  if (value === undefined) return "unset";
+  if (value === null) return "null";
+  if (typeof value === "string") return JSON.stringify(value);
+  return JSON.stringify(value);
+}
+
+function flattenForDiff(value: unknown, prefix = ""): Record<string, unknown> {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) return { [prefix]: value };
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length === 0) return { [prefix]: value };
+  return Object.fromEntries(entries.flatMap(([key, child]) => Object.entries(flattenForDiff(child, prefix ? `${prefix}.${key}` : key))));
+}
+
+function update(address: ResourceAddress, field: string, before: unknown, after: unknown, summary: string, details?: string[]): UpdateResourceChange {
   return {
     kind: "resource.update",
     address,
     field,
     before,
     after,
+    ...(details && details.length > 0 ? { details } : {}),
     path: `resources.${address}.${field}`,
     summary,
     severity: "safe",
@@ -255,9 +358,14 @@ function update(address: ResourceAddress, field: string, before: unknown, after:
 }
 
 function marker(change: RailwayChange): string {
-  if (change.kind === "resource.create") return "+";
+  if (change.kind === "resource.create" || change.kind === "domain.create") return "+";
   if (change.kind === "resource.delete") return "-";
   return "~";
+}
+
+function formatVariableDiffValue(value: VariableValue | undefined, resourcesByAddress: Map<ResourceAddress, ResourceNode>): string {
+  if (value === undefined) return "unset";
+  return formatDiffValue(normalizeVariableForDiff(value, resourcesByAddress));
 }
 
 function normalizeVariableForDiff(value: VariableValue | undefined, resourcesByAddress: Map<ResourceAddress, ResourceNode>): unknown {
@@ -270,6 +378,10 @@ function isEquivalentDatabaseSource(previous: ResourceNode, after: unknown): boo
   if (previous.type !== "database" || after == null || typeof after !== "object") return false;
   const source = after as Record<string, unknown>;
   return source.type === "image" && normalizeImageTag(String(source.image)) === normalizeImageTag(previous.image);
+}
+
+function isPreservedVariable(value: VariableValue | undefined): boolean {
+  return value?.type === "preserve";
 }
 
 function isUnknownImportedVariable(value: VariableValue | undefined): boolean {
@@ -294,9 +406,23 @@ function normalizeForDiff(field: string, value: unknown): unknown {
     if (copy.useLegacyStacker === false) delete copy.useLegacyStacker;
     if (copy.ipv6EgressEnabled === false) delete copy.ipv6EgressEnabled;
     if (copy.runtime === "V2") delete copy.runtime;
+    if (isDefaultMultiRegionConfig(copy.multiRegionConfig)) delete copy.multiRegionConfig;
   }
 
   return copy;
+}
+
+function isDefaultMultiRegionConfig(value: unknown): boolean {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) return false;
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length !== 1) return false;
+  const config = entries[0]?.[1];
+  if (config == null || typeof config !== "object" || Array.isArray(config)) return false;
+  const regionConfig = config as Record<string, unknown>;
+  return Object.entries(regionConfig).every(([key, child]) =>
+    (key === "numReplicas" && child === 1) ||
+    (key === "stackerAssignment" && child == null)
+  );
 }
 
 function normalizeImageTag(image: string): string {
