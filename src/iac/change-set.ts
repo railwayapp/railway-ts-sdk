@@ -365,6 +365,12 @@ function marker(change: RailwayChange): string {
 
 function formatVariableDiffValue(value: VariableValue | undefined, resourcesByAddress: Map<ResourceAddress, ResourceNode>): string {
   if (value === undefined) return "unset";
+  if (value.type === "preserve") return "preserve()";
+  if (value.type === "literal") return formatDiffValue(value.value);
+  if (value.type === "reference") {
+    const name = resourcesByAddress.get(value.resource)?.name ?? value.resource.split(".").slice(1).join(".") ?? value.resource;
+    return `${name}.${value.output}`;
+  }
   return formatDiffValue(normalizeVariableForDiff(value, resourcesByAddress));
 }
 
