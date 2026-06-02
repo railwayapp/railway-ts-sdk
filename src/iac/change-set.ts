@@ -110,7 +110,8 @@ export function diffGraphs({ current, desired }: { current: RailwayGraph; desire
     diffTopLevelField({ previous, resource, field: "build", changes });
     diffTopLevelField({ previous, resource, field: "deploy", changes });
     diffNetworking({ previous, resource, changes });
-    if (resource.type !== "database") diffTopLevelField({ previous, resource, field: "volumeMounts", changes });
+    // Volume lifecycle is not part of v0 authoring. Never plan an accidental unmount just
+    // because imported config omitted a Railway-owned volume id.
     diffTopLevelField({ previous, resource, field: "config", changes });
     if (resource.type === "database") diffTopLevelField({ previous, resource, field: "defaultMountPath", changes });
   }
@@ -402,6 +403,10 @@ function normalizeForDiff(field: string, value: unknown): unknown {
 
   if (field === "source") {
     if (copy.checkSuites === false) delete copy.checkSuites;
+    if (copy.branch === "main") delete copy.branch;
+    delete copy.commitSha;
+    delete copy.upstreamUrl;
+    if (copy.rootDirectory === "") delete copy.rootDirectory;
     if (typeof copy.image === "string") copy.image = normalizeImageTag(copy.image);
   }
 
@@ -434,7 +439,7 @@ function isDefaultMultiRegionConfig(value: unknown): boolean {
 }
 
 function normalizeImageTag(image: string): string {
-  const match = /^(redis|mysql|mongo|postgres):(\d+)(?:\.\d+)*$/.exec(image);
+  const match = /^(?:railwayapp\/|ghcr\.io\/railwayapp-templates\/)?(redis|mysql|mongo|postgres)(?:-ssl)?:(\d+)(?:\.\d+)*$/.exec(image);
   if (!match) return image;
   return `${match[1]}:${match[2]}`;
 }

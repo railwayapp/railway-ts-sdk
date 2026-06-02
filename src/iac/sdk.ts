@@ -82,6 +82,31 @@ export interface IntentServiceConfig {
 
 export type ServiceConfigInput = IntentServiceConfig;
 
+export type RailwayProvidedVariable =
+  | "RAILWAY_PUBLIC_DOMAIN"
+  | "RAILWAY_PRIVATE_DOMAIN"
+  | "RAILWAY_TCP_PROXY_DOMAIN"
+  | "RAILWAY_TCP_PROXY_PORT"
+  | "RAILWAY_DEPLOYMENT_ID"
+  | "RAILWAY_DEPLOYMENT_DRAINING_SECONDS"
+  | "RAILWAY_ENVIRONMENT"
+  | "RAILWAY_ENVIRONMENT_ID"
+  | "RAILWAY_PROJECT_ID"
+  | "RAILWAY_PROJECT_NAME"
+  | "RAILWAY_SERVICE_ID"
+  | "RAILWAY_SERVICE_NAME"
+  | "RAILWAY_REPLICA_ID"
+  | "PORT";
+
+export type PostgresVariable = RailwayProvidedVariable | "DATABASE_PUBLIC_URL" | "DATABASE_URL" | "PGDATA" | "PGDATABASE" | "PGHOST" | "PGPASSWORD" | "PGPORT" | "PGUSER" | "POSTGRES_DB" | "POSTGRES_PASSWORD" | "POSTGRES_USER" | "SSL_CERT_DAYS";
+export type RedisVariable = RailwayProvidedVariable | "REDIS_PASSWORD" | "REDIS_PUBLIC_URL" | "REDIS_URL" | "REDISHOST" | "REDISPASSWORD" | "REDISPORT" | "REDISUSER";
+export type MongoVariable = RailwayProvidedVariable | "MONGO_INITDB_ROOT_PASSWORD" | "MONGO_INITDB_ROOT_USERNAME" | "MONGO_PUBLIC_URL" | "MONGO_URL" | "MONGOHOST" | "MONGOPASSWORD" | "MONGOPORT" | "MONGOUSER";
+export type MySqlVariable = RailwayProvidedVariable | "MYSQL_DATABASE" | "MYSQL_PUBLIC_URL" | "MYSQL_ROOT_PASSWORD" | "MYSQL_URL" | "MYSQLDATABASE" | "MYSQLHOST" | "MYSQLPASSWORD" | "MYSQLPORT" | "MYSQLUSER";
+export type DatabaseVariable<E extends DatabaseNode["engine"]> = E extends "postgres" ? PostgresVariable : E extends "redis" ? RedisVariable : E extends "mongo" ? MongoVariable : E extends "mysql" ? MySqlVariable : RailwayProvidedVariable | string;
+export type ServiceVariableRef<K extends string = RailwayProvidedVariable | string> = { readonly [P in K]: VariableValue };
+export type ReferencableServiceNode<K extends string = RailwayProvidedVariable | string> = ServiceNode & { readonly env: ServiceVariableRef<K> };
+export type ReferencableDatabaseNode<E extends DatabaseNode["engine"]> = DatabaseNode & { readonly env: ServiceVariableRef<DatabaseVariable<E>> };
+
 export function github(repo: string, options: Omit<SourceConfig, "type" | "repo" | "image"> = {}): SourceConfig {
   return { type: "github", repo, branch: options.branch ?? "main", ...options };
 }
@@ -98,9 +123,9 @@ export function empty(): SourceConfig {
   return { type: "empty" };
 }
 
-export function service(name: string, config: ServiceConfigInput = {}): ServiceNode {
+export function service<const Env extends Record<string, string | VariableConfig | VariableValue> = {}>(name: string, config: Omit<ServiceConfigInput, "env" | "variables"> & { env?: Env; variables?: Env } = {}): ReferencableServiceNode<RailwayProvidedVariable | Extract<keyof Env, string>> {
   const source = normalizeSource(config.source, config.root ?? config.rootDirectory);
-  return pruneEmpty({
+  const node = pruneEmpty({
     address: resourceAddress("service", name) as `service.${string}`,
     type: "service",
     kind: source?.type === "github" ? "github" : source?.type === "image" ? "docker-image" : source?.type === "template" ? "template" : "empty",
@@ -118,13 +143,14 @@ export function service(name: string, config: ServiceConfigInput = {}): ServiceN
     ...(config.replicaConfig ? { replicaConfig: config.replicaConfig } : {}),
     ...(config.clusterDisplay ? { clusterDisplay: config.clusterDisplay } : {}),
   }) as ServiceNode;
+  return withVariableRefs(node) as ReferencableServiceNode<RailwayProvidedVariable | Extract<keyof Env, string>>;
 }
 
-export function fn(name: string, config: ServiceConfigInput = {}): ServiceNode {
-  return { ...service(name, config), kind: "function" };
+export function fn<const Env extends Record<string, string | VariableConfig | VariableValue> = {}>(name: string, config: Omit<ServiceConfigInput, "env" | "variables"> & { env?: Env; variables?: Env } = {}): ReferencableServiceNode<RailwayProvidedVariable | Extract<keyof Env, string>> {
+  return withVariableRefs({ ...service(name, config), kind: "function" } as ServiceNode) as ReferencableServiceNode<RailwayProvidedVariable | Extract<keyof Env, string>>;
 }
 
-export function postgres(name: string): DatabaseNode & { url: () => VariableValue } {
+export function postgres(name: string): ReferencableDatabaseNode<"postgres"> {
   return database(name, "postgres", {
     image: "ghcr.io/railwayapp-templates/postgres-ssl:18",
     output: "DATABASE_URL",
@@ -132,25 +158,25 @@ export function postgres(name: string): DatabaseNode & { url: () => VariableValu
   });
 }
 
-export function mysql(name: string): DatabaseNode & { url: () => VariableValue } {
+export function mysql(name: string): ReferencableDatabaseNode<"mysql"> {
   return database(name, "mysql", { image: "mysql:9", output: "MYSQL_URL", defaultMountPath: "/var/lib/mysql" });
 }
 
-export function redis(name: string): DatabaseNode & { url: () => VariableValue } {
-  return database(name, "redis", { image: "redis:8", output: "REDIS_URL", defaultMountPath: "/data" });
+export function redis(name: string): ReferencableDatabaseNode<"redis"> {
+  return database(name, "redis", { image: "railwayapp/redis:8.2", output: "REDIS_URL", defaultMountPath: "/bitnami" });
 }
 
-export function mongo(name: string): DatabaseNode & { url: () => VariableValue } {
+export function mongo(name: string): ReferencableDatabaseNode<"mongo"> {
   return database(name, "mongo", { image: "mongo:8", output: "MONGO_URL", defaultMountPath: "/data/db" });
 }
 
-export function database(
+export function database<E extends DatabaseNode["engine"]>(
   name: string,
-  engine: DatabaseNode["engine"],
+  engine: E,
   options: { image: string; output?: string; defaultMountPath?: string },
-): DatabaseNode & { url: () => VariableValue } {
+): ReferencableDatabaseNode<E> {
   const output = options.output ?? "DATABASE_URL";
-  return {
+  const node = {
     address: resourceAddress("database", name) as `database.${string}`,
     type: "database",
     kind: "database",
@@ -160,8 +186,8 @@ export function database(
     output,
     defaultMountPath: options.defaultMountPath,
     source: image(options.image),
-    url: () => ({ type: "reference", resource: resourceAddress("database", name), output }),
-  } as DatabaseNode & { url: () => VariableValue };
+  } as DatabaseNode;
+  return withVariableRefs(node) as ReferencableDatabaseNode<E>;
 }
 
 export function volume(name: string, config: VolumeConfig = {}): VolumeNode {
@@ -177,7 +203,29 @@ export function group(name: string, options: Omit<GroupNode, "address" | "type" 
 }
 
 export function ref(resource: ResourceNode, output: string): VariableValue {
+  return variableReference(resource, output);
+}
+
+export function preserve(): VariableValue {
+  return { type: "preserve" };
+}
+
+function variableReference(resource: ResourceNode, output: string): VariableValue {
   return { type: "reference", resource: resource.address, output };
+}
+
+function createVariableRefAccessor(resource: ResourceNode): ServiceVariableRef<string> {
+  return new Proxy({} as ServiceVariableRef<string>, {
+    get(_target, property) {
+      if (typeof property !== "string") return undefined;
+      return variableReference(resource, property);
+    },
+  });
+}
+
+function withVariableRefs<T extends ServiceNode | DatabaseNode>(node: T): T {
+  Object.defineProperty(node, "env", { enumerable: false, value: createVariableRefAccessor(node) });
+  return node;
 }
 
 function normalizeSource(source: ServiceConfigInput["source"], rootDirectory?: string): SourceConfig | undefined {
@@ -218,7 +266,7 @@ function normalizeRegions(regions: Record<string, RegionConfig>): DeployConfig["
 
 function normalizeNetworking(config: ServiceConfigInput): ServiceNetworking | undefined {
   const customDomains = config.domains
-    ? Object.fromEntries(config.domains.map(domain => (typeof domain === "string" ? [domain, {}] : [domain.domain, { port: domain.port }])))
+    ? Object.fromEntries(config.domains.map(domain => (typeof domain === "string" ? [domain, { port: 8080 }] : [domain.domain, { port: domain.port ?? 8080 }])))
     : undefined;
   const tcpProxies = config.tcp
     ? Object.fromEntries(config.tcp.map(port => [String(port), {}]))
