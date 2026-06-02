@@ -419,10 +419,23 @@ function normalizeForDiff(field: string, value: unknown): unknown {
     if (copy.useLegacyStacker === false) delete copy.useLegacyStacker;
     if (copy.ipv6EgressEnabled === false) delete copy.ipv6EgressEnabled;
     if (copy.runtime === "V2") delete copy.runtime;
+    copy.multiRegionConfig = normalizeMultiRegionConfig(copy.multiRegionConfig);
     if (isDefaultMultiRegionConfig(copy.multiRegionConfig)) delete copy.multiRegionConfig;
+    if (copy.multiRegionConfig != null && typeof copy.multiRegionConfig === "object" && !Array.isArray(copy.multiRegionConfig) && Object.keys(copy.multiRegionConfig).length === 0) delete copy.multiRegionConfig;
   }
 
   return copy;
+}
+
+function normalizeMultiRegionConfig(value: unknown): unknown {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) return value;
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, config]) => {
+      if (config == null || typeof config !== "object" || Array.isArray(config)) return true;
+      const replicas = (config as Record<string, unknown>).numReplicas;
+      return replicas !== null && replicas !== undefined;
+    });
+  return Object.fromEntries(entries);
 }
 
 function isDefaultMultiRegionConfig(value: unknown): boolean {
