@@ -43,6 +43,7 @@ Sandboxes come from static factory methods:
 
 - `Sandbox.create(options?)`: provision a new sandbox.
 - `Sandbox.create(template, options?)`: provision from a template (see [Templates](#templates)).
+- `Sandbox.create(source, options?)`: fork a running sandbox (see [Forking](#forking)).
 - `Sandbox.connect(id, options?)`: reattach to an existing sandbox by id.
 - `Sandbox.list(options?)`: list sandboxes in the environment.
 
@@ -62,6 +63,23 @@ result.stderr; // string
 result.truncated; // true if output exceeded the capture limit
 result.timedOut; // true if the command hit timeoutSec
 ```
+
+## Forking
+
+Fork a running sandbox to get an independent copy of its filesystem — handy for branching
+an environment after expensive setup. A fork is a fresh boot from a clone of the source's
+disk (not its live processes), created in the same environment.
+
+```ts
+const base = await Sandbox.create();
+await base.exec("npm install");
+
+const fork = await base.fork();
+await fork.exec("npm test"); // sees the installed deps, isolated from base
+```
+
+`Sandbox.create(source)` is the same operation in static form. Pass `idleTimeoutMinutes` to
+override the fork's idle timeout. The source must be `RUNNING`.
 
 ## Reconnecting and listing
 

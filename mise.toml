@@ -62,3 +62,7 @@ run = "pnpm exec tsx examples/sandboxes/quickstart.ts"
 description = "Create a sandbox from a template, then destroy it using .env credentials"
 run = "pnpm exec tsx examples/sandboxes/template.ts"
 
+[tasks."example:fork"]
+description = "Create a sandbox, fork it, and read forked filesystem state using .env credentials"
+run = "pnpm exec tsx examples/sandboxes/fork.ts"
+

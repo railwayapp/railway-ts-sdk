@@ -224,17 +224,18 @@ box; `create(source)` starts from a reusable base.
 
 ```ts
 const fromTemplate = await Sandbox.create(base);
+const forked = await sandbox.fork(); // equivalent to Sandbox.create(sandbox)
 
 // FUTURE
-const forked = await sandbox.fork(); // equivalent to Sandbox.create(sandbox)
 const fromImage = await Sandbox.create({ image: "ubuntu:24.04" });
 ```
 
-Today, `create` accepts a `SandboxTemplate`. Future sources are a running `Sandbox`
-value or an explicit `{ image }` object. There is no bare-string source, so there is
-never any guessing between "a base name" and "an image tag" — the source's type says
+Today, `create` accepts a `SandboxTemplate` or a running `Sandbox` value. The remaining
+future source is an explicit `{ image }` object. There is no bare-string source, so there
+is never any guessing between "a base name" and "an image tag" — the source's type says
 what it is. `sandbox.fork()` is sugar for `Sandbox.create(this)`, giving the
-live-environment fork its own obvious home.
+live-environment fork its own obvious home. A fork clones the source's filesystem (a fresh
+boot, not live processes) into the same environment.
 
 ---
 
@@ -294,7 +295,8 @@ that shipping it flips on a network call — never a breaking type change.
 | `Sandbox.connect(id)` / `Sandbox.list()` / `sandbox.refresh()` | **Live** |
 | `sandbox.files.*` | Future |
 | `Sandbox.template()` / `SandboxTemplate` / `create(template)` | **Live** |
-| `sandbox.fork()` / `create(sandbox)` / `create({ image })` | Future |
+| `sandbox.fork()` / `create(sandbox)` | **Live** |
+| `create({ image })` | Future |
 | `sandbox.expose(port)` / `unexpose` / `exposedPorts` | Future |
 | `exec` streaming (`{ stream }`) and background (`{ background }`) | Future |
 | Named/registry bases, multi-tenant credential binding | Future |
@@ -316,6 +318,7 @@ import {
   DEFAULT_RAILWAY_GRAPHQL_ENDPOINT,
   type CreateOptions,
   type ConnectOptions,
+  type ForkOptions,
   type ListOptions,
   type ExecOptions,
   type ExecResult,
@@ -331,6 +334,7 @@ import {
 ```ts
 class Sandbox {
   static create(template: SandboxTemplate, options?: CreateOptions): Promise<Sandbox>;
+  static create(source: Sandbox, options?: ForkOptions): Promise<Sandbox>;
   static create(options?: CreateOptions): Promise<Sandbox>;
   static connect(id: string, options?: ConnectOptions): Promise<Sandbox>;
   static list(options?: ListOptions): Promise<SandboxInfo[]>;
@@ -344,6 +348,7 @@ class Sandbox {
   readonly createdAt: string;
 
   exec(command: string, options?: ExecOptions): Promise<ExecResult>;
+  fork(options?: ForkOptions): Promise<Sandbox>;
   destroy(): Promise<void>;
   refresh(): Promise<this>;
   [Symbol.asyncDispose](): Promise<void>;

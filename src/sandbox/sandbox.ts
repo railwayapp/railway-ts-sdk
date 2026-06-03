@@ -14,6 +14,7 @@ import type {
   CreateOptions,
   ExecOptions,
   ExecResult,
+  ForkOptions,
   ListOptions,
   SandboxInfo,
   SandboxStatus,
@@ -67,11 +68,16 @@ export class Sandbox implements AsyncDisposable {
     template: SandboxTemplate,
     options?: CreateOptions,
   ): Promise<Sandbox>;
+  static create(source: Sandbox, options?: ForkOptions): Promise<Sandbox>;
   static create(options?: CreateOptions): Promise<Sandbox>;
   static async create(
-    sourceOrOptions: SandboxTemplate | CreateOptions = {},
+    sourceOrOptions: SandboxTemplate | Sandbox | CreateOptions = {},
     maybeOptions: CreateOptions = {},
   ): Promise<Sandbox> {
+    if (sourceOrOptions instanceof Sandbox) {
+      return sourceOrOptions.fork(maybeOptions);
+    }
+
     if (isSandboxTemplate(sourceOrOptions)) {
       const engine = engineFromOptions(maybeOptions);
       const instructions = compileSandboxTemplate(sourceOrOptions);
@@ -104,6 +110,15 @@ export class Sandbox implements AsyncDisposable {
 
   exec(command: string, options: ExecOptions = {}): Promise<ExecResult> {
     return this.#engine.exec(this.id, command, options);
+  }
+
+  /**
+   * Fork this running sandbox into a new, independent one. Clones the
+   * filesystem (a fresh boot, not live processes) into the same environment.
+   */
+  async fork(options?: ForkOptions): Promise<Sandbox> {
+    const info = await this.#engine.fork(this.id, options);
+    return new Sandbox(this.#engine, info);
   }
 
   async destroy(): Promise<void> {

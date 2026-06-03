@@ -11,6 +11,7 @@ export type {
   CreateOptions,
   ExecOptions,
   ExecResult,
+  ForkOptions,
   ListOptions,
   SandboxInfo,
   SandboxStatus,

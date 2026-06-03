@@ -38,6 +38,7 @@ import type {
   CreateOptions,
   ExecOptions,
   ExecResult,
+  ForkOptions,
   ListOptions,
   SandboxInfo,
   SandboxTemplateInfo,
@@ -84,6 +85,26 @@ export class SandboxEngine {
     }
     if (templateInstructions !== undefined) {
       input.template = { instructions: [...templateInstructions] };
+    }
+
+    const data = await requestGraphQL<
+      RailwaySandboxCreateMutation,
+      RailwaySandboxCreateMutationVariables
+    >(this.#config, RailwaySandboxCreateDocument, { input });
+
+    return this.#waitForRunning(data.sandboxCreate);
+  }
+
+  async fork(
+    sourceSandboxId: string,
+    options: ForkOptions = {},
+  ): Promise<SandboxInfo> {
+    const input: RailwaySandboxCreateMutationVariables["input"] = {
+      environmentId: this.#config.environmentId,
+      sourceSandboxId,
+    };
+    if (options.idleTimeoutMinutes !== undefined) {
+      input.idleTimeoutMinutes = options.idleTimeoutMinutes;
     }
 
     const data = await requestGraphQL<
