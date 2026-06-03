@@ -18,6 +18,7 @@ export {
   type CreateOptions,
   type ExecOptions,
   type ExecResult,
+  type ForkOptions,
   type ListOptions,
   type SandboxInfo,
   type SandboxStatus,

@@ -16,6 +16,10 @@ export interface CreateOptions extends RailwayClientConfig {
   idleTimeoutMinutes?: number;
 }
 
+export interface ForkOptions {
+  idleTimeoutMinutes?: number;
+}
+
 export interface ConnectOptions extends RailwayClientConfig {
   environmentId?: string;
 }
