@@ -56,12 +56,44 @@ non-zero exit code; inspect `exitCode` instead.
 ```ts
 const result = await sandbox.exec("npm run build", { timeoutSec: 120 });
 
-result.exitCode; // number
+result.exitCode; // number | null; -1 means killed by a signal
 result.stdout; // string
 result.stderr; // string
 result.truncated; // true if output exceeded the capture limit
-result.timedOut; // true if the command hit timeoutSec
+result.timedOut; // true if the command hit timeoutSec (enforced client-side)
 ```
+
+Commands are durable: they survive disconnects and can run for hours. Short
+commands resolve directly; long-running ones transparently stream output over a
+WebSocket until they exit. Add `onStdout`/`onStderr` callbacks to consume output
+live, and use the returned handle to get the `execId` or kill the command:
+
+```ts
+const handle = sandbox.exec("npm run test:slow", {
+  onStdout: chunk => process.stdout.write(chunk),
+});
+
+const execId = await handle.execId; // save to reattach later
+await handle.kill(); // optional: SIGTERM (pass a number for another signal)
+const result = await handle; // same ExecResult shape as above
+```
+
+Reattach to a running exec from anywhere — even another process — with the
+saved id. The stream replays the full retained history, then continues live:
+
+```ts
+const result = await sandbox.exec({ execId }, {
+  onStdout: chunk => process.stdout.write(chunk),
+});
+```
+
+If the sandbox VM restarted and the output is unrecoverable, `exec` rejects
+with `SandboxExecInterruptedError`. If the output stream cannot be
+re-established after several attempts, `exec` rejects with
+`RailwayConnectionError` — the command keeps running server-side and can be
+picked up again with `exec({ execId })`. In non-Node runtimes without a
+global `WebSocket`, pass an implementation via the `webSocketImpl` config
+option.
 
 ## Reconnecting and listing
 

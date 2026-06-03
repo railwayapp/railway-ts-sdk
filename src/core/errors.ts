@@ -23,6 +23,19 @@ export class RailwayAuthError extends RailwayError {
   }
 }
 
+/** A WebSocket transport failure outside the GraphQL protocol. */
+export class RailwayConnectionError extends RailwayError {
+  readonly closeCode: number | undefined;
+
+  constructor(args: { message: string; closeCode?: number; cause?: unknown }) {
+    super(
+      args.message,
+      args.cause === undefined ? undefined : { cause: args.cause },
+    );
+    this.closeCode = args.closeCode;
+  }
+}
+
 export class RailwayGraphQLError extends RailwayError {
   readonly status: number;
   readonly errors: readonly RailwayGraphQLErrorItem[];

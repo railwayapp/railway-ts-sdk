@@ -10,15 +10,12 @@ import {
   RailwaySandboxDestroyDocument,
   RailwaySandboxDocument,
   RailwaySandboxesDocument,
-  RailwaySandboxExecDocument,
   RailwaySandboxTemplateBuildDocument,
   RailwaySandboxTemplateDocument,
   type RailwaySandboxCreateMutation,
   type RailwaySandboxCreateMutationVariables,
   type RailwaySandboxDestroyMutation,
   type RailwaySandboxDestroyMutationVariables,
-  type RailwaySandboxExecMutation,
-  type RailwaySandboxExecMutationVariables,
   type RailwaySandboxesQuery,
   type RailwaySandboxesQueryVariables,
   type RailwaySandboxQuery,
@@ -34,10 +31,11 @@ import {
   SandboxTemplateBuildError,
   SandboxTimeoutError,
 } from "./errors.js";
+import { startExec, type ExecHandle } from "./exec.js";
 import type {
   CreateOptions,
   ExecOptions,
-  ExecResult,
+  ExecTarget,
   ListOptions,
   SandboxInfo,
   SandboxTemplateInfo,
@@ -207,24 +205,16 @@ export class SandboxEngine {
     return args.onTimeout(last);
   }
 
-  async exec(
-    id: string,
-    command: string,
-    options: ExecOptions = {},
-  ): Promise<ExecResult> {
-    const variables: RailwaySandboxExecMutationVariables = {
-      id,
-      command,
-      environmentId: this.#config.environmentId,
-    };
-    if (options.timeoutSec !== undefined) variables.timeoutSec = options.timeoutSec;
-
-    const data = await requestGraphQL<
-      RailwaySandboxExecMutation,
-      RailwaySandboxExecMutationVariables
-    >(this.#config, RailwaySandboxExecDocument, variables);
-
-    return data.sandboxExec;
+  exec(id: string, target: ExecTarget, options: ExecOptions = {}): ExecHandle {
+    return startExec(
+      {
+        config: this.#config,
+        environmentId: this.#config.environmentId,
+        sandboxId: id,
+      },
+      target,
+      options,
+    );
   }
 
   async destroy(id: string): Promise<void> {

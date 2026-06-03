@@ -71,9 +71,12 @@ describe("sandbox instance", () => {
       {
         data: {
           sandboxExec: {
+            execId: "exec_123",
+            state: "COMPLETED",
             exitCode: 0,
             stdout: "/\n",
             stderr: "",
+            cursor: "2",
             truncated: false,
             timedOut: false,
           },

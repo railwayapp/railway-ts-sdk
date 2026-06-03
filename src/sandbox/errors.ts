@@ -42,6 +42,24 @@ export class SandboxTemplateBuildError extends RailwayError {
   }
 }
 
+/**
+ * An exec was interrupted — the sandbox VM restarted or the exec is unknown —
+ * and its output is no longer recoverable.
+ */
+export class SandboxExecInterruptedError extends RailwayError {
+  readonly execId: string;
+  readonly sandboxId: string;
+
+  constructor(args: { execId: string; sandboxId: string }) {
+    super(
+      `Sandbox exec "${args.execId}" in sandbox "${args.sandboxId}" was interrupted; ` +
+        `its output is no longer recoverable.`,
+    );
+    this.execId = args.execId;
+    this.sandboxId = args.sandboxId;
+  }
+}
+
 /** A readiness wait timed out. */
 export class SandboxTimeoutError extends RailwayError {
   readonly resource: "sandbox" | "template";

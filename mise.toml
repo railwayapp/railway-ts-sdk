@@ -62,3 +62,11 @@ run = "pnpm exec tsx examples/sandboxes/quickstart.ts"
 description = "Create a sandbox from a template, then destroy it using .env credentials"
 run = "pnpm exec tsx examples/sandboxes/template.ts"
 
+[tasks."example:exec-long"]
+description = "Stream a random 60-120s command and verify every log line arrives in order"
+run = "pnpm exec tsx examples/sandboxes/exec-long.ts"
+
+[tasks."example:exec-reattach"]
+description = "Reattach to a running exec mid-command and verify the full log history is captured"
+run = "pnpm exec tsx examples/sandboxes/exec-reattach.ts"
+

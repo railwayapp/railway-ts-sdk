@@ -11,12 +11,25 @@ export interface RailwayClientConfig {
   token?: string;
   endpoint?: string;
   fetch?: typeof fetch;
+  /**
+   * WebSocket constructor used to stream exec output. Defaults to the global
+   * `WebSocket` (available in Node >= 22, browsers, Deno, and edge runtimes);
+   * pass an implementation (e.g. the `ws` package) where no global exists.
+   */
+  webSocketImpl?: WebSocketConstructor;
 }
+
+/** Structural constructor type satisfied by native WebSocket and the `ws` package. */
+export type WebSocketConstructor = new (
+  url: string,
+  protocols?: string | string[],
+) => unknown;
 
 export interface NormalizedRailwayClientConfig {
   token: string;
   endpoint: string;
   fetch: typeof fetch;
+  webSocketImpl?: WebSocketConstructor | undefined;
 }
 
 /**
@@ -39,7 +52,7 @@ export function normalizeRailwayClientConfig(
     firstNonEmpty(config.endpoint, readEnv(RAILWAY_ENDPOINT_ENV)) ??
     DEFAULT_RAILWAY_GRAPHQL_ENDPOINT;
 
-  return { token, endpoint, fetch: fetchImpl };
+  return { token, endpoint, fetch: fetchImpl, webSocketImpl: config.webSocketImpl };
 }
 
 export function resolveEnvironmentId(explicit?: string): string {

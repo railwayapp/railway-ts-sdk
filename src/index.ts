@@ -4,12 +4,15 @@ export {
 } from "./core/config.js";
 export {
   RailwayAuthError,
+  RailwayConnectionError,
   RailwayError,
   RailwayGraphQLError,
   type RailwayGraphQLErrorItem,
 } from "./core/errors.js";
 export {
+  ExecHandle,
   Sandbox,
+  SandboxExecInterruptedError,
   SandboxFailedError,
   SandboxNotFoundError,
   SandboxTemplateBuildError,
@@ -17,7 +20,9 @@ export {
   type ConnectOptions,
   type CreateOptions,
   type ExecOptions,
+  type ExecReattachTarget,
   type ExecResult,
+  type ExecTarget,
   type ListOptions,
   type SandboxInfo,
   type SandboxStatus,

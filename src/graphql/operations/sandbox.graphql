@@ -57,12 +57,48 @@ mutation RailwaySandboxExec(
     command: $command
     timeoutSec: $timeoutSec
   ) {
+    execId
+    state
     exitCode
     stdout
     stderr
+    cursor
     truncated
     timedOut
   }
+}
+
+subscription RailwaySandboxExecOutput(
+  $id: String!
+  $environmentId: String!
+  $execId: String!
+  $cursor: String
+) {
+  sandboxExecOutput(
+    id: $id
+    environmentId: $environmentId
+    execId: $execId
+    cursor: $cursor
+  ) {
+    data
+    isStderr
+    seq
+    exitCode
+  }
+}
+
+mutation RailwaySandboxExecKill(
+  $id: String!
+  $environmentId: String!
+  $execId: String!
+  $signal: Int
+) {
+  sandboxExecKill(
+    id: $id
+    environmentId: $environmentId
+    execId: $execId
+    signal: $signal
+  )
 }
 
 mutation RailwaySandboxDestroy($id: String!, $environmentId: String!) {
