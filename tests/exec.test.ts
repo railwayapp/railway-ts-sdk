@@ -35,26 +35,26 @@ function execResponse(
         exitCode: 0,
         stdout: "",
         stderr: "",
-        cursor: "0",
+        resumeToken: "0",
         truncated: false,
-        timedOut: false,
         ...overrides,
       },
     },
   };
 }
 
-const frame = (data: string, seq: string, isStderr = false) => ({
-  data,
-  isStderr,
-  seq,
+// A data frame carries exactly one of stdout/stderr plus the resume token.
+const frame = (data: string, resumeToken: string, isStderr = false) => ({
+  stdout: isStderr ? null : data,
+  stderr: isStderr ? data : null,
+  resumeToken,
   exitCode: null,
 });
-// The server's terminal frame carries no data and an empty seq.
+// The server's terminal frame carries no output and an empty resumeToken.
 const terminal = (exitCode: number) => ({
-  data: null,
-  isStderr: false,
-  seq: "",
+  stdout: null,
+  stderr: null,
+  resumeToken: "",
   exitCode,
 });
 const output = (...frames: unknown[]) => ({
@@ -89,20 +89,14 @@ function expectInterrupted(error: unknown, ids?: { execId: string; sandboxId: st
 }
 
 describe("exec fast path (COMPLETED)", () => {
-  it("resolves from the mutation without opening a WebSocket", async () => {
+  it("resolves a short command from the mutation without opening a WebSocket", async () => {
     const { sandbox, ws, mock } = await createSandbox({
       responses: [
         execResponse({ stdout: "hello\n", stderr: "oops\n", exitCode: 0 }),
       ],
     });
-    const stdoutChunks: string[] = [];
-    const stderrChunks: string[] = [];
 
-    const handle = sandbox.exec("echo hello", {
-      timeoutSec: 30,
-      onStdout: chunk => stdoutChunks.push(chunk),
-      onStderr: chunk => stderrChunks.push(chunk),
-    });
+    const handle = sandbox.exec("echo hello");
     expect(handle).toBeInstanceOf(ExecHandle);
     const result = await handle;
 
@@ -113,16 +107,48 @@ describe("exec fast path (COMPLETED)", () => {
       truncated: false,
       timedOut: false,
     });
-    expect(stdoutChunks).toEqual(["hello\n"]);
-    expect(stderrChunks).toEqual(["oops\n"]);
     expect(ws.sockets).toHaveLength(0);
     expect(await handle.execId).toBe("exec_123");
+    // No callbacks or timeout: let the server fast-return inline, no waitMs.
     expect(mock.calls[1]?.body.variables).toEqual({
       id: "sandbox_123",
       environmentId: "environment_123",
       command: "echo hello",
-      timeoutSec: 30,
     });
+  });
+
+  it("fires callbacks with the inline output on the COMPLETED path", async () => {
+    const { sandbox, mock } = await createSandbox({
+      responses: [execResponse({ stdout: "hello\n", stderr: "oops\n" })],
+    });
+    const stdoutChunks: string[] = [];
+    const stderrChunks: string[] = [];
+
+    await sandbox.exec("echo hello", {
+      onStdout: chunk => stdoutChunks.push(chunk),
+      onStderr: chunk => stderrChunks.push(chunk),
+    });
+
+    expect(stdoutChunks).toEqual(["hello\n"]);
+    expect(stderrChunks).toEqual(["oops\n"]);
+    // Callbacks force an immediate fast-return so output streams from the start.
+    expect(mock.calls[1]?.body.variables).toMatchObject({ waitMs: 0 });
+  });
+
+  it.each([
+    { label: "onStdout", options: { onStdout: () => {} }, expected: 0 },
+    { label: "timeoutSec", options: { timeoutSec: 5 }, expected: 0 },
+    { label: "explicit waitMs", options: { waitMs: 1000 }, expected: 1000 },
+    { label: "bare exec", options: {}, expected: undefined },
+  ])("derives waitMs from $label", async ({ options, expected }) => {
+    const { sandbox, mock } = await createSandbox({
+      responses: [execResponse()],
+    });
+
+    await sandbox.exec("true", options);
+
+    const sent = (mock.calls[1]?.body.variables as { waitMs?: number }).waitMs;
+    expect(sent).toBe(expected);
   });
 
   it("does not leak streaming fields into ExecResult", async () => {
@@ -175,14 +201,14 @@ describe("exec fast path (COMPLETED)", () => {
 });
 
 describe("exec streaming (RUNNING)", () => {
-  it("streams from cursor 0, ignores the preview, and resolves on the terminal frame", async () => {
+  it("streams from token 0, ignores the preview, and resolves on the terminal frame", async () => {
     const { sandbox, ws } = await createSandbox({
       responses: [
         execResponse({
           state: "RUNNING",
           exitCode: null,
           stdout: "preview-not-authoritative",
-          cursor: "42",
+          resumeToken: "42",
         }),
       ],
       script: [
@@ -212,7 +238,7 @@ describe("exec streaming (RUNNING)", () => {
       id: "sandbox_123",
       environmentId: "environment_123",
       execId: "exec_123",
-      cursor: "0",
+      after: "0",
     });
     expect(ws.calls[0]?.query).toContain("subscription RailwaySandboxExecOutput");
   });
@@ -242,12 +268,12 @@ describe("exec streaming (RUNNING)", () => {
     expect(result.exitCode).toBe(0);
   });
 
-  it("re-subscribes from the last seq when the server completes without a terminal frame", async () => {
-    const hugeSeq = "18446744073709551615";
+  it("re-subscribes from the last resumeToken when the server completes without a terminal frame", async () => {
+    const hugeToken = "18446744073709551615";
     const { sandbox, ws } = await createSandbox({
       responses: [execResponse({ state: "RUNNING", exitCode: null })],
       script: [
-        [{ next: output(frame("first\n", hugeSeq)) }, { complete: true }],
+        [{ next: output(frame("first\n", hugeToken)) }, { complete: true }],
         [{ next: output(frame("second\n", "18446744073709551699")) }, { next: output(terminal(5)) }],
       ],
     });
@@ -257,14 +283,14 @@ describe("exec streaming (RUNNING)", () => {
     expect(result.stdout).toBe("first\nsecond\n");
     expect(result.exitCode).toBe(5);
     expect(ws.calls).toHaveLength(2);
-    expect(ws.calls[0]?.variables.cursor).toBe("0");
-    expect(ws.calls[1]?.variables.cursor).toBe(hugeSeq);
+    expect(ws.calls[0]?.variables.after).toBe("0");
+    expect(ws.calls[1]?.variables.after).toBe(hugeToken);
   });
 
   // 4500 is also backboard's masked-resolver-error close; a single one must
   // be treated as transient, like any abnormal closure.
   it.each([1006, 4500])(
-    "resumes after a transport drop (close %i) without losing the cursor",
+    "resumes after a transport drop (close %i) without losing the resume token",
     async code => {
       const { sandbox, ws } = await createSandbox({
         responses: [execResponse({ state: "RUNNING", exitCode: null })],
@@ -278,7 +304,7 @@ describe("exec streaming (RUNNING)", () => {
 
       expect(result.stdout).toBe("a\n");
       expect(ws.calls).toHaveLength(2);
-      expect(ws.calls[1]?.variables.cursor).toBe("2");
+      expect(ws.calls[1]?.variables.after).toBe("2");
     },
   );
 
@@ -378,22 +404,20 @@ describe("exec streaming (RUNNING)", () => {
     expect(ws.calls).toHaveLength(5);
   });
 
-  it("marks gap frames as truncated and passes the marker through to stderr", async () => {
-    const marker = "\n[output truncated: 4096 bytes dropped]\n";
-    const { sandbox, ws } = await createSandbox({
-      responses: [execResponse({ state: "RUNNING", exitCode: null })],
-      script: [
-        [{ next: output(frame(marker, "5000", true)) }, { complete: true }],
-        [{ next: output(terminal(0)) }],
+  it("carries a drain-window truncation into the streamed result", async () => {
+    // The subscription hides buffer gaps; a truncation observed by the
+    // mutation's drain window is the only streaming-path truncation signal.
+    const { sandbox } = await createSandbox({
+      responses: [
+        execResponse({ state: "RUNNING", exitCode: null, truncated: true }),
       ],
+      script: [[{ next: output(frame("tail\n", "9")) }, { next: output(terminal(0)) }]],
     });
 
     const result = await sandbox.exec("long");
 
     expect(result.truncated).toBe(true);
-    expect(result.stderr).toBe(marker);
-    // Gap frames advance the cursor like any data frame.
-    expect(ws.calls[1]?.variables.cursor).toBe("5000");
+    expect(result.stdout).toBe("tail\n");
   });
 
   it("rejects with the callback's error when onStdout throws", async () => {
@@ -434,7 +458,7 @@ describe("exec fast path callbacks", () => {
 });
 
 describe("exec reattach", () => {
-  it("opens the subscription without a mutation and backfills from cursor 0", async () => {
+  it("opens the subscription without a mutation and backfills from token 0", async () => {
     const { sandbox, ws, mock } = await createSandbox({
       script: [
         [
@@ -453,7 +477,7 @@ describe("exec reattach", () => {
     expect(mock.calls).toHaveLength(1);
     expect(ws.calls[0]?.variables).toMatchObject({
       execId: "exec_attached",
-      cursor: "0",
+      after: "0",
     });
   });
 

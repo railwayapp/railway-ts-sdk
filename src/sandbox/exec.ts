@@ -26,8 +26,6 @@ import type { ExecOptions, ExecResult, ExecTarget } from "./types.js";
  * the cap so callers know the inline output may be incomplete.
  */
 const MAX_INLINE_OUTPUT_LENGTH = 16_000;
-/** Server-injected stderr marker for bytes dropped from the retained buffer. */
-const GAP_MARKER_PATTERN = /\[output truncated: \d+ bytes dropped\]/;
 const SIGKILL = 9;
 /** After a timeout SIGTERM, escalate to SIGKILL if the command has not exited. */
 const KILL_GRACE_MS = 10_000;
@@ -187,13 +185,19 @@ async function runExec(
 ): Promise<ExecResult> {
   let execId: string;
 
+  let seedTruncated = false;
+
   if (typeof target === "string") {
     const variables: RailwaySandboxExecMutationVariables = {
       id: context.sandboxId,
       environmentId: context.environmentId,
       command: target,
     };
-    if (options.timeoutSec !== undefined) variables.timeoutSec = options.timeoutSec;
+    // Skip the server's inline drain window when the caller wants to stream
+    // (callbacks) or enforce a timeout, so output and the timeout clock start
+    // immediately. Otherwise let the server fast-return short commands inline.
+    const waitMs = resolveWaitMs(options);
+    if (waitMs !== undefined) variables.waitMs = waitMs;
 
     const data = await requestGraphQL<
       RailwaySandboxExecMutation,
@@ -220,19 +224,35 @@ async function runExec(
           exec.truncated ||
           exec.stdout.length >= MAX_INLINE_OUTPUT_LENGTH ||
           exec.stderr.length >= MAX_INLINE_OUTPUT_LENGTH,
-        timedOut: exec.timedOut,
+        timedOut: false,
       };
     }
 
     execId = exec.execId;
+    // Carry a truncation seen during the drain window; the subscription hides
+    // later gaps, so this is the only streaming-path truncation signal.
+    seedTruncated = exec.truncated;
   } else {
     execId = target.execId;
     onExecId(execId);
   }
 
-  // Still running (or reattaching): stream from the beginning of the retained
+  // Still running (or reattaching): stream from the start of the retained
   // buffer for a complete result, ignoring the mutation's preview output.
-  return streamExec(context, execId, options, startedAt);
+  return streamExec(context, execId, options, startedAt, seedTruncated);
+}
+
+/**
+ * Effective inline-drain window for the mutation. An explicit `waitMs` wins;
+ * otherwise callbacks or a `timeoutSec` deadline force `0` (stream from the
+ * start); a plain `await exec()` leaves it unset so the server fast-returns.
+ */
+function resolveWaitMs(options: ExecOptions): number | undefined {
+  if (options.waitMs !== undefined) return options.waitMs;
+  if (options.onStdout || options.onStderr || options.timeoutSec !== undefined) {
+    return 0;
+  }
+  return undefined;
 }
 
 async function streamExec(
@@ -240,11 +260,12 @@ async function streamExec(
   execId: string,
   options: ExecOptions,
   startedAt: number,
+  initialTruncated: boolean,
 ): Promise<ExecResult> {
-  let cursor = "0";
+  let after = "0";
   let stdout = "";
   let stderr = "";
-  let truncated = false;
+  const truncated = initialTruncated;
   let timedOut = false;
 
   let sawTerminal = false;
@@ -260,23 +281,24 @@ async function streamExec(
     for (const frame of data.sandboxExecOutput) {
       attemptDelivered = true;
       if (frame.exitCode != null) {
-        // Terminal frame: carries no data and an empty seq — never advance
-        // the cursor from it.
+        // Terminal frame: no output and an empty resumeToken — never advance
+        // the resume position from it.
         sawTerminal = true;
         exitCode = frame.exitCode;
         return STOP_SUBSCRIPTION;
       }
-      if (frame.data == null) continue;
       consecutiveFailures = 0;
-      cursor = frame.seq;
+      after = frame.resumeToken;
       try {
-        if (frame.isStderr) {
-          if (GAP_MARKER_PATTERN.test(frame.data)) truncated = true;
-          stderr += frame.data;
-          options.onStderr?.(frame.data);
-        } else {
-          stdout += frame.data;
-          options.onStdout?.(frame.data);
+        // A data frame carries exactly one of stdout/stderr; the server hides
+        // buffer gaps, so there is no truncation marker to detect here.
+        if (frame.stdout != null) {
+          stdout += frame.stdout;
+          options.onStdout?.(frame.stdout);
+        }
+        if (frame.stderr != null) {
+          stderr += frame.stderr;
+          options.onStderr?.(frame.stderr);
         }
       } catch (error) {
         callbackError = { error };
@@ -321,7 +343,7 @@ async function streamExec(
             id: context.sandboxId,
             environmentId: context.environmentId,
             execId,
-            cursor,
+            after,
           },
           handleFrames,
         );
@@ -366,8 +388,8 @@ async function streamExec(
         return { exitCode, stdout, stderr, truncated, timedOut };
       }
       // The server caps one subscription at ~15 minutes and completes without
-      // a terminal frame; re-attach from the last cursor. Pause briefly when
-      // the attempt yielded nothing so a misbehaving server cannot hot-loop us.
+      // a terminal frame; re-attach from the last resumeToken. Pause briefly
+      // when the attempt yielded nothing so a misbehaving server can't hot-loop.
       if (!attemptDelivered) await sleep(EMPTY_RESUBSCRIBE_DELAY_MS);
     }
   } finally {

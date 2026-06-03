@@ -47,14 +47,22 @@ export interface ExecOptions {
   /**
    * Kill the command after this many seconds and resolve with
    * `timedOut: true`. Enforced client-side (SIGTERM, then SIGKILL after a
-   * grace period), so it cannot fire for commands that finish within the
-   * server's fast-return window (~25s) — those resolve normally.
+   * grace period); setting it streams from the start so the deadline is
+   * honored precisely.
    */
   timeoutSec?: number;
   /** Receives each stdout chunk as it arrives. A throw rejects the exec. */
   onStdout?: (chunk: string) => void;
   /** Receives each stderr chunk as it arrives. A throw rejects the exec. */
   onStderr?: (chunk: string) => void;
+  /**
+   * How long (ms) the server may wait for the command to finish before
+   * fast-returning so output can stream — clamped to [0, 25000]. Defaults to
+   * `0` when `onStdout`/`onStderr` or `timeoutSec` is set (stream from the
+   * start), otherwise the server default (~25s, short commands resolve inline
+   * with no WebSocket). Set `0` to force immediate streaming without callbacks.
+   */
+  waitMs?: number;
 }
 
 export interface TemplateBuildOptions extends RailwayClientConfig {

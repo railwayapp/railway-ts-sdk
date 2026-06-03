@@ -63,10 +63,11 @@ result.truncated; // true if output exceeded the capture limit
 result.timedOut; // true if the command hit timeoutSec (enforced client-side)
 ```
 
-Commands are durable: they survive disconnects and can run for hours. Short
-commands resolve directly; long-running ones transparently stream output over a
-WebSocket until they exit. Add `onStdout`/`onStderr` callbacks to consume output
-live, and use the returned handle to get the `execId` or kill the command:
+Commands are durable: they survive disconnects and can run for hours. A bare
+`await sandbox.exec("ls")` lets the server fast-return short commands inline
+(no WebSocket). Passing `onStdout`/`onStderr` streams output live over a
+WebSocket from the first byte — the handle also exposes the `execId` and a
+`kill()`:
 
 ```ts
 const handle = sandbox.exec("npm run test:slow", {

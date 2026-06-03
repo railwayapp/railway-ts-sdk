@@ -103,13 +103,32 @@ describe.runIf(live)("exec e2e (live)", () => {
     ).rejects.toBeInstanceOf(SandboxExecInterruptedError);
   }, 60_000);
 
-  it("enforces timeoutSec client-side on streaming commands", async () => {
-    // 35s clears the ~25s fast-return window so the exec goes RUNNING first.
+  it("enforces timeoutSec client-side", async () => {
+    // timeoutSec streams from the start (waitMs:0), so the deadline fires
+    // promptly instead of waiting out the fast-return window.
     const result = await sandbox.exec("echo start; sleep 300", {
-      timeoutSec: 35,
+      timeoutSec: 8,
     });
     expect(result.timedOut).toBe(true);
     expect(result.exitCode).toBe(-1);
     expect(result.stdout).toContain("start");
-  }, 120_000);
+  }, 60_000);
+
+  it("streams from the start immediately when onStdout is set (waitMs:0)", async () => {
+    // The first line must arrive well under the ~25s default drain window,
+    // proving callbacks skip it.
+    const firstLineAt = { ms: 0 };
+    const started = Date.now();
+    const result = await sandbox.exec(
+      "for i in $(seq 1 8); do echo line-$i; sleep 1; done",
+      {
+        onStdout: () => {
+          if (firstLineAt.ms === 0) firstLineAt.ms = Date.now() - started;
+        },
+      },
+    );
+    expect(firstLineAt.ms).toBeLessThan(10_000);
+    expect(result.exitCode).toBe(0);
+    expectSequential(result.stdout);
+  }, 60_000);
 });

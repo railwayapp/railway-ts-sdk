@@ -76,16 +76,15 @@ describe("sandbox instance", () => {
             exitCode: 0,
             stdout: "/\n",
             stderr: "",
-            cursor: "2",
+            resumeToken: "2",
             truncated: false,
-            timedOut: false,
           },
         },
       },
     ]);
 
     const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch });
-    const result = await sandbox.exec("pwd", { timeoutSec: 30 });
+    const result = await sandbox.exec("pwd");
 
     expect(result.stdout).toBe("/\n");
     expect(mock.calls[1]?.body.query).toContain("mutation RailwaySandboxExec");
@@ -93,7 +92,6 @@ describe("sandbox instance", () => {
       id: "sandbox_123",
       environmentId: "environment_123",
       command: "pwd",
-      timeoutSec: 30,
     });
   });
 

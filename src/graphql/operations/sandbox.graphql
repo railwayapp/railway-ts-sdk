@@ -49,22 +49,21 @@ mutation RailwaySandboxExec(
   $id: String!
   $environmentId: String!
   $command: String!
-  $timeoutSec: Int
+  $waitMs: Int
 ) {
   sandboxExec(
     id: $id
     environmentId: $environmentId
     command: $command
-    timeoutSec: $timeoutSec
+    waitMs: $waitMs
   ) {
     execId
     state
     exitCode
     stdout
     stderr
-    cursor
+    resumeToken
     truncated
-    timedOut
   }
 }
 
@@ -72,17 +71,17 @@ subscription RailwaySandboxExecOutput(
   $id: String!
   $environmentId: String!
   $execId: String!
-  $cursor: String
+  $after: String
 ) {
   sandboxExecOutput(
     id: $id
     environmentId: $environmentId
     execId: $execId
-    cursor: $cursor
+    after: $after
   ) {
-    data
-    isStderr
-    seq
+    stdout
+    stderr
+    resumeToken
     exitCode
   }
 }
