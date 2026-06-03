@@ -15,6 +15,7 @@
     "delete",
     "destroy",
     "exec",
+    "fork",
     "idleTimeoutMinutes",
     "refresh",
     "region",

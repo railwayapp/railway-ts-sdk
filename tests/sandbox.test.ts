@@ -24,16 +24,28 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-async function createWithDestroyMock(): Promise<{
-  sandbox: Sandbox;
-  calls: FetchCall[];
-}> {
+async function createThenQueue(
+  followup: unknown,
+): Promise<{ sandbox: Sandbox; calls: FetchCall[] }> {
   const mock = createFetchMock([
     { data: { sandboxCreate: sandboxInfo() } },
-    { data: { sandboxDestroy: sandboxInfo({ status: "DESTROYED" }) } },
+    followup,
   ]);
   const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch });
   return { sandbox, calls: mock.calls };
+}
+
+function createWithDestroyMock(): Promise<{ sandbox: Sandbox; calls: FetchCall[] }> {
+  return createThenQueue({
+    data: { sandboxDestroy: sandboxInfo({ status: "DESTROYED" }) },
+  });
+}
+
+function expectForkMutation(call: FetchCall | undefined): void {
+  expect(call?.body.query).toContain("mutation RailwaySandboxCreate");
+  expect(call?.body.variables).toEqual({
+    input: { environmentId: "environment_123", sourceSandboxId: "sandbox_123" },
+  });
 }
 
 function silenceExpectedRejection<T>(promise: Promise<T>): Promise<T> {
@@ -382,6 +394,70 @@ describe("Sandbox.create(template)", () => {
           ],
         },
       },
+    });
+  });
+});
+
+const forkResponse = { data: { sandboxCreate: sandboxInfo({ id: "forked_123" }) } };
+
+describe("sandbox.fork", () => {
+  it("forks a running sandbox via the create mutation", async () => {
+    const { sandbox, calls } = await createThenQueue(forkResponse);
+    const forked = await sandbox.fork();
+
+    expect(forked.id).toBe("forked_123");
+    expect(forked).not.toBe(sandbox);
+    expectForkMutation(calls[1]);
+  });
+
+  it("passes idleTimeoutMinutes into the fork input", async () => {
+    const { sandbox, calls } = await createThenQueue(forkResponse);
+    await sandbox.fork({ idleTimeoutMinutes: 15 });
+
+    expect(calls[1]?.body.variables).toEqual({
+      input: {
+        environmentId: "environment_123",
+        sourceSandboxId: "sandbox_123",
+        idleTimeoutMinutes: 15,
+      },
+    });
+  });
+
+  it("delegates Sandbox.create(source) to fork, reusing the source engine", async () => {
+    // No fetch on the create(source) call: it must reuse the source's engine.
+    const { sandbox: source, calls } = await createThenQueue(forkResponse);
+    const forked = await Sandbox.create(source);
+
+    expect(forked.id).toBe("forked_123");
+    expectForkMutation(calls[1]);
+  });
+});
+
+describe("sandbox.fork readiness", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("polls until the fork is RUNNING", async () => {
+    const mock = createFetchMock([
+      { data: { sandboxCreate: sandboxInfo() } },
+      { data: { sandboxCreate: sandboxInfo({ id: "forked_123", status: "CREATING" }) } },
+      { data: { sandbox: sandboxInfo({ id: "forked_123", status: "CREATING" }) } },
+      { data: { sandbox: sandboxInfo({ id: "forked_123", status: "RUNNING" }) } },
+    ]);
+
+    const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch });
+    const promise = sandbox.fork();
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    const forked = await promise;
+
+    expect(forked.id).toBe("forked_123");
+    expect(forked.status).toBe("RUNNING");
+    expect(mock.calls).toHaveLength(4);
+    expect(mock.calls[1]?.body.query).toContain("mutation RailwaySandboxCreate");
+    expect(mock.calls[2]?.body.query).toContain("query RailwaySandbox");
+    expect(mock.calls[2]?.body.variables).toEqual({
+      id: "forked_123",
+      environmentId: "environment_123",
     });
   });
 });
