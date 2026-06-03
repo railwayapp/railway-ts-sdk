@@ -91,7 +91,7 @@ export function deriveWebSocketUrl(endpoint: string): string {
   return endpoint.replace(/^http/, "ws");
 }
 
-function resolveWebSocketImpl(config: NormalizedRailwayClientConfig): unknown {
+export function resolveWebSocketImpl(config: NormalizedRailwayClientConfig): unknown {
   const impl =
     config.webSocketImpl ??
     (globalThis as { WebSocket?: unknown }).WebSocket;

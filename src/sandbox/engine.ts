@@ -31,7 +31,8 @@ import {
   SandboxTemplateBuildError,
   SandboxTimeoutError,
 } from "./errors.js";
-import { startExec, type ExecHandle } from "./exec.js";
+import { startExec, type ExecContext, type ExecHandle } from "./exec.js";
+import { startWsExec } from "./ws-exec.js";
 import type {
   CreateOptions,
   ExecOptions,
@@ -206,15 +207,15 @@ export class SandboxEngine {
   }
 
   exec(id: string, target: ExecTarget, options: ExecOptions = {}): ExecHandle {
-    return startExec(
-      {
-        config: this.#config,
-        environmentId: this.#config.environmentId,
-        sandboxId: id,
-      },
-      target,
-      options,
-    );
+    const context: ExecContext = {
+      config: this.#config,
+      environmentId: this.#config.environmentId,
+      sandboxId: id,
+    };
+    if (options.transport === "ws") {
+      return startWsExec(context, target, options);
+    }
+    return startExec(context, target, options);
   }
 
   async destroy(id: string): Promise<void> {

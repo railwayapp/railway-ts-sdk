@@ -45,6 +45,15 @@ export type ExecTarget = string | ExecReattachTarget;
 
 export interface ExecOptions {
   /**
+   * Transport for this exec. `"backboard"` (default) runs the durable
+   * `sandboxExec` mutation + subscription. `"ws"` streams over the tcp-proxy
+   * `/ws/exec` bridge (experimental): separated stdout/stderr and a real exit
+   * code. When durable sessions are enabled server-side, `execId` is the
+   * VM-assigned session id and `exec({ execId }, { transport: "ws" })`
+   * reattaches to it.
+   */
+  transport?: "backboard" | "ws";
+  /**
    * Kill the command after this many seconds and resolve with
    * `timedOut: true`. Enforced client-side (SIGTERM, then SIGKILL after a
    * grace period); setting it streams from the start so the deadline is

@@ -1,0 +1,3 @@
+mutation RailwayGenerateShellToken($input: ShellTokenInput!) {
+  generateShellToken(input: $input)
+}

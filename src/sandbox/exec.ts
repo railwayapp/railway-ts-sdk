@@ -118,7 +118,16 @@ export class ExecHandle implements Promise<ExecResult> {
   }
 }
 
-interface ExecContext {
+/** Builds an ExecHandle from settled parts; lets the WS path reuse the handle. */
+export function createExecHandle(args: {
+  execId: Promise<string>;
+  result: Promise<ExecResult>;
+  kill: (signal?: number) => Promise<boolean>;
+}): ExecHandle {
+  return constructHandle(args);
+}
+
+export interface ExecContext {
   config: NormalizedRailwayClientConfig;
   environmentId: string;
   sandboxId: string;
