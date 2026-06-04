@@ -13,16 +13,19 @@ export type SandboxInfo = RailwaySandboxFieldsFragment;
 
 export type SandboxTemplateInfo = RailwaySandboxTemplateFieldsFragment;
 
-export interface CreateOptions extends RailwayClientConfig {
-  environmentId?: string;
+/** Knobs shared by every sandbox-creating call: `create`, `create(template)`, and `fork`. */
+export interface SandboxCreationOptions {
   idleTimeoutMinutes?: number;
   networkIsolation?: SandboxNetworkIsolation;
 }
 
-export interface ForkOptions {
-  idleTimeoutMinutes?: number;
-  networkIsolation?: SandboxNetworkIsolation;
+export interface CreateOptions
+  extends RailwayClientConfig,
+    SandboxCreationOptions {
+  environmentId?: string;
 }
+
+export type ForkOptions = SandboxCreationOptions;
 
 export interface ConnectOptions extends RailwayClientConfig {
   environmentId?: string;
