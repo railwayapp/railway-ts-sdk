@@ -121,7 +121,8 @@ export function diffGraphs({ current, desired }: { current: RailwayGraph; desire
     } else {
       diffTopLevelField({ previous, resource, field: "config", changes });
     }
-    if (resource.type === "database") diffTopLevelField({ previous, resource, field: "defaultMountPath", changes });
+    // Database mount paths are product/template defaults in v0. Do not churn or attempt
+    // mount-path updates after creation; Backboard owns the database realization details.
   }
 
   for (const resource of current.resources) {
