@@ -67,11 +67,29 @@ describe("Sandbox.create", () => {
     expect(sandbox.status).toBe("RUNNING");
     expect(sandbox.region).toBe("us-west2");
     expect(sandbox.idleTimeoutMinutes).toBe(5);
+    expect(sandbox.networkIsolation).toBe("ISOLATED");
     expect(sandbox.createdAt).toBe("2026-05-13T00:00:00.000Z");
     expect(sandbox.toJSON()).toEqual(sandboxInfo());
     expect(mock.calls[0]?.body.query).toContain("mutation RailwaySandboxCreate");
     expect(mock.calls[0]?.body.variables).toEqual({
       input: { environmentId: "environment_123", idleTimeoutMinutes: 10 },
+    });
+  });
+
+  it("passes networkIsolation into the create input and reads it back", async () => {
+    const mock = createFetchMock([
+      { data: { sandboxCreate: sandboxInfo({ networkIsolation: "PRIVATE" }) } },
+    ]);
+
+    const sandbox = await Sandbox.create({
+      ...auth,
+      networkIsolation: "PRIVATE",
+      fetch: mock.fetch,
+    });
+
+    expect(sandbox.networkIsolation).toBe("PRIVATE");
+    expect(mock.calls[0]?.body.variables).toEqual({
+      input: { environmentId: "environment_123", networkIsolation: "PRIVATE" },
     });
   });
 });
@@ -419,6 +437,19 @@ describe("sandbox.fork", () => {
         environmentId: "environment_123",
         sourceSandboxId: "sandbox_123",
         idleTimeoutMinutes: 15,
+      },
+    });
+  });
+
+  it("passes networkIsolation into the fork input", async () => {
+    const { sandbox, calls } = await createThenQueue(forkResponse);
+    await sandbox.fork({ networkIsolation: "PRIVATE" });
+
+    expect(calls[1]?.body.variables).toEqual({
+      input: {
+        environmentId: "environment_123",
+        sourceSandboxId: "sandbox_123",
+        networkIsolation: "PRIVATE",
       },
     });
   });

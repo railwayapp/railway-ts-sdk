@@ -81,6 +81,20 @@ await fork.exec("npm test"); // sees the installed deps, isolated from base
 `Sandbox.create(source)` is the same operation in static form. Pass `idleTimeoutMinutes` to
 override the fork's idle timeout. The source must be `RUNNING`.
 
+## Network isolation
+
+By default a sandbox is `ISOLATED`: it has public NAT egress but cannot reach the rest of
+your environment's private network. Pass `networkIsolation: "PRIVATE"` to place it on the
+environment private network, so it can talk to your other services.
+
+```ts
+const sandbox = await Sandbox.create({ networkIsolation: "PRIVATE" });
+sandbox.networkIsolation; // "ISOLATED" | "PRIVATE"
+```
+
+`networkIsolation` is settable on `create`, `create(template)`, and `fork`, and is read
+back on every sandbox. It defaults to `ISOLATED` when omitted.
+
 ## Reconnecting and listing
 
 A sandbox outlives the process that created it, so you can reattach to it by id.

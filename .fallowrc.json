@@ -17,6 +17,7 @@
     "exec",
     "fork",
     "idleTimeoutMinutes",
+    "networkIsolation",
     "refresh",
     "region",
     "run",

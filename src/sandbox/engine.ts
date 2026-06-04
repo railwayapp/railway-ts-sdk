@@ -83,6 +83,9 @@ export class SandboxEngine {
     if (options.idleTimeoutMinutes !== undefined) {
       input.idleTimeoutMinutes = options.idleTimeoutMinutes;
     }
+    if (options.networkIsolation !== undefined) {
+      input.networkIsolation = options.networkIsolation;
+    }
     if (templateInstructions !== undefined) {
       input.template = { instructions: [...templateInstructions] };
     }
@@ -105,6 +108,9 @@ export class SandboxEngine {
     };
     if (options.idleTimeoutMinutes !== undefined) {
       input.idleTimeoutMinutes = options.idleTimeoutMinutes;
+    }
+    if (options.networkIsolation !== undefined) {
+      input.networkIsolation = options.networkIsolation;
     }
 
     const data = await requestGraphQL<
