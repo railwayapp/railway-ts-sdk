@@ -27,6 +27,7 @@ import {
   type RailwaySandboxTemplateBuildMutationVariables,
   type RailwaySandboxTemplateQuery,
   type RailwaySandboxTemplateQueryVariables,
+  type SandboxTemplateInput,
 } from "../generated/graphql.js";
 import {
   SandboxFailedError,
@@ -35,6 +36,7 @@ import {
   SandboxTimeoutError,
 } from "./errors.js";
 import type {
+  CompiledTemplate,
   CreateOptions,
   ExecOptions,
   ExecResult,
@@ -76,13 +78,15 @@ export class SandboxEngine {
 
   async create(
     options: CreateOptions = {},
-    templateInstructions?: readonly string[],
+    template?: CompiledTemplate,
   ): Promise<SandboxInfo> {
     const input: RailwaySandboxCreateMutationVariables["input"] = {
       environmentId: this.#config.environmentId,
     };
-    if (templateInstructions !== undefined) {
-      input.template = { instructions: [...templateInstructions] };
+    if (template !== undefined) {
+      // Echo the template's build-time variables so the backend hash matches
+      // the built snapshot and forks from it.
+      input.template = toTemplateInput(template);
     }
 
     return this.#createAndWait(input, options);
@@ -109,6 +113,9 @@ export class SandboxEngine {
     if (options.networkIsolation !== undefined) {
       input.networkIsolation = options.networkIsolation;
     }
+    if (options.env !== undefined) {
+      input.variables = options.env;
+    }
 
     const data = await requestGraphQL<
       RailwaySandboxCreateMutation,
@@ -118,12 +125,10 @@ export class SandboxEngine {
     return this.#waitForRunning(data.sandboxCreate);
   }
 
-  async buildTemplate(
-    instructions: readonly string[],
-  ): Promise<SandboxTemplateInfo> {
+  async buildTemplate(template: CompiledTemplate): Promise<SandboxTemplateInfo> {
     const variables: RailwaySandboxTemplateBuildMutationVariables = {
       environmentId: this.#config.environmentId,
-      input: { instructions: [...instructions] },
+      input: toTemplateInput(template),
     };
     const data = await requestGraphQL<
       RailwaySandboxTemplateBuildMutation,
@@ -147,9 +152,9 @@ export class SandboxEngine {
   }
 
   async buildTemplateUntilReady(
-    instructions: readonly string[],
+    template: CompiledTemplate,
   ): Promise<SandboxTemplateInfo> {
-    const built = await this.buildTemplate(instructions);
+    const built = await this.buildTemplate(template);
     if (built.status === "READY") return built;
     if (built.status === "FAILED") {
       throw new SandboxTemplateBuildError({
@@ -293,6 +298,13 @@ export class SandboxEngine {
 
 function isSandboxTerminal(status: SandboxInfo["status"]): boolean {
   return status === "FAILED" || status === "DESTROYED" || status === "DESTROYING";
+}
+
+function toTemplateInput(template: CompiledTemplate): SandboxTemplateInput {
+  return {
+    instructions: [...template.instructions],
+    ...(template.variables && { variables: template.variables }),
+  };
 }
 
 export function engineFromOptions(options: SandboxOptions = {}): SandboxEngine {

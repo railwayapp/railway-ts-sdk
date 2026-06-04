@@ -13,10 +13,19 @@ export type SandboxInfo = RailwaySandboxFieldsFragment;
 
 export type SandboxTemplateInfo = RailwaySandboxTemplateFieldsFragment;
 
+/** A template recipe compiled into the inputs the backend understands. */
+export interface CompiledTemplate {
+  readonly instructions: readonly string[];
+  /** Build-time env for the build instructions; omitted when empty. */
+  readonly variables?: Record<string, string>;
+}
+
 /** Knobs shared by every sandbox-creating call: `create`, `create(template)`, and `fork`. */
 export interface SandboxCreationOptions {
   idleTimeoutMinutes?: number;
   networkIsolation?: SandboxNetworkIsolation;
+  /** Runtime env baked into the sandbox, available to every command. Values may use Railway references (e.g. `${{shared.FOO}}`). */
+  env?: Record<string, string>;
 }
 
 export interface CreateOptions
