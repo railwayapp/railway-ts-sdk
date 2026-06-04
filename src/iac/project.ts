@@ -12,6 +12,7 @@ import type {
   VolumeNode,
 } from "./graph.js";
 import type { EnvironmentConfig } from "./schema.js";
+import type { RailwayContextInput } from "./sdk.js";
 
 export interface RailwayIacServiceMap {}
 export interface RailwayIacDatabaseMap {}
@@ -30,6 +31,7 @@ export type RailwayResourceName = KnownName<RailwayIacResourceMap>;
 export interface EvaluatedRailwayProjectOptions extends GraphCompileOptions {
   file?: string;
   cwd?: string;
+  context?: RailwayContextInput;
 }
 
 export interface EvaluatedRailwayProjectSnapshot {

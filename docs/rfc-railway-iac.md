@@ -319,7 +319,7 @@ description: Edit this project's Railway infrastructure-as-code configuration. U
 
 Today config is still effectively tied to the linked environment during plan/apply. The next major design step is making `.railway/railway.ts` generic and context-aware.
 
-Target shape:
+Current shape:
 
 ```ts
 export default defineRailway(ctx => {
@@ -338,7 +338,7 @@ export default defineRailway(ctx => {
 });
 ```
 
-The CLI/runner should pass context such as project, environment, workspace, and command so the same source file can render different desired state for different environments.
+The CLI/runner now passes context such as command, project ID, environment ID, and environment name so the same source file can render different desired state for different environments. Remaining work is polishing import/rendering patterns so pulled config naturally preserves environment-agnostic structure instead of hardcoding one environment's state.
 
 ### 2. Persisted ChangeSets
 

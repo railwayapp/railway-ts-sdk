@@ -22,13 +22,23 @@ import type {
   VolumeMount,
 } from "./schema.js";
 
-export interface RailwayContext {
+export interface RailwayContextInput {
+  command?: string;
+  projectId?: string;
+  projectName?: string;
+  environmentId?: string;
+  environment?: string;
+  environmentName?: string;
+}
+
+export interface RailwayContext extends RailwayContextInput {
   randomString: (label?: string, bytes?: number) => string;
+  isEnvironment: (name: string) => boolean;
 }
 
 export type RailwayProgram = (
-  project: (name: string, definition: Omit<ProjectDefinition, "name">) => ProjectDefinition,
   ctx: RailwayContext,
+  project: (name: string, definition: Omit<ProjectDefinition, "name">) => ProjectDefinition,
 ) => ProjectDefinition | Promise<ProjectDefinition>;
 
 export function defineRailway(program: RailwayProgram): RailwayProgram {
@@ -41,10 +51,14 @@ export function project(name: string, definition: Omit<ProjectDefinition, "name"
   return { name, ...definition };
 }
 
-export function createRailwayContext(): RailwayContext {
+export function createRailwayContext(input: RailwayContextInput = {}): RailwayContext {
+  const environment = input.environment ?? input.environmentName;
   return {
+    ...input,
+    ...(environment ? { environment, environmentName: environment } : {}),
     randomString: (label = "random", bytes = 12) =>
-      createHash("sha256").update(`railway-iac:${label}`).digest("hex").slice(0, bytes * 2),
+      createHash("sha256").update(`railway-iac:${environment ?? "default"}:${label}`).digest("hex").slice(0, bytes * 2),
+    isEnvironment: (name: string) => environment === name,
   };
 }
 

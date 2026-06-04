@@ -6,6 +6,7 @@ import { evaluateRailwayProject, findRailwayFile } from "./project.js";
 import { renderRailwayGraphTypes } from "./typegen.js";
 import type { EnvironmentConfig } from "./schema.js";
 import type { RailwayAuthType } from "../core/config.js";
+import type { RailwayContextInput } from "./sdk.js";
 
 export interface RailwayIacRunnerRequest {
   command?: "evaluate" | "typegen" | "current" | "plan" | "stage" | "apply";
@@ -13,6 +14,7 @@ export interface RailwayIacRunnerRequest {
   file?: string;
   includeTypes?: boolean;
   pretty?: boolean;
+  context?: RailwayContextInput;
   backboard?: RailwayIacBackboardContext;
 }
 
@@ -96,7 +98,7 @@ export async function runRailwayIac(request: RailwayIacRunnerRequest = {}): Prom
   const file = request.file ?? await findRailwayFile(cwd);
 
   try {
-    const evaluated = await evaluateRailwayProject({ file });
+    const evaluated = await evaluateRailwayProject({ file, context: runnerContext(request, command) });
     const diagnostics = graphDiagnostics(evaluated.graph);
 
     if (command === "typegen") {
@@ -231,6 +233,19 @@ async function planRailwayIac({ file, desiredGraph, request, diagnostics }: {
     diff: renderChangeSet(changeSet),
     ...(request.includeTypes ? { graphTypes: renderRailwayGraphTypes(desiredGraph) } : {}),
     diagnostics: allDiagnostics,
+  };
+}
+
+function runnerContext(request: RailwayIacRunnerRequest, command: string): RailwayContextInput {
+  const environment = request.context?.environment ?? request.context?.environmentName;
+  const projectId = request.context?.projectId ?? request.backboard?.projectId;
+  const environmentId = request.context?.environmentId ?? request.backboard?.environmentId;
+  return {
+    ...request.context,
+    command,
+    ...(projectId ? { projectId } : {}),
+    ...(environmentId ? { environmentId } : {}),
+    ...(environment ? { environment, environmentName: environment } : {}),
   };
 }
 
