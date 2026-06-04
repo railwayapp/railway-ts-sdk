@@ -219,7 +219,7 @@ function diffVariables({ previous, resource, changes, resourcesByAddress }: { pr
   const before = "variables" in previous ? previous.variables ?? {} : {};
   const after = "variables" in resource ? resource.variables ?? {} : {};
   for (const [key, value] of Object.entries(after)) {
-    if (isPreservedVariable(value) || isUnknownImportedVariable(before[key])) continue;
+    if (isPreservedVariable(value) || isPreservedVariable(before[key]) || isUnknownImportedVariable(before[key])) continue;
     if (stableStringify(normalizeVariableForDiff(before[key], resourcesByAddress)) === stableStringify(normalizeVariableForDiff(value, resourcesByAddress))) continue;
     changes.push({
       kind: "variable.set",
@@ -424,7 +424,7 @@ function normalizeForDiff(field: string, value: unknown): unknown {
     if (copy.multiRegionConfig != null && typeof copy.multiRegionConfig === "object" && !Array.isArray(copy.multiRegionConfig) && Object.keys(copy.multiRegionConfig).length === 0) delete copy.multiRegionConfig;
   }
 
-  return copy;
+  return Object.keys(copy).length === 0 ? undefined : copy;
 }
 
 function normalizeMultiRegionConfig(value: unknown): unknown {

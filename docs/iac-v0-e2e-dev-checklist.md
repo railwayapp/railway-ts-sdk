@@ -70,7 +70,7 @@ Automated by `scripts/iac-v0-dev-e2e.mjs`:
 - [ ] multiple regions
 - [ ] env literal string
 - [ ] env number/bool as strings for v0
-- [ ] env `preserve()`
+- [ ] env `preserve()` on imported/existing secrets
 - [ ] `db.env.DATABASE_URL`
 - [ ] `redis.env.REDIS_URL`
 
