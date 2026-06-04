@@ -231,7 +231,8 @@ interface ServiceConfigInput {
   };
 
   deploy?: DeployConfig;
-  regions?: Record<string, RegionConfig>;
+  replicas?: number | Record<string, RegionConfig>;
+  regions?: Record<string, RegionConfig>; // compatibility alias
 
   networking?: ServiceNetworking;
   domains?: Array<string | { domain: string; port?: number }>;
@@ -276,25 +277,34 @@ Expands to Railway deploy/build config:
 }
 ```
 
-### Regions
+### Replicas
 
-```ts
-type RegionConfig = number | {
-  replicas?: number;
-  stacker?: string | null;
-};
-```
+Prefer `replicas` for scaling intent.
 
 ```ts
 service("web", {
-  regions: {
+  replicas: 3,
+});
+```
+
+Advanced placement form:
+
+```ts
+type RegionConfig = number | {
+  count?: number;
+  replicas?: number; // compatibility alias
+  stacker?: string | null;
+};
+
+service("web", {
+  replicas: {
     "us-west2": 2,
-    "europe-west4": { replicas: 1 },
+    "europe-west4": { count: 1 },
   },
 });
 ```
 
-This renders to Railway multi-region replica config. Disabled/null regions from Railway are ignored during import/diff.
+`regions` remains a compatibility alias for the same underlying Railway multi-region replica config. Imports should prefer `replicas`. Disabled/null regions from Railway are ignored during import/diff.
 
 ### Domains
 
@@ -554,7 +564,7 @@ mongo("mongo").env.MONGO_URL
 
 Public DSL names should prefer product concepts:
 
-- `regions`, not `multiRegionConfig`
+- `replicas`, not `multiRegionConfig`
 - `domains`, not `networking.customDomains`
 - `.env` references, not raw Railway variable reference syntax
 - `preserve()`, not placeholder secret strings

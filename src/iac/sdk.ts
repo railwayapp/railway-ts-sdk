@@ -62,7 +62,7 @@ export function createRailwayContext(input: RailwayContextInput = {}): RailwayCo
   };
 }
 
-export type RegionConfig = number | { replicas?: number; stacker?: string | null };
+export type RegionConfig = number | { count?: number; replicas?: number; stacker?: string | null };
 
 export interface IntentServiceConfig {
   source?: SourceConfig | Omit<SourceConfig, "type">;
@@ -78,6 +78,7 @@ export interface IntentServiceConfig {
   healthcheck?: string;
   healthcheckPath?: string;
   healthcheckTimeout?: number;
+  replicas?: number | Record<string, RegionConfig>;
   regions?: Record<string, RegionConfig>;
   networking?: ServiceNetworking;
   domains?: Array<string | { domain: string; port?: number }>;
@@ -263,8 +264,15 @@ function normalizeDeploy(config: ServiceConfigInput): DeployConfig | undefined {
     preDeployCommand: Array.isArray(preDeployCommand) ? preDeployCommand : preDeployCommand ? [preDeployCommand] : config.deploy?.preDeployCommand,
     healthcheckPath: config.healthcheck ?? config.healthcheckPath ?? config.run?.healthcheck ?? config.deploy?.healthcheckPath,
     healthcheckTimeout: config.healthcheckTimeout ?? config.run?.healthcheckTimeout ?? config.deploy?.healthcheckTimeout,
-    multiRegionConfig: config.regions ? normalizeRegions(config.regions) : config.deploy?.multiRegionConfig,
+    multiRegionConfig: normalizeReplicas(config.replicas, config.regions) ?? config.deploy?.multiRegionConfig,
   }) as DeployConfig | undefined;
+}
+
+function normalizeReplicas(replicas: ServiceConfigInput["replicas"], regions: ServiceConfigInput["regions"]): DeployConfig["multiRegionConfig"] | undefined {
+  if (typeof replicas === "number") return normalizeRegions({ "us-west2": replicas });
+  if (replicas) return normalizeRegions(replicas);
+  if (regions) return normalizeRegions(regions);
+  return undefined;
 }
 
 function normalizeRegions(regions: Record<string, RegionConfig>): DeployConfig["multiRegionConfig"] {
@@ -273,7 +281,7 @@ function normalizeRegions(regions: Record<string, RegionConfig>): DeployConfig["
       region,
       typeof value === "number"
         ? { numReplicas: value }
-        : (pruneEmpty({ numReplicas: value.replicas, stackerAssignment: value.stacker }) ?? {}),
+        : (pruneEmpty({ numReplicas: value.count ?? value.replicas, stackerAssignment: value.stacker }) ?? {}),
     ]),
   ) as DeployConfig["multiRegionConfig"];
 }

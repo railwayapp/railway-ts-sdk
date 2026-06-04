@@ -82,7 +82,7 @@ async function main() {
     ["github-source", `  const web = service("web", { source: github("railwayapp-templates/expressjs", { branch: "main" }) });\n  return project("iac-e2e-github", { environments: ["production"], services: [web] });`],
     ["image-source", `  const web = service("web", { source: image("nginx:latest") });\n  return project("iac-e2e-image", { environments: ["production"], services: [web] });`],
     ["empty-build-start-health", `  const web = service("web", { build: "pnpm build", start: "pnpm start", healthcheck: "/health", healthcheckTimeout: 30 });\n  return project("iac-e2e-empty", { environments: ["production"], services: [web] });`],
-    ["regions-replicas", `  const web = service("web", { regions: { "us-west2": 1, "europe-west4": 1 } });\n  return project("iac-e2e-regions", { environments: ["production"], services: [web] });`],
+    ["replicas-placement", `  const web = service("web", { replicas: { "us-west2": 1, "europe-west4": 1 } });\n  return project("iac-e2e-replicas", { environments: ["production"], services: [web] });`],
     ["env-literals", `  const web = service("web", { env: { LITERAL: "hello", COUNT: "1", ENABLED: "true" } });\n  return project("iac-e2e-env", { environments: ["production"], services: [web] });`],
     ["db-refs", `  const db = postgres("postgres");\n  const cache = redis("redis");\n  const web = service("web", { env: { DATABASE_URL: db.env.DATABASE_URL, REDIS_URL: cache.env.REDIS_URL } });\n  return project("iac-e2e-refs", { environments: ["production"], services: [db, cache, web] });`],
   ];

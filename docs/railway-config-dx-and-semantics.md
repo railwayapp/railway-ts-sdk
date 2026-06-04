@@ -168,9 +168,9 @@ export default defineRailway((ctx) => {
 
   const web = service("web", {
     source: github("acme/web"),
-    regions: prod
+    replicas: prod
       ? { "us-west2": 2, "europe-west4": 1 }
-      : { "us-west2": 1 },
+      : 1,
   });
 
   return project("regional-web", {
@@ -245,7 +245,7 @@ export default defineRailway((ctx) => {
     build: "pnpm --filter api build",
     start: "pnpm --filter api start",
     healthcheck: "/health",
-    regions: prod ? { "us-west2": 2, "europe-west4": 1 } : { "us-west2": 1 },
+    replicas: prod ? { "us-west2": 2, "europe-west4": 1 } : 1,
     env: {
       DATABASE_URL: db.env.DATABASE_URL,
       REDIS_URL: cache.env.REDIS_URL,
@@ -305,7 +305,7 @@ These are required somewhere in Railway's backend model, but not always required
   - no source → `empty`
 - Source branch: `github()` defaults to `main`.
 - Build config: string expands to `{ buildCommand }`.
-- Deploy config: `start`, `healthcheck`, `healthcheckTimeout`, `regions` expand to Railway deploy fields.
+- Deploy config: `start`, `healthcheck`, `healthcheckTimeout`, `replicas` expand to Railway deploy fields.
 - Variable references: `db.env.DATABASE_URL` expands to a Railway variable reference.
 - Local upload target: `railway up` infers linked service or single desired source-less/deployable service.
 - Current project/environment context: passed by CLI into the runner.
@@ -336,7 +336,7 @@ These are Railway product concepts users may need to express:
 - databases
 - buckets
 - custom domains
-- regions/replicas
+- replicas/placement
 - Railway-provided service variables
 - private/public domains via variable refs
 - source-less services for local upload with `railway up`
@@ -424,10 +424,16 @@ Deleting variables:
 - Removing a variable from source can emit `variable.delete` once the service/resource is managed.
 - Variable deletes are destructive and should be visible in the plan.
 
-### Regions / replicas
+### Replicas / placement
 
 ```ts
-regions: {
+replicas: 3
+```
+
+Advanced placement:
+
+```ts
+replicas: {
   "us-west2": 2,
   "europe-west4": 1,
 }
@@ -521,7 +527,7 @@ This skips configuration apply and behaves like normal deploy.
 - Should `project(..., { services: [...] })` be renamed/expanded to `resources` while keeping `services` as compat?
 - Should string custom domains default to port `8080`, or should the backend infer the service port?
 - Should `preserve()` be allowed for missing variables as a no-op, or should it warn that there is nothing to preserve?
-- Which deploy fields deserve first-class DSL aliases beyond `start`, `healthcheck`, `regions`?
+- Which deploy fields deserve first-class DSL aliases beyond `start`, `healthcheck`, `replicas`?
 - Should volume helpers be hidden from v0 docs until lifecycle is safe?
 - Should group helpers be hidden/export-gated until import/round-trip/apply semantics are complete?
 - How much imported config should be environment-agnostic vs literal current-environment state?
