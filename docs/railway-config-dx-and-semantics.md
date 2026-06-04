@@ -523,4 +523,5 @@ This skips configuration apply and behaves like normal deploy.
 - Should `preserve()` be allowed for missing variables as a no-op, or should it warn that there is nothing to preserve?
 - Which deploy fields deserve first-class DSL aliases beyond `start`, `healthcheck`, `regions`?
 - Should volume helpers be hidden from v0 docs until lifecycle is safe?
+- Should group helpers be hidden/export-gated until import/round-trip/apply semantics are complete?
 - How much imported config should be environment-agnostic vs literal current-environment state?

@@ -22,7 +22,6 @@ import {
   database,
   bucket,
   volume,
-  group,
   ref,
   preserve,
 } from "railway/iac";
@@ -466,17 +465,9 @@ Volume lifecycle is not a safe v0 authoring path yet. Existing volume mounts are
 
 ## Groups
 
-```ts
-group(name: string, options?: {
-  color?: string;
-  icon?: string;
-  isCollapsed?: boolean;
-})
-```
+`group()` exists experimentally in the SDK, but it is **not part of the v0 public DSL** yet.
 
-```ts
-const backend = group("Backend", { color: "blue" });
-```
+Reason: group creation compiles into config, but import/round-trip/apply semantics are not complete enough to promise no-op behavior. Do not use groups in release examples until they are covered by E2E tests.
 
 ## Variables and references
 
