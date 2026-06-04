@@ -16,7 +16,7 @@ export default defineRailway(() => {
           "us-west1": 4,
         },
         env: {
-          QUEUE_URL: queue.url(),
+          QUEUE_URL: queue.env.REDIS_URL,
           WORKER_CONCURRENCY: "8",
         },
       }),
@@ -30,7 +30,7 @@ export default defineRailway(() => {
           restartPolicyType: "NEVER",
         },
         env: {
-          QUEUE_URL: queue.url(),
+          QUEUE_URL: queue.env.REDIS_URL,
         },
       }),
     ],

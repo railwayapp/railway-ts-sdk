@@ -28,7 +28,7 @@ export default defineRailway(() => {
         domains: [{ domain: "api.example.com", port: 3000 }],
         env: {
           NODE_ENV: "production",
-          DATABASE_URL: db.url(),
+          DATABASE_URL: db.env.DATABASE_URL,
           S3_BUCKET: "uploads",
           SESSION_SECRET: { generator: "secret(32)", isSealed: true },
         },

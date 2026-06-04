@@ -1,46 +1,25 @@
-import {
-  defineRailway,
-  github,
-  project,
-  redis,
-  service,
-} from "../../../src/iac/index.ts";
+import { bucket, defineRailway, github, postgres, preserve, project, redis, service } from "railway/iac";
 
 export default defineRailway(() => {
-  const cache = redis("Redis");
+  const Redis = redis("Redis");
+  const Postgres = postgres("Postgres");
+  const api = service("api", {
+    source: github("futurepastori/dummy-iac-example", { branch: "victor/init-dummy-api" }),
+    build: "pnpm build",
+    start: "pnpm start",
+    healthcheck: "/health",
+    regions: { "europe-west4": 1, "us-west1": 2 },
+    env: {
+      DATABASE_URL: preserve(),
+      NODE_ENV: preserve(),
+      REDIS_URL: preserve(),
+    },
+  });
+  const memesMedia = bucket("memes-media", { region: "sjc" });
+  const collectedPierogi = bucket("collected-pierogi", { region: "sjc" });
 
-  const repo = "futurepastori/todo-iac-example";
-
-  return project("todo-list", {
+  return project("imported-project", {
     environments: ["production"],
-    services: [
-      cache,
-
-      service("backend", {
-        source: github(repo, { rootDirectory: "apps/backend" }),
-        build: "pnpm install --frozen-lockfile && pnpm --filter backend build",
-        start: "pnpm --filter backend start",
-        healthcheck: "/health",
-        env: {
-          PORT: "3000",
-          REDIS_URL: cache.url(),
-          CORS_ORIGIN: "${{frontend.RAILWAY_PUBLIC_DOMAIN}}",
-        },
-      }),
-
-      service("frontend", {
-        source: github(repo, { rootDirectory: "apps/frontend" }),
-        build: "pnpm install --frozen-lockfile && pnpm --filter frontend build",
-        start: "pnpm --filter frontend preview -- --port ${PORT:-4173}",
-        preDeploy: "pnpm --filter frontend generate-sitemap",
-        regions: {
-          "us-west1": 3,
-          "europe-west4": 2,
-        },
-        env: {
-          VITE_API_URL: "https://${{backend.RAILWAY_PUBLIC_DOMAIN}}",
-        },
-      }),
-    ],
+    services: [Redis, Postgres, api, memesMedia, collectedPierogi],
   });
 });

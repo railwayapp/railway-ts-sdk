@@ -1,8 +1,11 @@
 export const DEFAULT_RAILWAY_GRAPHQL_ENDPOINT =
   "https://backboard.railway.com/graphql/v2";
 
+export type RailwayAuthType = "bearer" | "project-token";
+
 export interface RailwayClientConfig {
   token: string;
+  authType?: RailwayAuthType;
   endpoint?: string;
   /** Alias used by IaC/demo flows. Prefer endpoint for the stable SDK surface. */
   graphqlEndpoint?: string;
@@ -11,6 +14,7 @@ export interface RailwayClientConfig {
 
 export interface NormalizedRailwayClientConfig {
   token: string;
+  authType: RailwayAuthType;
   endpoint: string;
   fetch: typeof fetch;
 }
@@ -27,6 +31,7 @@ export function normalizeRailwayClientConfig(
 
   return {
     token: config.token,
+    authType: config.authType ?? "bearer",
     endpoint: config.endpoint ?? config.graphqlEndpoint ?? DEFAULT_RAILWAY_GRAPHQL_ENDPOINT,
     fetch: fetchImpl,
   };

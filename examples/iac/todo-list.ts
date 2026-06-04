@@ -16,7 +16,7 @@ export default defineRailway(() => {
         healthcheck: "/health",
         env: {
           PORT: "3000",
-          REDIS_URL: cache.url(),
+          REDIS_URL: cache.env.REDIS_URL,
           CORS_ORIGIN: "${{frontend.RAILWAY_PUBLIC_DOMAIN}}",
         },
       }),

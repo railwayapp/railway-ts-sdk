@@ -34,7 +34,8 @@ try {
 }
 
 async function runRunner(command: "plan" | "stage"): Promise<RunnerResponse> {
-  const token = args.token ?? process.env.RAILWAY_TOKEN;
+  const projectToken = process.env.RAILWAY_TOKEN;
+  const token = args.token ?? projectToken ?? process.env.RAILWAY_API_TOKEN;
   const environmentId = args.environmentId ?? process.env.RAILWAY_ENVIRONMENT_ID;
   const projectId = args.projectId ?? process.env.RAILWAY_PROJECT_ID;
   const endpoint = args.endpoint ?? process.env.RAILWAY_GRAPHQL_ENDPOINT ?? "https://backboard.railway.com/graphql/v2";
@@ -58,6 +59,7 @@ async function runRunner(command: "plan" | "stage"): Promise<RunnerResponse> {
     "--file", file,
     "--endpoint", endpoint,
     "--token", token,
+    "--auth-type", projectToken && !args.token ? "project-token" : "bearer",
     "--environment-id", environmentId,
     "--compact",
     ...(projectId ? ["--project-id", projectId] : []),

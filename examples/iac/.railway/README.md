@@ -1,10 +1,31 @@
-# Generated graph example
+# Railway configuration
 
-This directory demonstrates what a project-local Railway IaC setup can generate from `.railway/railway.ts`.
+This project contains a Railway configuration file:
 
-- `railway.ts` is the authored TypeScript definition.
-- `generated/graph.json` is the deterministic graph.
-- `generated/desired-config.json` is the compiled Railway environment config.
-- `generated/graph-types.d.ts` augments `railway/iac` with graph resource names for autocomplete.
+```txt
+.railway/railway.ts
+```
 
-The generated files are examples only. In a real project they can be regenerated from the evaluated graph.
+Use it to describe the desired shape of this Railway project: services, databases, buckets, volumes, domains, and environment variables.
+
+## Commands
+
+Preview changes:
+
+```bash
+railway config plan
+```
+
+Apply changes:
+
+```bash
+railway config apply
+```
+
+Deploy code:
+
+```bash
+railway up
+```
+
+If `.railway/railway.ts` has pending changes, `railway up` may ask to apply them before deploying.
