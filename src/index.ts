@@ -21,6 +21,7 @@ export {
   type ForkOptions,
   type ListOptions,
   type SandboxInfo,
+  type SandboxNetworkIsolation,
   type SandboxStatus,
   type SandboxTemplate,
   type TemplateBuildOptions,

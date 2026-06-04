@@ -293,6 +293,7 @@ that shipping it flips on a network call — never a breaking type change.
 | `sandbox.destroy()` / `await using` | **Live** |
 | Env-resolved config + `RailwayAuthError` | **Live** |
 | `Sandbox.connect(id)` / `Sandbox.list()` / `sandbox.refresh()` | **Live** |
+| `create({ networkIsolation })` + `sandbox.networkIsolation` | **Live** |
 | `sandbox.files.*` | Future |
 | `Sandbox.template()` / `SandboxTemplate` / `create(template)` | **Live** |
 | `sandbox.fork()` / `create(sandbox)` | **Live** |
@@ -324,6 +325,7 @@ import {
   type ExecResult,
   type SandboxInfo,
   type SandboxStatus,
+  type SandboxNetworkIsolation,
   type SandboxTemplate,
   type TemplateBuildOptions,
   type RailwayClientConfig,
@@ -342,6 +344,7 @@ class Sandbox {
 
   readonly id: string;
   readonly status: SandboxStatus;
+  readonly networkIsolation: SandboxNetworkIsolation;
   readonly environmentId: string;
   readonly region: string;
   readonly idleTimeoutMinutes: number | null;

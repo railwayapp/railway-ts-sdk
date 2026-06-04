@@ -17,6 +17,7 @@ import type {
   ForkOptions,
   ListOptions,
   SandboxInfo,
+  SandboxNetworkIsolation,
   SandboxStatus,
 } from "./types.js";
 
@@ -41,6 +42,11 @@ export class Sandbox implements AsyncDisposable {
 
   get status(): SandboxStatus {
     return this.#info.status;
+  }
+
+  /** Network access mode: `ISOLATED` (NAT egress only) or `PRIVATE` (joins the environment private network). */
+  get networkIsolation(): SandboxNetworkIsolation {
+    return this.#info.networkIsolation;
   }
 
   get environmentId(): string {

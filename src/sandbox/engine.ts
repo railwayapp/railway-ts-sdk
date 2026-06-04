@@ -40,6 +40,7 @@ import type {
   ExecResult,
   ForkOptions,
   ListOptions,
+  SandboxCreationOptions,
   SandboxInfo,
   SandboxTemplateInfo,
 } from "./types.js";
@@ -80,31 +81,33 @@ export class SandboxEngine {
     const input: RailwaySandboxCreateMutationVariables["input"] = {
       environmentId: this.#config.environmentId,
     };
-    if (options.idleTimeoutMinutes !== undefined) {
-      input.idleTimeoutMinutes = options.idleTimeoutMinutes;
-    }
     if (templateInstructions !== undefined) {
       input.template = { instructions: [...templateInstructions] };
     }
 
-    const data = await requestGraphQL<
-      RailwaySandboxCreateMutation,
-      RailwaySandboxCreateMutationVariables
-    >(this.#config, RailwaySandboxCreateDocument, { input });
-
-    return this.#waitForRunning(data.sandboxCreate);
+    return this.#createAndWait(input, options);
   }
 
   async fork(
     sourceSandboxId: string,
     options: ForkOptions = {},
   ): Promise<SandboxInfo> {
-    const input: RailwaySandboxCreateMutationVariables["input"] = {
-      environmentId: this.#config.environmentId,
-      sourceSandboxId,
-    };
+    return this.#createAndWait(
+      { environmentId: this.#config.environmentId, sourceSandboxId },
+      options,
+    );
+  }
+
+  /** Applies the shared creation knobs, runs the create mutation, and waits for RUNNING. */
+  async #createAndWait(
+    input: RailwaySandboxCreateMutationVariables["input"],
+    options: SandboxCreationOptions,
+  ): Promise<SandboxInfo> {
     if (options.idleTimeoutMinutes !== undefined) {
       input.idleTimeoutMinutes = options.idleTimeoutMinutes;
+    }
+    if (options.networkIsolation !== undefined) {
+      input.networkIsolation = options.networkIsolation;
     }
 
     const data = await requestGraphQL<

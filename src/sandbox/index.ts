@@ -14,6 +14,7 @@ export type {
   ForkOptions,
   ListOptions,
   SandboxInfo,
+  SandboxNetworkIsolation,
   SandboxStatus,
   TemplateBuildOptions,
 } from "./types.js";
