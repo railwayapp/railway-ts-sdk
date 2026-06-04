@@ -67,7 +67,7 @@ function planApplyNoop(dir, label) {
 }
 
 function ts(resources) {
-  return `import { bucket, defineRailway, github, image, mongo, mysql, postgres, preserve, project, redis, service } from "railway/iac";\n\nexport default defineRailway(() => {\n${resources}\n});\n`;
+  return `import { bucket, defineRailway, github, group, image, mongo, mysql, postgres, preserve, project, redis, service } from "railway/iac";\n\nexport default defineRailway(() => {\n${resources}\n});\n`;
 }
 
 async function main() {
@@ -108,6 +108,17 @@ async function main() {
     }
     initRailwayProject(dir, uniqueProjectName(`db-${db}`));
     planApplyNoop(dir, `database ${db}`);
+  }
+
+  const groupDir = projectDir("iac-groups");
+  writeConfig(groupDir, ts(`  const api = service("api");\n  const worker = service("worker");\n  const backend = group("Backend", [api, worker]);\n  return project("iac-e2e-groups", { environments: ["production"], services: [backend] });`));
+  if (mutating) {
+    initRailwayProject(groupDir, uniqueProjectName("groups"));
+    planApplyNoop(groupDir, "groups create");
+    writeConfig(groupDir, ts(`  const api = service("api");\n  const worker = service("worker");\n  const frontend = group("Frontend", [api]);\n  const backend = group("Backend", [worker]);\n  return project("iac-e2e-groups", { environments: ["production"], services: [frontend, backend] });`));
+    planApplyNoop(groupDir, "groups move service");
+  } else {
+    results.push({ name: "groups matrix: skipped mutating matrix", ok: true, status: 0, out: groupDir });
   }
 
   const bucketDir = projectDir("iac-bucket");

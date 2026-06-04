@@ -109,6 +109,7 @@ export function diffGraphs({ current, desired }: { current: RailwayGraph; desire
     diffTopLevelField({ previous, resource, field: "source", changes });
     diffTopLevelField({ previous, resource, field: "build", changes });
     diffTopLevelField({ previous, resource, field: "deploy", changes });
+    diffTopLevelField({ previous, resource, field: "groupId", changes });
     diffNetworking({ previous, resource, changes });
     // Volume lifecycle is not part of v0 authoring. Never plan an accidental unmount just
     // because imported config omitted a Railway-owned volume id.
@@ -365,7 +366,7 @@ function update(address: ResourceAddress, field: string, before: unknown, after:
     path: `resources.${address}.${field}`,
     summary,
     severity: "safe",
-    deployEffect: field === "config" ? "none" : "deploy",
+    deployEffect: field === "config" || field === "groupId" ? "none" : "deploy",
   };
 }
 

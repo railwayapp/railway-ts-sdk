@@ -102,6 +102,25 @@ export function environmentConfigToGraph(
   options: { projectName?: string; serviceNamesById?: Record<string, string>; bucketNamesById?: Record<string, string>; customDomainsByServiceId?: Record<string, Record<string, { port?: number }>> } = {},
 ): RailwayGraph {
   const resources: ResourceNode[] = [];
+  const groupNamesById = Object.fromEntries(
+    Object.entries(config.groups ?? {}).map(([groupId, groupConfig]) => [groupId, groupConfig?.name ?? groupId]),
+  );
+
+  for (const [groupId, groupConfig] of Object.entries(config.groups ?? {})) {
+    if (groupConfig == null || groupConfig.isDeleted) continue;
+    const name = groupConfig.name ?? groupId;
+    const parentGroupId = (groupConfig as { groupId?: string | null }).groupId;
+    resources.push(pruneEmpty({
+      address: resourceAddress("group", name) as `group.${string}`,
+      type: "group",
+      name,
+      color: groupConfig.color,
+      icon: groupConfig.icon,
+      isCollapsed: groupConfig.isCollapsed,
+      ...(parentGroupId ? { groupId: groupNamesById[parentGroupId] ?? parentGroupId } : {}),
+    }) as ResourceNode);
+  }
+
   for (const [serviceId, serviceConfig] of Object.entries(config.services ?? {})) {
     if (serviceConfig == null || serviceConfig.isDeleted) continue;
     const name = options.serviceNamesById?.[serviceId] ?? serviceId;
@@ -119,6 +138,7 @@ export function environmentConfigToGraph(
         output: engine === "redis" ? "REDIS_URL" : engine === "mysql" ? "MYSQL_URL" : engine === "mongo" ? "MONGO_URL" : "DATABASE_URL",
         defaultMountPath: Object.keys(serviceConfig.volumeMounts ?? {}).length > 0 ? serviceConfig.deploy?.requiredMountPath : undefined,
         ...(serviceConfig.volumeMounts ? { volumeMounts: serviceConfig.volumeMounts } : {}),
+        ...(serviceConfig.groupId ? { groupId: groupNamesById[serviceConfig.groupId] ?? serviceConfig.groupId } : {}),
       }) as ResourceNode);
       continue;
     }
@@ -134,14 +154,21 @@ export function environmentConfigToGraph(
       ...(serviceConfig.networking || options.customDomainsByServiceId?.[serviceId] ? { networking: pruneEmpty({ ...serviceConfig.networking, customDomains: options.customDomainsByServiceId?.[serviceId] ?? serviceConfig.networking?.customDomains }) as ServiceNetworking } : {}),
       ...(serviceConfig.volumeMounts ? { volumeMounts: serviceConfig.volumeMounts } : {}),
       ...(serviceConfig.configFile ? { configFile: serviceConfig.configFile } : {}),
-      ...(serviceConfig.groupId ? { groupId: serviceConfig.groupId } : {}),
+      ...(serviceConfig.groupId ? { groupId: groupNamesById[serviceConfig.groupId] ?? serviceConfig.groupId } : {}),
     });
   }
 
   for (const [bucketId, bucketConfig] of Object.entries(config.buckets ?? {})) {
     if (bucketConfig == null || bucketConfig.isDeleted) continue;
     const name = options.bucketNamesById?.[bucketId] ?? bucketId;
-    resources.push({ address: resourceAddress("bucket", name) as `bucket.${string}`, type: "bucket", name, config: bucketConfig });
+    const groupId = (bucketConfig as { groupId?: string | null }).groupId;
+    resources.push({
+      address: resourceAddress("bucket", name) as `bucket.${string}`,
+      type: "bucket",
+      name,
+      config: bucketConfig,
+      ...(groupId ? { groupId: groupNamesById[groupId] ?? groupId } : {}),
+    });
   }
 
   return projectDefinitionToGraph({
