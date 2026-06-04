@@ -92,6 +92,23 @@ describe("Sandbox.create", () => {
       input: { environmentId: "environment_123", networkIsolation: "PRIVATE" },
     });
   });
+
+  it("passes env (incl. Railway references) into the create input verbatim", async () => {
+    const mock = createFetchMock([{ data: { sandboxCreate: sandboxInfo() } }]);
+
+    await Sandbox.create({
+      ...auth,
+      env: { NODE_ENV: "production", API_KEY: "${{shared.API_KEY}}" },
+      fetch: mock.fetch,
+    });
+
+    expect(mock.calls[0]?.body.variables).toEqual({
+      input: {
+        environmentId: "environment_123",
+        variables: { NODE_ENV: "production", API_KEY: "${{shared.API_KEY}}" },
+      },
+    });
+  });
 });
 
 describe("sandbox instance", () => {
@@ -282,35 +299,38 @@ describe("SandboxTemplate", () => {
     const withRun = base.run("echo hi");
 
     expect(withRun).not.toBe(base);
-    expect(compileSandboxTemplate(base)).toEqual([]);
-    expect(compileSandboxTemplate(withRun)).toEqual(["echo hi"]);
+    expect(compileSandboxTemplate(base)).toEqual({ instructions: [] });
+    expect(compileSandboxTemplate(withRun)).toEqual({ instructions: ["echo hi"] });
   });
 
-  it("folds env + workdir into each subsequent command", () => {
+  it("folds workdir into each subsequent command, keeping env as build-time variables", () => {
     const tpl = Sandbox.template()
       .withEnv({ K: "v" })
       .workdir("/app")
       .run("npm install");
 
-    expect(compileSandboxTemplate(tpl)).toEqual([
-      "export K='v' && mkdir -p '/app' && cd '/app' && npm install",
-    ]);
+    expect(compileSandboxTemplate(tpl)).toEqual({
+      instructions: ["mkdir -p '/app' && cd '/app' && npm install"],
+      variables: { K: "v" },
+    });
   });
 
   it("compiles withPackages to an apt install", () => {
     expect(
       compileSandboxTemplate(Sandbox.template().withPackages("ffmpeg", "git")),
-    ).toEqual([
-      "apt-get update && apt-get install -y --no-install-recommends ffmpeg git",
-    ]);
+    ).toEqual({
+      instructions: [
+        "apt-get update && apt-get install -y --no-install-recommends ffmpeg git",
+      ],
+    });
   });
 
-  it("escapes shell-special env values", () => {
+  it("passes env values through raw as build-time variables (no shell escaping)", () => {
     expect(
       compileSandboxTemplate(
         Sandbox.template().withEnv({ MSG: "a'b c" }).run("echo $MSG"),
       ),
-    ).toEqual([`export MSG='a'\\''b c' && echo $MSG`]);
+    ).toEqual({ instructions: ["echo $MSG"], variables: { MSG: "a'b c" } });
   });
 });
 
@@ -337,6 +357,32 @@ describe("SandboxTemplate.build", () => {
         ],
       },
     });
+  });
+
+  it("passes withEnv through as build-time variables", async () => {
+    const mock = createFetchMock([
+      { data: { sandboxTemplateBuild: templateInfo({ status: "READY" }) } },
+    ]);
+
+    await Sandbox.template()
+      .withEnv({ FOO: "bar" })
+      .run("echo hi")
+      .build({ ...auth, fetch: mock.fetch });
+
+    expect(mock.calls[0]?.body.variables).toEqual({
+      environmentId: "environment_123",
+      input: { instructions: ["echo hi"], variables: { FOO: "bar" } },
+    });
+  });
+
+  it("skips the backend build when there are no instructions", async () => {
+    const mock = createFetchMock([]);
+
+    const base = Sandbox.template().withEnv({ FOO: "bar" });
+    const built = await base.build({ ...auth, fetch: mock.fetch });
+
+    expect(built).toBe(base);
+    expect(mock.calls).toHaveLength(0);
   });
 
   it("polls a template build until READY", async () => {
@@ -414,6 +460,42 @@ describe("Sandbox.create(template)", () => {
       },
     });
   });
+
+  it("echoes build-time variables into both the build and the create template input", async () => {
+    const mock = createFetchMock([
+      { data: { sandboxTemplateBuild: templateInfo({ status: "READY" }) } },
+      { data: { sandboxCreate: sandboxInfo() } },
+    ]);
+
+    const base = Sandbox.template().withEnv({ FOO: "bar" }).run("true");
+    await Sandbox.create(base, { ...auth, fetch: mock.fetch });
+
+    expect(mock.calls[0]?.body.variables).toEqual({
+      environmentId: "environment_123",
+      input: { instructions: ["true"], variables: { FOO: "bar" } },
+    });
+    expect(mock.calls[1]?.body.variables).toEqual({
+      input: {
+        environmentId: "environment_123",
+        template: { instructions: ["true"], variables: { FOO: "bar" } },
+      },
+    });
+  });
+
+  it("skips the build for an env-only template, creating directly", async () => {
+    const mock = createFetchMock([{ data: { sandboxCreate: sandboxInfo() } }]);
+
+    const base = Sandbox.template().withEnv({ FOO: "bar" });
+    const sandbox = await Sandbox.create(base, { ...auth, fetch: mock.fetch });
+
+    expect(sandbox.status).toBe("RUNNING");
+    expect(mock.calls).toHaveLength(1);
+    expect(mock.calls[0]?.body.query).toContain("mutation RailwaySandboxCreate");
+    // Build-time env with no build steps has no effect and isn't sent.
+    expect(mock.calls[0]?.body.variables).toEqual({
+      input: { environmentId: "environment_123" },
+    });
+  });
 });
 
 const forkResponse = { data: { sandboxCreate: sandboxInfo({ id: "forked_123" }) } };
@@ -450,6 +532,19 @@ describe("sandbox.fork", () => {
         environmentId: "environment_123",
         sourceSandboxId: "sandbox_123",
         networkIsolation: "PRIVATE",
+      },
+    });
+  });
+
+  it("passes env into the fork input as runtime variables", async () => {
+    const { sandbox, calls } = await createThenQueue(forkResponse);
+    await sandbox.fork({ env: { FOO: "bar" } });
+
+    expect(calls[1]?.body.variables).toEqual({
+      input: {
+        environmentId: "environment_123",
+        sourceSandboxId: "sandbox_123",
+        variables: { FOO: "bar" },
       },
     });
   });

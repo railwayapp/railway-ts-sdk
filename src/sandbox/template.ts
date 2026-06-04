@@ -1,5 +1,5 @@
 import { engineFromOptions } from "./engine.js";
-import type { TemplateBuildOptions } from "./types.js";
+import type { CompiledTemplate, TemplateBuildOptions } from "./types.js";
 
 interface TemplateState {
   readonly instructions: readonly string[];
@@ -15,7 +15,11 @@ export interface SandboxTemplate {
   run(command: string): SandboxTemplate;
   /** Install Debian packages with apt. */
   withPackages(...packages: string[]): SandboxTemplate;
-  /** Set environment variables for later build steps. */
+  /**
+   * Set build-time environment variables available to the build instructions.
+   * Values may use Railway references (e.g. `${{shared.FOO}}`), resolved at
+   * build time. Build-time only — runtime env comes from `create({ env })`.
+   */
   withEnv(vars: Record<string, string>): SandboxTemplate;
   /** Set the working directory for later build steps. */
   workdir(dir: string): SandboxTemplate;
@@ -31,7 +35,9 @@ export function isSandboxTemplate(value: unknown): value is SandboxTemplate {
   return value instanceof SandboxTemplateRecipe;
 }
 
-export function compileSandboxTemplate(template: SandboxTemplate): string[] {
+export function compileSandboxTemplate(
+  template: SandboxTemplate,
+): CompiledTemplate {
   if (!(template instanceof SandboxTemplateRecipe)) {
     throw new TypeError("Expected a SandboxTemplate returned by Sandbox.template().");
   }
@@ -69,17 +75,22 @@ class SandboxTemplateRecipe implements SandboxTemplate {
   }
 
   async build(options: TemplateBuildOptions = {}): Promise<SandboxTemplate> {
-    const engine = engineFromOptions(options);
-    await engine.buildTemplateUntilReady(this.compile());
+    const compiled = this.compile();
+    // Nothing to build without instructions; build-time env alone has no effect.
+    if (compiled.instructions.length > 0) {
+      await engineFromOptions(options).buildTemplateUntilReady(compiled);
+    }
     return this;
   }
 
-  compile(): string[] {
-    return [...this.#state.instructions];
+  compile(): CompiledTemplate {
+    const instructions = [...this.#state.instructions];
+    if (this.#state.env.length === 0) return { instructions };
+    return { instructions, variables: Object.fromEntries(this.#state.env) };
   }
 
   #append(command: string): SandboxTemplate {
-    const instruction = compile(command, this.#state.env, this.#state.workdir);
+    const instruction = compileInstruction(command, this.#state.workdir);
     return new SandboxTemplateRecipe({
       ...this.#state,
       instructions: [...this.#state.instructions, instruction],
@@ -87,19 +98,10 @@ class SandboxTemplateRecipe implements SandboxTemplate {
   }
 }
 
-function compile(
-  command: string,
-  env: ReadonlyArray<readonly [string, string]>,
-  workdir: string | undefined,
-): string {
-  const parts: string[] = [];
-  for (const [key, value] of env) parts.push(`export ${key}=${shellQuote(value)}`);
-  if (workdir !== undefined) {
-    const quoted = shellQuote(workdir);
-    parts.push(`mkdir -p ${quoted}`, `cd ${quoted}`);
-  }
-  parts.push(command);
-  return parts.join(" && ");
+function compileInstruction(command: string, workdir: string | undefined): string {
+  if (workdir === undefined) return command;
+  const quoted = shellQuote(workdir);
+  return `mkdir -p ${quoted} && cd ${quoted} && ${command}`;
 }
 
 function upsertEnv(

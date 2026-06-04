@@ -102,7 +102,38 @@ exception. Reserve exceptions for transport and auth failures.
 
 ---
 
-## 5. Public URLs — Railway's superpower _(future)_
+## 5. Environment variables
+
+Seed a sandbox's environment in one line. Values may be plain strings or Railway
+variable references (`${{shared.FOO}}`, `${{ServiceName.BAR}}`) — resolved
+server-side, so a sandbox can pull a shared secret without you ever handling its
+value.
+
+```ts
+const sandbox = await Sandbox.create({
+  env: { NODE_ENV: "production", API_KEY: "${{shared.API_KEY}}" },
+});
+```
+
+`env` is baked into the sandbox at create time and available to every command it
+runs. It is accepted anywhere a sandbox is created — `Sandbox.create(options)`,
+`Sandbox.create(template, options)`, and `sandbox.fork(options)` (a fork does not
+inherit the source's env, so pass it again).
+
+Runtime env is deliberately separate from a template's build-time env:
+
+| Layer | Set via | Applies to |
+| --- | --- | --- |
+| **Runtime** | `create({ env })` / `fork({ env })` | Every command the created sandbox runs. |
+| **Build-time** | template `.withEnv(…)` (§10) | The template's build instructions only. |
+
+Keeping them separate means a build-only secret (say an `NPM_TOKEN` used by
+`.withEnv(…)` to install private packages) never leaks into the running sandbox's
+environment.
+
+---
+
+## 6. Public URLs — Railway's superpower _(future)_
 
 Public domains are Railway's core competency, so exposing a sandbox port as a real
 HTTPS URL should be a single line — something no other sandbox SDK can make feel as
@@ -124,7 +155,7 @@ is a headline feature. Companion methods grow additively: `sandbox.unexpose(port
 
 ---
 
-## 6. Lifecycle & reconnect
+## 7. Lifecycle & reconnect
 
 A sandbox outlives the process that created it, so you can reattach to it by id — ideal
 for serverless and multi-step agent workflows.
@@ -145,7 +176,7 @@ update `status` and the other fields in place.
 
 ---
 
-## 7. Auto-cleanup with `await using`
+## 8. Auto-cleanup with `await using`
 
 A sandbox is a disposable resource, so it implements `Symbol.asyncDispose`. With
 `await using`, it is destroyed automatically when the scope exits — even on throw — and
@@ -161,7 +192,7 @@ await sandbox.exec("pytest");
 
 ---
 
-## 8. Files _(future)_
+## 9. Files _(future)_
 
 File access lives under a `files` namespace so it never crowds the quickstart. Writes
 accept a string or bytes (no `Buffer` ceremony) and support a batch form, because every
@@ -185,7 +216,7 @@ Planned surface: `read` / `readText` / `write` / `list` / `info` / `exists` /
 
 ---
 
-## 9. Templates: reusable bases
+## 10. Templates: reusable bases
 
 The centerpiece of the vision. You rarely want a blank box — you want _your_
 environment (a runtime, system packages, your code) and you want to stamp sandboxes
@@ -207,8 +238,13 @@ const sandbox = await Sandbox.create(base);
 
 Available today: `.run("…")` (the raw escape hatch), `.withPackages(…)`,
 `.withEnv(…)`, `.workdir(…)`, and `template.build()`. Builds run server-side on the
-default base image, content-addressed and cached. Reserved for later: custom base
-images (`Sandbox.template("node:20")`), more node-first sugar (`withNode`,
+default base image, content-addressed and cached. `.withEnv(…)` sets **build-time**
+env for the build instructions — resolved (including Railway references) at build
+time and folded into the template's content hash, so templates differing only by
+env build and cache separately; for env in the running sandbox, use
+`create({ env })` (§5). A template with no build steps (e.g. only `.withEnv(…)`) is
+never built server-side — there is nothing to snapshot. Reserved for later: custom
+base images (`Sandbox.template("node:20")`), more node-first sugar (`withNode`,
 `withPython`, `copy`), and `.toDockerfile()` transparency.
 
 > The types are named `SandboxTemplate` / `SandboxBase` — never a bare `Template` —
@@ -217,7 +253,7 @@ images (`Sandbox.template("node:20")`), more node-first sugar (`withNode`,
 
 ---
 
-## 10. `create(source?)` — one verb, many starting points _(future)_
+## 11. `create(source?)` — one verb, many starting points _(future)_
 
 One verb covers every way to start a sandbox. `create()` with no source is the blank
 box; `create(source)` starts from a reusable base.
@@ -239,7 +275,7 @@ boot, not live processes) into the same environment.
 
 ---
 
-## 11. Streaming & background commands _(future)_
+## 12. Streaming & background commands _(future)_
 
 The plain `exec` call shape never changes. Streaming and background execution arrive as
 options that return richer — but still awaitable — handles, so the simple case stays a
@@ -265,7 +301,7 @@ types. We use async iterators over callbacks because they compose with `for awai
 
 ---
 
-## 12. Errors
+## 13. Errors
 
 All SDK errors extend `RailwayError`:
 
@@ -281,7 +317,7 @@ All SDK errors extend `RailwayError`:
 
 ---
 
-## 13. Backend phasing
+## 14. Backend phasing
 
 Honesty about what is real. Every future surface is designed to its final signature so
 that shipping it flips on a network call — never a breaking type change.
@@ -294,6 +330,8 @@ that shipping it flips on a network call — never a breaking type change.
 | Env-resolved config + `RailwayAuthError` | **Live** |
 | `Sandbox.connect(id)` / `Sandbox.list()` / `sandbox.refresh()` | **Live** |
 | `create({ networkIsolation })` + `sandbox.networkIsolation` | **Live** |
+| `create({ env })` / `fork({ env })` runtime variables | **Live** |
+| Template `.withEnv(…)` build-time variables | **Live** |
 | `sandbox.files.*` | Future |
 | `Sandbox.template()` / `SandboxTemplate` / `create(template)` | **Live** |
 | `sandbox.fork()` / `create(sandbox)` | **Live** |
@@ -304,7 +342,7 @@ that shipping it flips on a network call — never a breaking type change.
 
 ---
 
-## 14. API reference (today)
+## 15. API reference (today)
 
 ```ts
 import {

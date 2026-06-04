@@ -5464,6 +5464,8 @@ export type SandboxCreateInput = {
   /** Fork an existing running sandbox in this environment. Mutually exclusive with template. */
   sourceSandboxId?: InputMaybe<Scalars['String']['input']>;
   template?: InputMaybe<SandboxTemplateInput>;
+  /** Environment variables baked into the sandbox, available to every command. Values may contain Railway variable references (e.g. ${{shared.FOO}}, ${{ServiceName.BAR}}), resolved at create time. */
+  variables?: InputMaybe<Scalars['EnvironmentVariables']['input']>;
 };
 
 export type SandboxExecResult = {
@@ -5499,6 +5501,8 @@ export type SandboxTemplate = {
 export type SandboxTemplateInput = {
   baseImageDigest?: InputMaybe<Scalars['String']['input']>;
   instructions: Array<Scalars['String']['input']>;
+  /** Environment variables available to the template's build instructions. Values may contain Railway variable references (e.g. ${{shared.FOO}}, ${{ServiceName.BAR}}), resolved at build time. */
+  variables?: InputMaybe<Scalars['EnvironmentVariables']['input']>;
 };
 
 export type SandboxTemplateStatus =
