@@ -27,6 +27,7 @@ import {
   type RailwaySandboxTemplateBuildMutationVariables,
   type RailwaySandboxTemplateQuery,
   type RailwaySandboxTemplateQueryVariables,
+  type SandboxTemplateInput,
 } from "../generated/graphql.js";
 import {
   SandboxFailedError,
@@ -85,10 +86,7 @@ export class SandboxEngine {
     if (template !== undefined) {
       // Echo the template's build-time variables so the backend hash matches
       // the built snapshot and forks from it.
-      input.template = {
-        instructions: [...template.instructions],
-        ...(template.variables && { variables: template.variables }),
-      };
+      input.template = toTemplateInput(template);
     }
 
     return this.#createAndWait(input, options);
@@ -128,14 +126,9 @@ export class SandboxEngine {
   }
 
   async buildTemplate(template: CompiledTemplate): Promise<SandboxTemplateInfo> {
-    const input: RailwaySandboxTemplateBuildMutationVariables["input"] = {
-      instructions: [...template.instructions],
-    };
-    if (template.variables) input.variables = template.variables;
-
     const variables: RailwaySandboxTemplateBuildMutationVariables = {
       environmentId: this.#config.environmentId,
-      input,
+      input: toTemplateInput(template),
     };
     const data = await requestGraphQL<
       RailwaySandboxTemplateBuildMutation,
@@ -305,6 +298,13 @@ export class SandboxEngine {
 
 function isSandboxTerminal(status: SandboxInfo["status"]): boolean {
   return status === "FAILED" || status === "DESTROYED" || status === "DESTROYING";
+}
+
+function toTemplateInput(template: CompiledTemplate): SandboxTemplateInput {
+  return {
+    instructions: [...template.instructions],
+    ...(template.variables && { variables: template.variables }),
+  };
 }
 
 export function engineFromOptions(options: SandboxOptions = {}): SandboxEngine {
