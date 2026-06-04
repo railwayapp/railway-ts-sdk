@@ -212,12 +212,13 @@ async function planRailwayIac({ file, desiredGraph, request, diagnostics }: {
     message: diagnostic.message,
   } satisfies RailwayIacRunnerDiagnostic))];
   const { config: _config, ...currentEnvironment } = current;
-  const preview = changeSet.changes.length > 0
+  const hasErrors = allDiagnostics.some(diagnostic => diagnostic.severity === "error");
+  const preview = !hasErrors && changeSet.changes.length > 0
     ? await client.previewChangeSet({ environmentId: context.environmentId, changeSet })
     : undefined;
 
   return {
-    ok: allDiagnostics.every(diagnostic => diagnostic.severity !== "error"),
+    ok: !hasErrors,
     command: "plan",
     file,
     mode: "real",

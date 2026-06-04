@@ -112,7 +112,15 @@ export function diffGraphs({ current, desired }: { current: RailwayGraph; desire
     diffNetworking({ previous, resource, changes });
     // Volume lifecycle is not part of v0 authoring. Never plan an accidental unmount just
     // because imported config omitted a Railway-owned volume id.
-    diffTopLevelField({ previous, resource, field: "config", changes });
+    if (previous.type === "bucket" && resource.type === "bucket" && bucketRegion(previous) !== bucketRegion(resource)) {
+      diagnostics.push({
+        severity: "error",
+        path: `resources.${resource.address}.config.region`,
+        message: `Bucket region cannot be changed after creation. Create a new bucket in ${bucketRegion(resource) ?? "the desired region"} and migrate data instead.`,
+      });
+    } else {
+      diffTopLevelField({ previous, resource, field: "config", changes });
+    }
     if (resource.type === "database") diffTopLevelField({ previous, resource, field: "defaultMountPath", changes });
   }
 
@@ -381,6 +389,12 @@ function normalizeVariableForDiff(value: VariableValue | undefined, resourcesByA
   if (value?.type !== "reference") return value;
   const name = resourcesByAddress.get(value.resource)?.name ?? value.resource.split(".").slice(1).join(".") ?? value.resource;
   return { type: "literal", value: `\${{${name}.${value.output}}}` };
+}
+
+function bucketRegion(resource: ResourceNode): string | undefined {
+  if (resource.type !== "bucket") return undefined;
+  const config = (resource as ResourceNode & { config?: { region?: string | null } }).config;
+  return config?.region ?? undefined;
 }
 
 function isEquivalentDatabaseSource(previous: ResourceNode, after: unknown): boolean {

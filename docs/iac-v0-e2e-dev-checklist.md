@@ -126,10 +126,10 @@ Checks:
 
 - [ ] Create plan is clear.
 - [ ] Apply creates bucket.
-- [ ] Update plan is clear.
-- [ ] Apply updates config.
-- [ ] Next plan is no-op.
-- [ ] No service lookup error for bucket update.
+- [ ] Next plan is no-op after create.
+- [ ] Region change does not apply, because bucket regions are immutable.
+- [ ] Region change prints clear feedback: create a new bucket and migrate data.
+- [ ] No fake "applied" result for an impossible bucket region update.
 
 ## 5. Domain matrix
 

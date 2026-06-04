@@ -116,7 +116,8 @@ async function main() {
     initRailwayProject(bucketDir, uniqueProjectName("bucket"));
     planApplyNoop(bucketDir, "bucket create");
     writeConfig(bucketDir, ts(`  const media = bucket("media", { region: "sjc" });\n  return project("iac-e2e-bucket", { environments: ["production"], services: [media] });`));
-    planApplyNoop(bucketDir, "bucket update");
+    const bucketRegionChange = run("bucket immutable region feedback", ["config", "plan", "--verbose"], bucketDir, { allowFailure: true });
+    check("bucket region change rejected", /Bucket region cannot be changed after creation/i.test(bucketRegionChange), bucketRegionChange);
   } else {
     results.push({ name: "bucket matrix: skipped mutating matrix", ok: true, status: 0, out: bucketDir });
   }
