@@ -231,7 +231,7 @@ export default defineRailway(() => {
 ### 9. Larger monorepo
 
 ```ts
-import { bucket, defineRailway, github, postgres, preserve, project, redis, service } from "railway/iac";
+import { bucket, defineRailway, github, group, postgres, preserve, project, redis, service } from "railway/iac";
 
 export default defineRailway((ctx) => {
   const prod = ctx.environment === "production";
@@ -274,9 +274,12 @@ export default defineRailway((ctx) => {
     },
   });
 
+  const backend = group("Backend", [db, cache, api, worker]);
+  const storage = group("Storage", [uploads]);
+
   return project("acme", {
     environments: ["production", "staging"],
-    services: [db, cache, uploads, api, web, worker],
+    services: [backend, storage, web],
   });
 });
 ```
@@ -529,5 +532,5 @@ This skips configuration apply and behaves like normal deploy.
 - Should `preserve()` be allowed for missing variables as a no-op, or should it warn that there is nothing to preserve?
 - Which deploy fields deserve first-class DSL aliases beyond `start`, `healthcheck`, `replicas`?
 - Should volume helpers be hidden from v0 docs until lifecycle is safe?
-- Should group helpers be hidden/export-gated until import/round-trip/apply semantics are complete?
+- Should imported groups be emitted structurally in all cases, or only when they contain more than one resource?
 - How much imported config should be environment-agnostic vs literal current-environment state?

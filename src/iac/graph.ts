@@ -38,6 +38,7 @@ export interface GraphResourceBase {
   address: ResourceAddress;
   type: ResourceType;
   name: string;
+  groupId?: string;
 }
 
 export type ResourceNode = ServiceNode | DatabaseNode | VolumeNode | BucketNode | GroupNode;
@@ -102,6 +103,7 @@ export interface GroupNode extends GraphResourceBase {
 export type VariableValue =
   | ({ type: "literal" } & VariableConfig)
   | { type: "reference"; resource: ResourceAddress; output: string }
+  | { type: "preserve" }
   | { type: "raw"; value: VariableConfig };
 
 export interface Edge {
@@ -111,10 +113,12 @@ export interface Edge {
   key?: string;
 }
 
+export type ProjectResourceInput = ResourceNode | ResourceNode[];
+
 export interface ProjectDefinition {
   name: string;
   environments: string[];
-  services: ResourceNode[];
+  services: ProjectResourceInput[];
 }
 
 export interface GraphCompileOptions {

@@ -9,11 +9,12 @@ import type {
   ServiceNode,
   VariableValue,
 } from "./graph.js";
-import type { EnvironmentConfig, ServiceConfig, VariableConfig, VariableValues } from "./schema.js";
+import type { EnvironmentConfig, ServiceConfig, ServiceNetworking, VariableConfig, VariableValues } from "./schema.js";
 
 export function projectDefinitionToGraph(definition: ProjectDefinition): RailwayGraph {
+  const resources = definition.services.flat();
   const edges: Edge[] = [];
-  for (const resource of definition.services) {
+  for (const resource of resources) {
     if (resource.type !== "service" && resource.type !== "database") continue;
     for (const [key, value] of Object.entries(resource.variables ?? {})) {
       if (value.type !== "reference") continue;
@@ -24,7 +25,7 @@ export function projectDefinitionToGraph(definition: ProjectDefinition): Railway
     version: RAILWAY_GRAPH_VERSION,
     project: { name: definition.name },
     environments: definition.environments.map(name => ({ name })),
-    resources: definition.services.map(stripRuntimeHelpers),
+    resources: resources.map(stripRuntimeHelpers),
     edges,
   };
 }
@@ -77,7 +78,7 @@ export function graphToEnvironmentConfig(graph: RailwayGraph, options: GraphComp
       const existingBucketId = options.bucketIdsByName?.[resource.name];
       const bucketKey = existingBucketId ?? resource.name;
       config.buckets = config.buckets ?? {};
-      config.buckets[bucketKey] = { ...(existingBucketId ? {} : { isCreated: true }), ...resource.config };
+      config.buckets[bucketKey] = { ...(existingBucketId ? {} : { isCreated: true }), ...resource.config, ...(resource.groupId ? { groupId: resource.groupId } : {}) };
       continue;
     }
 
@@ -98,7 +99,7 @@ export function graphToEnvironmentConfig(graph: RailwayGraph, options: GraphComp
 
 export function environmentConfigToGraph(
   config: EnvironmentConfig,
-  options: { projectName?: string; serviceNamesById?: Record<string, string>; bucketNamesById?: Record<string, string> } = {},
+  options: { projectName?: string; serviceNamesById?: Record<string, string>; bucketNamesById?: Record<string, string>; customDomainsByServiceId?: Record<string, Record<string, { port?: number }>> } = {},
 ): RailwayGraph {
   const resources: ResourceNode[] = [];
   for (const [serviceId, serviceConfig] of Object.entries(config.services ?? {})) {
@@ -108,7 +109,7 @@ export function environmentConfigToGraph(
     const looksLikeDatabase = imageName?.includes("postgres") || imageName?.includes("mysql") || imageName?.includes("redis") || imageName?.includes("mongo");
     if (looksLikeDatabase) {
       const engine = imageName?.includes("mysql") ? "mysql" : imageName?.includes("redis") ? "redis" : imageName?.includes("mongo") ? "mongo" : "postgres";
-      resources.push({
+      resources.push(pruneEmpty({
         address: resourceAddress("database", name) as `database.${string}`,
         type: "database",
         kind: "database",
@@ -116,7 +117,9 @@ export function environmentConfigToGraph(
         name,
         image: imageName ?? "postgres:16",
         output: engine === "redis" ? "REDIS_URL" : engine === "mysql" ? "MYSQL_URL" : engine === "mongo" ? "MONGO_URL" : "DATABASE_URL",
-      });
+        defaultMountPath: Object.keys(serviceConfig.volumeMounts ?? {}).length > 0 ? serviceConfig.deploy?.requiredMountPath : undefined,
+        ...(serviceConfig.volumeMounts ? { volumeMounts: serviceConfig.volumeMounts } : {}),
+      }) as ResourceNode);
       continue;
     }
     resources.push({
@@ -128,7 +131,7 @@ export function environmentConfigToGraph(
       ...(serviceConfig.build ? { build: serviceConfig.build } : {}),
       ...(serviceConfig.deploy ? { deploy: serviceConfig.deploy } : {}),
       ...(serviceConfig.variables ? { variables: variablesFromEnvironmentConfig(serviceConfig.variables) } : {}),
-      ...(serviceConfig.networking ? { networking: serviceConfig.networking } : {}),
+      ...(serviceConfig.networking || options.customDomainsByServiceId?.[serviceId] ? { networking: pruneEmpty({ ...serviceConfig.networking, customDomains: options.customDomainsByServiceId?.[serviceId] ?? serviceConfig.networking?.customDomains }) as ServiceNetworking } : {}),
       ...(serviceConfig.volumeMounts ? { volumeMounts: serviceConfig.volumeMounts } : {}),
       ...(serviceConfig.configFile ? { configFile: serviceConfig.configFile } : {}),
       ...(serviceConfig.groupId ? { groupId: serviceConfig.groupId } : {}),
@@ -238,11 +241,17 @@ function serviceToEnvironmentConfig(service: ServiceNode, resourceNamesById: Rec
 
 function variablesToEnvironmentConfig(variables: Record<string, VariableValue>, resourceNamesById: Record<string, string>): VariableValues {
   return Object.fromEntries(
-    Object.entries(variables).map(([key, value]) => [
-      key,
-      value.type === "literal" ? literalVariable(value) : value.type === "raw" ? value.value : { value: `\${{${resourceNamesById[value.resource] ?? value.resource}.${value.output}}}` },
-    ]),
+    Object.entries(variables)
+      .filter((entry): entry is [string, Exclude<VariableValue, { type: "preserve" }>] => entry[1].type !== "preserve")
+      .map(([key, value]) => [
+        key,
+        value.type === "literal" ? literalVariable(value) : value.type === "raw" ? value.value : referenceVariable(value, resourceNamesById),
+      ]),
   );
+}
+
+function referenceVariable(value: Extract<VariableValue, { type: "reference" }>, resourceNamesById: Record<string, string>): VariableConfig {
+  return { value: `\${{${resourceNamesById[value.resource] ?? value.resource}.${value.output}}}` };
 }
 
 function literalVariable(value: Extract<VariableValue, { type: "literal" }>): VariableConfig {
@@ -251,7 +260,7 @@ function literalVariable(value: Extract<VariableValue, { type: "literal" }>): Va
 }
 
 function variablesFromEnvironmentConfig(variables: VariableValues): Record<string, VariableValue> {
-  return Object.fromEntries(Object.entries(variables).filter(([, value]) => value != null).map(([key, value]) => [key, { type: "literal", value: value?.value ?? "" }]));
+  return Object.fromEntries(Object.entries(variables).filter(([, value]) => value != null).map(([key, value]) => [key, value?.value == null || value.value === "" ? { type: "preserve" } : { type: "literal", value: value.value }]));
 }
 
 function pruneEmpty<T>(value: T, path: string[] = []): T {

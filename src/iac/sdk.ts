@@ -5,6 +5,7 @@ import type {
   DatabaseNode,
   GroupNode,
   ProjectDefinition,
+  ProjectResourceInput,
   ResourceNode,
   ServiceNode,
   SourceConfig,
@@ -48,7 +49,7 @@ export function defineRailway(program: RailwayProgram): RailwayProgram {
 export const define = defineRailway;
 
 export function project(name: string, definition: Omit<ProjectDefinition, "name">): ProjectDefinition {
-  return { name, ...definition };
+  return { name, ...definition, services: definition.services.flat() };
 }
 
 export function createRailwayContext(input: RailwayContextInput = {}): RailwayContext {
@@ -213,8 +214,18 @@ export function bucket(name: string, config: BucketConfig = {}): BucketNode {
   return { address: resourceAddress("bucket", name) as `bucket.${string}`, type: "bucket", name, config };
 }
 
-export function group(name: string, options: Omit<GroupNode, "address" | "type" | "name"> = {}): GroupNode {
-  return { address: resourceAddress("group", name) as `group.${string}`, type: "group", name, ...options };
+export function group(name: string, resources: ProjectResourceInput[], options?: Omit<GroupNode, "address" | "type" | "name">): ResourceNode[];
+export function group(name: string, options?: Omit<GroupNode, "address" | "type" | "name">): GroupNode;
+export function group(
+  name: string,
+  resourcesOrOptions: ProjectResourceInput[] | Omit<GroupNode, "address" | "type" | "name"> = {},
+  maybeOptions: Omit<GroupNode, "address" | "type" | "name"> = {},
+): GroupNode | ResourceNode[] {
+  const resources = Array.isArray(resourcesOrOptions) ? resourcesOrOptions.flat() : undefined;
+  const options = Array.isArray(resourcesOrOptions) ? maybeOptions : resourcesOrOptions;
+  const node: GroupNode = { address: resourceAddress("group", name) as `group.${string}`, type: "group", name, ...options };
+  if (!resources) return node;
+  return [node, ...resources.map(resource => ({ ...resource, groupId: name }))];
 }
 
 export function ref(resource: ResourceNode, output: string): VariableValue {

@@ -22,6 +22,7 @@ import {
   database,
   bucket,
   volume,
+  group,
   ref,
   preserve,
 } from "railway/iac";
@@ -475,9 +476,38 @@ Volume lifecycle is not a safe v0 authoring path yet. Existing volume mounts are
 
 ## Groups
 
-`group()` exists experimentally in the SDK, but it is **not part of the v0 public DSL** yet.
+Groups are structural canvas organization.
 
-Reason: group creation compiles into config, but import/round-trip/apply semantics are not complete enough to promise no-op behavior. Do not use groups in release examples until they are covered by E2E tests.
+```ts
+const backend = group("Backend", [
+  api,
+  worker,
+  db,
+]);
+
+return project("acme", {
+  environments: ["production"],
+  services: [backend, web],
+});
+```
+
+Metadata form:
+
+```ts
+const backend = group("Backend", [api, worker], {
+  color: "blue",
+  icon: "server",
+  isCollapsed: false,
+});
+```
+
+Compatibility form for group metadata only:
+
+```ts
+const backend = group("Backend", { color: "blue" });
+```
+
+When passed resources, `group()` returns the group plus those resources with group membership attached, so `services: [group("Backend", [api, worker])]` is valid.
 
 ## Variables and references
 
