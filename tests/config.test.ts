@@ -5,6 +5,7 @@ import {
   RailwayAuthError,
   RailwayGraphQLError,
   Sandbox,
+  type CreateOptions,
 } from "../src/index.js";
 import {
   clearRailwayEnv,
@@ -117,5 +118,70 @@ describe("configuration", () => {
 
     expect(error).toBeInstanceOf(RailwayGraphQLError);
     expect(error).toMatchObject({ message: "no access" });
+  });
+});
+
+describe("verbose logging", () => {
+  let stderr: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    stderr = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    stderr.mockRestore();
+  });
+
+  const logged = (): string[] =>
+    stderr.mock.calls.map(call => String(call[0]));
+
+  const createSandbox = (overrides: Partial<CreateOptions> = {}) => {
+    const mock = createFetchMock([{ data: { sandboxCreate: sandboxInfo() } }]);
+    return Sandbox.create({
+      token: "t",
+      environmentId: "e",
+      fetch: mock.fetch,
+      ...overrides,
+    });
+  };
+
+  it("is silent by default", async () => {
+    await createSandbox();
+
+    expect(stderr).not.toHaveBeenCalled();
+  });
+
+  it("prints progress when `verbose: true`", async () => {
+    await createSandbox({ verbose: true });
+
+    const lines = logged();
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines.every(line => line.startsWith("[railway] "))).toBe(true);
+    expect(lines).toContainEqual(
+      expect.stringContaining("RailwaySandboxCreate"),
+    );
+  });
+
+  it("is enabled by RAILWAY_VERBOSE=1", async () => {
+    vi.stubEnv("RAILWAY_VERBOSE", "1");
+
+    await createSandbox();
+
+    expect(stderr).toHaveBeenCalled();
+  });
+
+  it("stays off for RAILWAY_VERBOSE=0", async () => {
+    vi.stubEnv("RAILWAY_VERBOSE", "0");
+
+    await createSandbox();
+
+    expect(stderr).not.toHaveBeenCalled();
+  });
+
+  it("never logs the token", async () => {
+    await createSandbox({ token: "secret_token_value", verbose: true });
+
+    expect(logged().some(line => line.includes("secret_token_value"))).toBe(
+      false,
+    );
   });
 });

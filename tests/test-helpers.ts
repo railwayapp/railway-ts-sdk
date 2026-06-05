@@ -8,6 +8,7 @@ export function clearRailwayEnv(): void {
   vi.stubEnv("RAILWAY_API_TOKEN", "");
   vi.stubEnv("RAILWAY_ENVIRONMENT_ID", "");
   vi.stubEnv("RAILWAY_GRAPHQL_ENDPOINT", "");
+  vi.stubEnv("RAILWAY_VERBOSE", "");
 }
 
 export interface FetchCall {
