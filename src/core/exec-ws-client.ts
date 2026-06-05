@@ -1,9 +1,9 @@
-import type {
-  NormalizedRailwayClientConfig,
-  WebSocketConstructor,
+import {
+  resolveWebSocketImpl,
+  type NormalizedRailwayClientConfig,
+  type WebSocketConstructor,
 } from "./config.js";
 import { RailwayConnectionError } from "./errors.js";
-import { resolveWebSocketImpl } from "./graphql-ws-client.js";
 
 /**
  * tcp-proxy `/ws/exec` wire protocol: stdout/stderr ride binary frames tagged
@@ -62,7 +62,7 @@ export function connectExecWs(args: {
   handlers: ExecWsHandlers;
 }): Promise<ExecWsConnection> {
   const { config, jwt, command, durableSessionId, handlers } = args;
-  const WS = resolveWebSocketImpl(config) as WebSocketConstructor;
+  const WS: WebSocketConstructor = resolveWebSocketImpl(config);
 
   return new Promise<ExecWsConnection>((resolve, reject) => {
     let opened = false;

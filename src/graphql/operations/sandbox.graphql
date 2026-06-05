@@ -45,61 +45,6 @@ mutation RailwaySandboxCreate($input: SandboxCreateInput!) {
   }
 }
 
-mutation RailwaySandboxExec(
-  $id: String!
-  $environmentId: String!
-  $command: String!
-  $waitMs: Int
-) {
-  sandboxExec(
-    id: $id
-    environmentId: $environmentId
-    command: $command
-    waitMs: $waitMs
-  ) {
-    execId
-    state
-    exitCode
-    stdout
-    stderr
-    resumeToken
-    truncated
-  }
-}
-
-subscription RailwaySandboxExecOutput(
-  $id: String!
-  $environmentId: String!
-  $execId: String!
-  $after: String
-) {
-  sandboxExecOutput(
-    id: $id
-    environmentId: $environmentId
-    execId: $execId
-    after: $after
-  ) {
-    stdout
-    stderr
-    resumeToken
-    exitCode
-  }
-}
-
-mutation RailwaySandboxExecKill(
-  $id: String!
-  $environmentId: String!
-  $execId: String!
-  $signal: Int
-) {
-  sandboxExecKill(
-    id: $id
-    environmentId: $environmentId
-    execId: $execId
-    signal: $signal
-  )
-}
-
 mutation RailwaySandboxDestroy($id: String!, $environmentId: String!) {
   sandboxDestroy(id: $id, environmentId: $environmentId) {
     ...RailwaySandboxFields

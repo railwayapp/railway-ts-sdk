@@ -6,8 +6,8 @@ import {
 } from "./helpers.ts";
 
 // Runs a command for a random 60-120s and verifies output streams the entire
-// time: every line arrives live (in order, no gaps, no duplicates) even
-// though the command far outlives the mutation's fast-return window.
+// time: every line arrives live (in order, no gaps, no duplicates) over the
+// /ws/exec WebSocket bridge, from the first byte through to exit.
 await runExample(async () => {
   const totalLines = 120 + Math.floor(Math.random() * 121); // 0.5s/line => 60-120s
   console.log(`target: ${totalLines} lines over ~${Math.round(totalLines / 2)}s`);

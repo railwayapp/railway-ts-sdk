@@ -32,7 +32,6 @@ import {
   SandboxTimeoutError,
 } from "./errors.js";
 import { startExec, type ExecContext, type ExecHandle } from "./exec.js";
-import { startWsExec } from "./ws-exec.js";
 import type {
   CreateOptions,
   ExecOptions,
@@ -212,9 +211,6 @@ export class SandboxEngine {
       environmentId: this.#config.environmentId,
       sandboxId: id,
     };
-    if (options.transport === "ws") {
-      return startWsExec(context, target, options);
-    }
     return startExec(context, target, options);
   }
 

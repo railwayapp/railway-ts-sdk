@@ -12,7 +12,6 @@ export {
 export {
   ExecHandle,
   Sandbox,
-  SandboxExecInterruptedError,
   SandboxFailedError,
   SandboxNotFoundError,
   SandboxTemplateBuildError,

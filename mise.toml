@@ -29,6 +29,10 @@ run = "pnpm run test"
 description = "Run unit tests in watch mode"
 run = "pnpm run test:watch"
 
+[tasks.e2e]
+description = "Run the live exec e2e against .env credentials (sets SANDBOX_E2E=1, uses the system CA store for dev certs)"
+run = "if [ -f .env ]; then set -a; . ./.env; set +a; fi; SANDBOX_E2E=1 NODE_OPTIONS=--use-system-ca pnpm exec vitest run tests/exec.e2e.test.ts"
+
 [tasks.codegen]
 description = "Regenerate GraphQL types from the configured schema"
 run = "pnpm run codegen"

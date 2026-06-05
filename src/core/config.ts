@@ -1,4 +1,4 @@
-import { RailwayAuthError } from "./errors.js";
+import { RailwayAuthError, RailwayConnectionError } from "./errors.js";
 
 export const DEFAULT_RAILWAY_GRAPHQL_ENDPOINT =
   "https://backboard.railway.com/graphql/v2";
@@ -22,9 +22,9 @@ export interface RailwayClientConfig {
    */
   webSocketImpl?: WebSocketConstructor;
   /**
-   * tcp-proxy exec WebSocket endpoint for `exec({ transport: "ws" })`.
-   * Defaults to the value derived from `endpoint` (`backboard.<host>` →
-   * `wss://ssh.<host>:2226/ws/exec`); override for non-standard deployments.
+   * tcp-proxy exec WebSocket endpoint. Defaults to the value derived from
+   * `endpoint` (`backboard.<host>` → `wss://ssh.<host>:2226/ws/exec`);
+   * override for non-standard deployments.
    */
   tcpProxyWsEndpoint?: string;
 }
@@ -88,6 +88,22 @@ export function deriveTcpProxyWsEndpoint(endpoint: string): string {
     ? `ssh.${url.hostname.slice("backboard.".length)}`
     : `ssh.${url.hostname}`;
   return `wss://${host}:${TCP_PROXY_WS_PORT}${TCP_PROXY_WS_PATH}`;
+}
+
+export function resolveWebSocketImpl(
+  config: NormalizedRailwayClientConfig,
+): WebSocketConstructor {
+  const impl =
+    config.webSocketImpl ??
+    (globalThis as { WebSocket?: WebSocketConstructor }).WebSocket;
+  if (!impl) {
+    throw new RailwayConnectionError({
+      message:
+        "No WebSocket implementation found. Pass `webSocketImpl` in the config " +
+        "(e.g. the `ws` package) to stream exec output.",
+    });
+  }
+  return impl;
 }
 
 export function resolveEnvironmentId(explicit?: string): string {

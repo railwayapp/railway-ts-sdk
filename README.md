@@ -56,18 +56,17 @@ non-zero exit code; inspect `exitCode` instead.
 ```ts
 const result = await sandbox.exec("npm run build", { timeoutSec: 120 });
 
-result.exitCode; // number | null; -1 means killed by a signal
+result.exitCode; // number | null; null if the session ended without one
 result.stdout; // string
 result.stderr; // string
-result.truncated; // true if output exceeded the capture limit
+result.truncated; // true if the server cut the output
 result.timedOut; // true if the command hit timeoutSec (enforced client-side)
 ```
 
-Commands are durable: they survive disconnects and can run for hours. A bare
-`await sandbox.exec("ls")` lets the server fast-return short commands inline
-(no WebSocket). Passing `onStdout`/`onStderr` streams output live over a
-WebSocket from the first byte — the handle also exposes the `execId` and a
-`kill()`:
+Every exec runs over a WebSocket bridge to the sandbox, with separated
+stdout/stderr and a real exit code. Short commands resolve when they exit;
+passing `onStdout`/`onStderr` streams output live from the first byte. The
+handle also exposes the `execId` and a `kill()`:
 
 ```ts
 const handle = sandbox.exec("npm run test:slow", {
@@ -75,12 +74,13 @@ const handle = sandbox.exec("npm run test:slow", {
 });
 
 const execId = await handle.execId; // save to reattach later
-await handle.kill(); // optional: SIGTERM (pass a number for another signal)
+await handle.kill(); // close the session
 const result = await handle; // same ExecResult shape as above
 ```
 
-Reattach to a running exec from anywhere — even another process — with the
-saved id. The stream replays the full retained history, then continues live:
+When durable sessions are enabled for the sandbox, reattach to a running exec
+from anywhere — even another process — with the saved id. The stream replays
+the retained output tail, then continues live:
 
 ```ts
 const result = await sandbox.exec({ execId }, {
@@ -88,13 +88,9 @@ const result = await sandbox.exec({ execId }, {
 });
 ```
 
-If the sandbox VM restarted and the output is unrecoverable, `exec` rejects
-with `SandboxExecInterruptedError`. If the output stream cannot be
-re-established after several attempts, `exec` rejects with
-`RailwayConnectionError` — the command keeps running server-side and can be
-picked up again with `exec({ execId })`. In non-Node runtimes without a
-global `WebSocket`, pass an implementation via the `webSocketImpl` config
-option.
+If the WebSocket cannot be established, `exec` rejects with
+`RailwayConnectionError`. In non-Node runtimes without a global `WebSocket`,
+pass an implementation via the `webSocketImpl` config option.
 
 ## Reconnecting and listing
 

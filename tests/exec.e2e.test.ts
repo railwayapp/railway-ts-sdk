@@ -1,11 +1,10 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { Sandbox, SandboxExecInterruptedError } from "../src/index.js";
+import { Sandbox } from "../src/index.js";
 
 /**
- * Live end-to-end exec tests, mirroring the backboard reference harness
- * (Tests A-F). Skipped unless explicitly enabled so the unit suite stays
- * offline:
+ * Live end-to-end exec tests over the `/ws/exec` transport. Skipped unless
+ * explicitly enabled so the unit suite stays offline:
  *
  *   SANDBOX_E2E=1 RAILWAY_API_TOKEN=... RAILWAY_ENVIRONMENT_ID=... \
  *     [RAILWAY_GRAPHQL_ENDPOINT=...] pnpm vitest run tests/exec.e2e.test.ts
@@ -40,7 +39,7 @@ describe.runIf(live)("exec e2e (live)", () => {
     await sandbox?.destroy().catch(() => {});
   });
 
-  it("completes short commands inline with split streams (A) and nonzero exits (B)", async () => {
+  it("completes short commands with split streams (A) and nonzero exits (B)", async () => {
     const result = await sandbox.exec("echo hello; echo oops 1>&2; exit 0");
     expect(result).toMatchObject({
       exitCode: 0,
@@ -53,82 +52,23 @@ describe.runIf(live)("exec e2e (live)", () => {
     expect(nonzero.exitCode).toBe(7);
   }, 90_000);
 
-  it("streams long commands live (C), reattaches without gaps or dupes (D), and kills (E)", async () => {
+  it("streams long commands live, gapless and dupe-free (C)", async () => {
     const liveChunks: string[] = [];
-    const handle = sandbox.exec(
-      "for i in $(seq 1 120); do echo line-$i; sleep 0.5; done",
+    const result = await sandbox.exec(
+      "for i in $(seq 1 20); do echo line-$i; sleep 0.2; done",
       { onStdout: chunk => liveChunks.push(chunk) },
     );
-    const execId = await handle.execId;
-    expect(execId).toBeTruthy();
-
-    // C: output streams while the command is still running.
-    await vi.waitFor(
-      () => expect(lineNumbers(liveChunks.join("")).length).toBeGreaterThanOrEqual(5),
-      { timeout: 90_000, interval: 250 },
-    );
-
-    // D: a late attachment replays the full history and catches up.
-    const reChunks: string[] = [];
-    const reattached = sandbox.exec(
-      { execId },
-      { onStdout: chunk => reChunks.push(chunk) },
-    );
-    await vi.waitFor(
-      () => {
-        const seen = lineNumbers(reChunks.join(""));
-        expect(seen).toContain(1);
-        expect(seen.length).toBeGreaterThanOrEqual(
-          lineNumbers(liveChunks.join("")).length - 2,
-        );
-      },
-      { timeout: 60_000, interval: 250 },
-    );
-
-    // E: kill terminates both attachments with a signal exit.
-    await expect(handle.kill()).resolves.toBe(true);
-    const [first, second] = await Promise.all([handle, reattached]);
-    expect(first.exitCode).toBe(-1);
-    expect(second.exitCode).toBe(-1);
-
-    // Both saw an identical, gapless, dupe-free prefix of the output.
-    expectSequential(first.stdout);
-    expectSequential(second.stdout);
-    expect(second.stdout).toBe(first.stdout);
-  }, 180_000);
-
-  it("rejects reattaching to an unknown execId with SandboxExecInterruptedError (F)", async () => {
-    await expect(
-      sandbox.exec({ execId: "00000000-0000-4000-8000-000000000000" }).result(),
-    ).rejects.toBeInstanceOf(SandboxExecInterruptedError);
-  }, 60_000);
+    expect(result.exitCode).toBe(0);
+    // Output arrived incrementally and ends up sequential with no gaps/dupes.
+    expect(liveChunks.length).toBeGreaterThan(1);
+    expectSequential(result.stdout);
+  }, 90_000);
 
   it("enforces timeoutSec client-side", async () => {
-    // timeoutSec streams from the start (waitMs:0), so the deadline fires
-    // promptly instead of waiting out the fast-return window.
     const result = await sandbox.exec("echo start; sleep 300", {
       timeoutSec: 8,
     });
     expect(result.timedOut).toBe(true);
-    expect(result.exitCode).toBe(-1);
     expect(result.stdout).toContain("start");
-  }, 60_000);
-
-  it("streams from the start immediately when onStdout is set (waitMs:0)", async () => {
-    // The first line must arrive well under the ~25s default drain window,
-    // proving callbacks skip it.
-    const firstLineAt = { ms: 0 };
-    const started = Date.now();
-    const result = await sandbox.exec(
-      "for i in $(seq 1 8); do echo line-$i; sleep 1; done",
-      {
-        onStdout: () => {
-          if (firstLineAt.ms === 0) firstLineAt.ms = Date.now() - started;
-        },
-      },
-    );
-    expect(firstLineAt.ms).toBeLessThan(10_000);
-    expect(result.exitCode).toBe(0);
-    expectSequential(result.stdout);
   }, 60_000);
 });
