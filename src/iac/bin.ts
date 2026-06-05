@@ -1,4 +1,4 @@
-#!/usr/bin/env -S node --import tsx
+#!/usr/bin/env node
 import process from "node:process";
 import { runRailwayIac, type RailwayIacRunnerRequest } from "./runner.js";
 
