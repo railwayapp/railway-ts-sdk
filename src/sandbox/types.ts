@@ -13,7 +13,7 @@ export interface ExecResult {
   exitCode: number | null;
   stdout: string;
   stderr: string;
-  /** True when output was cut (server-side caps); the streams may be incomplete. */
+  /** True when the server cut the output; the streams may be incomplete. */
   truncated: boolean;
   /** True when the client-side `timeoutSec` deadline killed the command. */
   timedOut: boolean;
@@ -36,19 +36,20 @@ export interface ListOptions extends RailwayClientConfig {
   after?: string;
 }
 
-/** Reattach to an exec started earlier (its id comes from `ExecHandle.execId`). */
+/** Reattach to an exec started earlier (its name comes from `ExecHandle.sessionName`). */
 export interface ExecReattachTarget {
-  execId: string;
+  sessionName: string;
 }
 
 export type ExecTarget = string | ExecReattachTarget;
 
+/** Signal names accepted by `ExecHandle.kill()` (sent to the process group). */
+export type ExecSignal = "HUP" | "INT" | "QUIT" | "KILL" | "TERM";
+
 export interface ExecOptions {
   /**
    * Kill the command after this many seconds and resolve with
-   * `timedOut: true`. Enforced client-side (SIGTERM, then SIGKILL after a
-   * grace period); setting it streams from the start so the deadline is
-   * honored precisely.
+   * `timedOut: true`. Enforced client-side by closing the exec session.
    */
   timeoutSec?: number;
   /** Receives each stdout chunk as it arrives. A throw rejects the exec. */
@@ -56,13 +57,13 @@ export interface ExecOptions {
   /** Receives each stderr chunk as it arrives. A throw rejects the exec. */
   onStderr?: (chunk: string) => void;
   /**
-   * How long (ms) the server may wait for the command to finish before
-   * fast-returning so output can stream — clamped to [0, 25000]. Defaults to
-   * `0` when `onStdout`/`onStderr` or `timeoutSec` is set (stream from the
-   * start), otherwise the server default (~25s, short commands resolve inline
-   * with no WebSocket). Set `0` to force immediate streaming without callbacks.
+   * On reattach (`exec({ sessionName })`), set `true` to resume from the
+   * server's last-read cursor — exact, but lossy if a previous reading client
+   * didn't keep up before detaching. Defaults to `false`: replay all retained
+   * logs for the session (lossless, may repeat output an earlier reader saw).
+   * Ignored on a fresh exec.
    */
-  waitMs?: number;
+  resumeFromLastRead?: boolean;
 }
 
 export interface TemplateBuildOptions extends RailwayClientConfig {

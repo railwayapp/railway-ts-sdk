@@ -29,6 +29,10 @@ run = "pnpm run test"
 description = "Run unit tests in watch mode"
 run = "pnpm run test:watch"
 
+[tasks.e2e]
+description = "Run the live exec e2e against .env credentials (sets SANDBOX_E2E=1, uses the system CA store for dev certs)"
+run = "if [ -f .env ]; then set -a; . ./.env; set +a; fi; SANDBOX_E2E=1 NODE_OPTIONS=--use-system-ca pnpm exec vitest run tests/exec.e2e.test.ts"
+
 [tasks.codegen]
 description = "Regenerate GraphQL types from the configured schema"
 run = "pnpm run codegen"
@@ -69,4 +73,8 @@ run = "pnpm exec tsx examples/sandboxes/exec-long.ts"
 [tasks."example:exec-reattach"]
 description = "Reattach to a running exec mid-command and verify the full log history is captured"
 run = "pnpm exec tsx examples/sandboxes/exec-reattach.ts"
+
+[tasks."example:exec-kill"]
+description = "Kill a running command mid-stream and verify it terminates (vs detach, which keeps it running)"
+run = "pnpm exec tsx examples/sandboxes/exec-kill.ts"
 

@@ -1,6 +1,5 @@
 export { Sandbox } from "./sandbox.js";
 export {
-  SandboxExecInterruptedError,
   SandboxFailedError,
   SandboxNotFoundError,
   SandboxTemplateBuildError,
@@ -14,6 +13,7 @@ export type {
   ExecOptions,
   ExecReattachTarget,
   ExecResult,
+  ExecSignal,
   ExecTarget,
   ListOptions,
   SandboxInfo,

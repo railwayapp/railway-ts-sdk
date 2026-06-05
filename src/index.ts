@@ -12,7 +12,6 @@ export {
 export {
   ExecHandle,
   Sandbox,
-  SandboxExecInterruptedError,
   SandboxFailedError,
   SandboxNotFoundError,
   SandboxTemplateBuildError,
@@ -22,6 +21,7 @@ export {
   type ExecOptions,
   type ExecReattachTarget,
   type ExecResult,
+  type ExecSignal,
   type ExecTarget,
   type ListOptions,
   type SandboxInfo,

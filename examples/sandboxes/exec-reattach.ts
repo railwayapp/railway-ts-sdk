@@ -7,10 +7,11 @@ import {
   waitFor,
 } from "./helpers.ts";
 
-// Starts a ~60s command, watches the live stream briefly, then reconnects to
-// the still-running exec via `exec({ execId })` — like a client that crashed
-// and came back. The reattached stream must replay the full history from the
-// start and keep streaming live until exit, capturing every log line.
+// Starts a ~60s command, watches the live stream briefly, then `detach()`es —
+// stops streaming and closes the socket while the command keeps running — and
+// reconnects to it via `exec({ sessionName })`. The reconnect replays the full
+// log (the default) and follows live to the end, capturing every line. To
+// terminate the command instead of detaching, see exec-kill.ts.
 await runExample(async () => {
   const totalLines = 120; // 0.5s/line => ~60s
 
@@ -22,32 +23,30 @@ await runExample(async () => {
     `for i in $(seq 1 ${totalLines}); do echo line-$i; sleep 0.5; done`,
     { onStdout: (chunk) => liveChunks.push(chunk) },
   );
-  const execId = await handle.execId;
-  console.log(`execId: ${execId}`);
 
   await waitFor(
     () => countLines(liveChunks.join("")) >= 10,
     60_000,
     "10 live lines",
   );
-  console.log(
-    `saw ${countLines(liveChunks.join(""))} lines live; going away for 10s...`,
-  );
-  await sleep(10_000);
+  console.log(`saw ${countLines(liveChunks.join(""))} lines live; detaching...`);
 
-  // Reconnect mid-run. In a real crash the execId would come from storage;
-  // here the first attachment simply keeps running in the background.
-  console.log("reattaching from the saved execId\n");
-  const reattached = sandbox.exec(
-    { execId },
+  // Detach: stop streaming, leave the command running server-side. Returns the
+  // durable session name to reconnect with.
+  const sessionName = await handle.detach();
+  console.log(`detached; sessionName: ${sessionName}`);
+  await sleep(3_000); // the command keeps running while we're gone
+
+  // Reconnect from the saved name and replay the full log.
+  console.log("reattaching from the saved sessionName\n");
+  const result = await sandbox.exec(
+    { sessionName },
     { onStdout: (chunk) => process.stdout.write(chunk) },
   );
-  const result = await reattached;
-  await handle;
 
   assertSequentialLines(result.stdout, totalLines);
   console.log(
-    `\n✓ exit ${result.exitCode}; reattached stream captured all ${totalLines} ` +
-      `lines — history emitted before reattaching plus everything after`,
+    `\n✓ exit ${result.exitCode}; the reconnect replayed all ${totalLines} ` +
+      `lines — everything produced before and after the detach`,
   );
 });
