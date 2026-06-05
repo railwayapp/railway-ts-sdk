@@ -15,8 +15,10 @@ export type {
   ExecResult,
   ExecSignal,
   ExecTarget,
+  ForkOptions,
   ListOptions,
   SandboxInfo,
+  SandboxNetworkIsolation,
   SandboxStatus,
   TemplateBuildOptions,
 } from "./types.js";

@@ -1,4 +1,5 @@
 import { RailwayAuthError, RailwayConnectionError } from "./errors.js";
+import { createLogger, type Logger } from "./logger.js";
 
 export const DEFAULT_RAILWAY_GRAPHQL_ENDPOINT =
   "https://backboard.railway.com/graphql/v2";
@@ -7,13 +8,19 @@ const RAILWAY_TOKEN_ENV = "RAILWAY_API_TOKEN";
 const RAILWAY_ENVIRONMENT_ENV = "RAILWAY_ENVIRONMENT_ID";
 const RAILWAY_ENDPOINT_ENV = "RAILWAY_GRAPHQL_ENDPOINT";
 const RAILWAY_TCP_PROXY_WS_ENV = "RAILWAY_TCP_PROXY_WS_ENDPOINT";
+const RAILWAY_VERBOSE_ENV = "RAILWAY_VERBOSE";
 
 const TCP_PROXY_WS_PORT = "2226";
 const TCP_PROXY_WS_PATH = "/ws/exec";
 
+export type RailwayAuthType = "bearer" | "project-token";
+
 export interface RailwayClientConfig {
   token?: string;
+  authType?: RailwayAuthType;
   endpoint?: string;
+  /** Alias used by IaC flows. Prefer endpoint for the stable SDK surface. */
+  graphqlEndpoint?: string;
   fetch?: typeof fetch;
   /**
    * WebSocket constructor used to stream exec output. Defaults to the global
@@ -27,6 +34,11 @@ export interface RailwayClientConfig {
    * override for non-standard deployments.
    */
   tcpProxyWsEndpoint?: string;
+  /**
+   * Print human-readable progress to stderr (requests, polling, lifecycle).
+   * Also enabled by `RAILWAY_VERBOSE`. Tokens and env values are never logged.
+   */
+  verbose?: boolean;
 }
 
 /** Structural constructor type satisfied by native WebSocket and the `ws` package. */
@@ -37,10 +49,12 @@ export type WebSocketConstructor = new (
 
 export interface NormalizedRailwayClientConfig {
   token: string;
+  authType: RailwayAuthType;
   endpoint: string;
   fetch: typeof fetch;
   webSocketImpl?: WebSocketConstructor | undefined;
   tcpProxyWsEndpoint: string;
+  log: Logger;
 }
 
 /**
@@ -60,20 +74,30 @@ export function normalizeRailwayClientConfig(
   }
 
   const endpoint =
-    firstNonEmpty(config.endpoint, readEnv(RAILWAY_ENDPOINT_ENV)) ??
-    DEFAULT_RAILWAY_GRAPHQL_ENDPOINT;
+    firstNonEmpty(
+      config.endpoint,
+      config.graphqlEndpoint,
+      readEnv(RAILWAY_ENDPOINT_ENV),
+    ) ?? DEFAULT_RAILWAY_GRAPHQL_ENDPOINT;
 
   const tcpProxyWsEndpoint =
     firstNonEmpty(config.tcpProxyWsEndpoint, readEnv(RAILWAY_TCP_PROXY_WS_ENV)) ??
     deriveTcpProxyWsEndpoint(endpoint);
 
-  return {
+  const verbose = config.verbose ?? isTruthyEnv(readEnv(RAILWAY_VERBOSE_ENV));
+  const normalized: NormalizedRailwayClientConfig = {
     token,
+    authType: config.authType ?? "bearer",
     endpoint,
     fetch: fetchImpl,
     webSocketImpl: config.webSocketImpl,
     tcpProxyWsEndpoint,
+    log: createLogger(verbose),
   };
+  normalized.log(
+    `config resolved: endpoint=${endpoint} authType=${normalized.authType}`,
+  );
+  return normalized;
 }
 
 /**
@@ -122,6 +146,13 @@ export function resolveEnvironmentId(explicit?: string): string {
 function readEnv(name: string): string | undefined {
   if (typeof process === "undefined") return undefined;
   return process.env?.[name];
+}
+
+/** Treats `1`/`true`/`yes` as on so `RAILWAY_VERBOSE=0` doesn't accidentally enable. */
+function isTruthyEnv(value: string | undefined): boolean {
+  if (value === undefined) return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
 }
 
 function firstNonEmpty(...values: (string | undefined)[]): string | undefined {

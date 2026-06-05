@@ -1,6 +1,6 @@
 {
   "name": "railway",
-  "version": "3.0.2",
+  "version": "3.1.0",
   "description": "TypeScript SDK for Railway.",
   "type": "module",
   "license": "MIT",
@@ -28,6 +28,9 @@
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "railway-iac-ts": "./dist/iac/bin.js"
+  },
   "exports": {
     ".": {
       "import": {
@@ -37,6 +40,16 @@
       "require": {
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
+      }
+    },
+    "./iac": {
+      "import": {
+        "types": "./dist/iac/index.d.ts",
+        "default": "./dist/iac/index.js"
+      },
+      "require": {
+        "types": "./dist/iac/index.d.cts",
+        "default": "./dist/iac/index.cjs"
       }
     }
   },
@@ -53,12 +66,14 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "codegen": "graphql-codegen --config codegen.ts",
+    "demo:iac": "tsx examples/iac/demo.ts",
     "package:check": "publint --strict --pack npm && npm pack --dry-run && tsx scripts/package-smoke.ts",
     "clean": "rm -rf dist coverage railway-*.tgz"
   },
   "dependencies": {
     "@graphql-typed-document-node/core": "^3.2.0",
-    "graphql": "^16.10.0"
+    "graphql": "^16.10.0",
+    "tsx": "^4.20.0"
   },
   "devDependencies": {
     "@graphql-codegen/cli": "^5.0.3",
@@ -70,7 +85,6 @@
     "fallow": "^2.67.0",
     "publint": "^0.3.21",
     "tsup": "^8.5.0",
-    "tsx": "^4.20.0",
     "typescript": "^5.8.3",
     "vitest": "^3.1.4"
   }

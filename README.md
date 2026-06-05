@@ -43,6 +43,7 @@ Sandboxes come from static factory methods:
 
 - `Sandbox.create(options?)`: provision a new sandbox.
 - `Sandbox.create(template, options?)`: provision from a template (see [Templates](#templates)).
+- `Sandbox.create(source, options?)`: fork a running sandbox (see [Forking](#forking)).
 - `Sandbox.connect(id, options?)`: reattach to an existing sandbox by id.
 - `Sandbox.list(options?)`: list sandboxes in the environment.
 
@@ -95,6 +96,37 @@ from a fresh `Sandbox.connect(id)`.
 If the WebSocket cannot be established, `exec` rejects with
 `RailwayConnectionError`. In non-Node runtimes without a global `WebSocket`,
 pass an implementation via the `webSocketImpl` config option.
+
+## Forking
+
+Fork a running sandbox to get an independent copy of its filesystem — handy for branching
+an environment after expensive setup. A fork is a fresh boot from a clone of the source's
+disk (not its live processes), created in the same environment.
+
+```ts
+const base = await Sandbox.create();
+await base.exec("npm install");
+
+const fork = await base.fork();
+await fork.exec("npm test"); // sees the installed deps, isolated from base
+```
+
+`Sandbox.create(source)` is the same operation in static form. Pass `idleTimeoutMinutes` to
+override the fork's idle timeout. The source must be `RUNNING`.
+
+## Network isolation
+
+By default a sandbox is `ISOLATED`: it has public NAT egress but cannot reach the rest of
+your environment's private network. Pass `networkIsolation: "PRIVATE"` to place it on the
+environment private network, so it can talk to your other services.
+
+```ts
+const sandbox = await Sandbox.create({ networkIsolation: "PRIVATE" });
+sandbox.networkIsolation; // "ISOLATED" | "PRIVATE"
+```
+
+`networkIsolation` is settable on `create`, `create(template)`, and `fork`, and is read
+back on every sandbox. It defaults to `ISOLATED` when omitted.
 
 ## Reconnecting and listing
 
@@ -168,6 +200,7 @@ then an environment variable, then a default. Pass explicit values to override.
 | `environmentId` | `RAILWAY_ENVIRONMENT_ID` | _(required)_ |
 | `endpoint` | `RAILWAY_GRAPHQL_ENDPOINT` | `https://backboard.railway.com/graphql/v2` |
 | `fetch` | n/a | `globalThis.fetch` |
+| `verbose` | `RAILWAY_VERBOSE` | `false` |
 
 ```ts
 const sandbox = await Sandbox.create({
@@ -180,6 +213,12 @@ const sandbox = await Sandbox.create({
 
 Environment variables are read only where a runtime exposes them, so the SDK is safe to
 import in the browser and edge runtimes; provide credentials explicitly there.
+
+### Verbose logging
+
+Set `verbose: true` (or `RAILWAY_VERBOSE=1`) to print human-readable progress to **stderr** —
+GraphQL requests, readiness polling, and lifecycle events. Useful when a `create`, `fork`, or
+template build seems stuck. Tokens and `env` values are never logged.
 
 ## Errors
 

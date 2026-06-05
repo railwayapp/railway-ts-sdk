@@ -25,16 +25,28 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-async function createWithDestroyMock(): Promise<{
-  sandbox: Sandbox;
-  calls: FetchCall[];
-}> {
+async function createThenQueue(
+  followup: unknown,
+): Promise<{ sandbox: Sandbox; calls: FetchCall[] }> {
   const mock = createFetchMock([
     { data: { sandboxCreate: sandboxInfo() } },
-    { data: { sandboxDestroy: sandboxInfo({ status: "DESTROYED" }) } },
+    followup,
   ]);
   const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch });
   return { sandbox, calls: mock.calls };
+}
+
+function createWithDestroyMock(): Promise<{ sandbox: Sandbox; calls: FetchCall[] }> {
+  return createThenQueue({
+    data: { sandboxDestroy: sandboxInfo({ status: "DESTROYED" }) },
+  });
+}
+
+function expectForkMutation(call: FetchCall | undefined): void {
+  expect(call?.body.query).toContain("mutation RailwaySandboxCreate");
+  expect(call?.body.variables).toEqual({
+    input: { environmentId: "environment_123", sourceSandboxId: "sandbox_123" },
+  });
 }
 
 function silenceExpectedRejection<T>(promise: Promise<T>): Promise<T> {
@@ -56,11 +68,46 @@ describe("Sandbox.create", () => {
     expect(sandbox.status).toBe("RUNNING");
     expect(sandbox.region).toBe("us-west2");
     expect(sandbox.idleTimeoutMinutes).toBe(5);
+    expect(sandbox.networkIsolation).toBe("ISOLATED");
     expect(sandbox.createdAt).toBe("2026-05-13T00:00:00.000Z");
     expect(sandbox.toJSON()).toEqual(sandboxInfo());
     expect(mock.calls[0]?.body.query).toContain("mutation RailwaySandboxCreate");
     expect(mock.calls[0]?.body.variables).toEqual({
       input: { environmentId: "environment_123", idleTimeoutMinutes: 10 },
+    });
+  });
+
+  it("passes networkIsolation into the create input and reads it back", async () => {
+    const mock = createFetchMock([
+      { data: { sandboxCreate: sandboxInfo({ networkIsolation: "PRIVATE" }) } },
+    ]);
+
+    const sandbox = await Sandbox.create({
+      ...auth,
+      networkIsolation: "PRIVATE",
+      fetch: mock.fetch,
+    });
+
+    expect(sandbox.networkIsolation).toBe("PRIVATE");
+    expect(mock.calls[0]?.body.variables).toEqual({
+      input: { environmentId: "environment_123", networkIsolation: "PRIVATE" },
+    });
+  });
+
+  it("passes env (incl. Railway references) into the create input verbatim", async () => {
+    const mock = createFetchMock([{ data: { sandboxCreate: sandboxInfo() } }]);
+
+    await Sandbox.create({
+      ...auth,
+      env: { NODE_ENV: "production", API_KEY: "${{shared.API_KEY}}" },
+      fetch: mock.fetch,
+    });
+
+    expect(mock.calls[0]?.body.variables).toEqual({
+      input: {
+        environmentId: "environment_123",
+        variables: { NODE_ENV: "production", API_KEY: "${{shared.API_KEY}}" },
+      },
     });
   });
 });
@@ -254,35 +301,38 @@ describe("SandboxTemplate", () => {
     const withRun = base.run("echo hi");
 
     expect(withRun).not.toBe(base);
-    expect(compileSandboxTemplate(base)).toEqual([]);
-    expect(compileSandboxTemplate(withRun)).toEqual(["echo hi"]);
+    expect(compileSandboxTemplate(base)).toEqual({ instructions: [] });
+    expect(compileSandboxTemplate(withRun)).toEqual({ instructions: ["echo hi"] });
   });
 
-  it("folds env + workdir into each subsequent command", () => {
+  it("folds workdir into each subsequent command, keeping env as build-time variables", () => {
     const tpl = Sandbox.template()
       .withEnv({ K: "v" })
       .workdir("/app")
       .run("npm install");
 
-    expect(compileSandboxTemplate(tpl)).toEqual([
-      "export K='v' && mkdir -p '/app' && cd '/app' && npm install",
-    ]);
+    expect(compileSandboxTemplate(tpl)).toEqual({
+      instructions: ["mkdir -p '/app' && cd '/app' && npm install"],
+      variables: { K: "v" },
+    });
   });
 
   it("compiles withPackages to an apt install", () => {
     expect(
       compileSandboxTemplate(Sandbox.template().withPackages("ffmpeg", "git")),
-    ).toEqual([
-      "apt-get update && apt-get install -y --no-install-recommends ffmpeg git",
-    ]);
+    ).toEqual({
+      instructions: [
+        "apt-get update && apt-get install -y --no-install-recommends ffmpeg git",
+      ],
+    });
   });
 
-  it("escapes shell-special env values", () => {
+  it("passes env values through raw as build-time variables (no shell escaping)", () => {
     expect(
       compileSandboxTemplate(
         Sandbox.template().withEnv({ MSG: "a'b c" }).run("echo $MSG"),
       ),
-    ).toEqual([`export MSG='a'\\''b c' && echo $MSG`]);
+    ).toEqual({ instructions: ["echo $MSG"], variables: { MSG: "a'b c" } });
   });
 });
 
@@ -309,6 +359,32 @@ describe("SandboxTemplate.build", () => {
         ],
       },
     });
+  });
+
+  it("passes withEnv through as build-time variables", async () => {
+    const mock = createFetchMock([
+      { data: { sandboxTemplateBuild: templateInfo({ status: "READY" }) } },
+    ]);
+
+    await Sandbox.template()
+      .withEnv({ FOO: "bar" })
+      .run("echo hi")
+      .build({ ...auth, fetch: mock.fetch });
+
+    expect(mock.calls[0]?.body.variables).toEqual({
+      environmentId: "environment_123",
+      input: { instructions: ["echo hi"], variables: { FOO: "bar" } },
+    });
+  });
+
+  it("skips the backend build when there are no instructions", async () => {
+    const mock = createFetchMock([]);
+
+    const base = Sandbox.template().withEnv({ FOO: "bar" });
+    const built = await base.build({ ...auth, fetch: mock.fetch });
+
+    expect(built).toBe(base);
+    expect(mock.calls).toHaveLength(0);
   });
 
   it("polls a template build until READY", async () => {
@@ -384,6 +460,132 @@ describe("Sandbox.create(template)", () => {
           ],
         },
       },
+    });
+  });
+
+  it("echoes build-time variables into both the build and the create template input", async () => {
+    const mock = createFetchMock([
+      { data: { sandboxTemplateBuild: templateInfo({ status: "READY" }) } },
+      { data: { sandboxCreate: sandboxInfo() } },
+    ]);
+
+    const base = Sandbox.template().withEnv({ FOO: "bar" }).run("true");
+    await Sandbox.create(base, { ...auth, fetch: mock.fetch });
+
+    expect(mock.calls[0]?.body.variables).toEqual({
+      environmentId: "environment_123",
+      input: { instructions: ["true"], variables: { FOO: "bar" } },
+    });
+    expect(mock.calls[1]?.body.variables).toEqual({
+      input: {
+        environmentId: "environment_123",
+        template: { instructions: ["true"], variables: { FOO: "bar" } },
+      },
+    });
+  });
+
+  it("skips the build for an env-only template, creating directly", async () => {
+    const mock = createFetchMock([{ data: { sandboxCreate: sandboxInfo() } }]);
+
+    const base = Sandbox.template().withEnv({ FOO: "bar" });
+    const sandbox = await Sandbox.create(base, { ...auth, fetch: mock.fetch });
+
+    expect(sandbox.status).toBe("RUNNING");
+    expect(mock.calls).toHaveLength(1);
+    expect(mock.calls[0]?.body.query).toContain("mutation RailwaySandboxCreate");
+    // Build-time env with no build steps has no effect and isn't sent.
+    expect(mock.calls[0]?.body.variables).toEqual({
+      input: { environmentId: "environment_123" },
+    });
+  });
+});
+
+const forkResponse = { data: { sandboxCreate: sandboxInfo({ id: "forked_123" }) } };
+
+describe("sandbox.fork", () => {
+  it("forks a running sandbox via the create mutation", async () => {
+    const { sandbox, calls } = await createThenQueue(forkResponse);
+    const forked = await sandbox.fork();
+
+    expect(forked.id).toBe("forked_123");
+    expect(forked).not.toBe(sandbox);
+    expectForkMutation(calls[1]);
+  });
+
+  it("passes idleTimeoutMinutes into the fork input", async () => {
+    const { sandbox, calls } = await createThenQueue(forkResponse);
+    await sandbox.fork({ idleTimeoutMinutes: 15 });
+
+    expect(calls[1]?.body.variables).toEqual({
+      input: {
+        environmentId: "environment_123",
+        sourceSandboxId: "sandbox_123",
+        idleTimeoutMinutes: 15,
+      },
+    });
+  });
+
+  it("passes networkIsolation into the fork input", async () => {
+    const { sandbox, calls } = await createThenQueue(forkResponse);
+    await sandbox.fork({ networkIsolation: "PRIVATE" });
+
+    expect(calls[1]?.body.variables).toEqual({
+      input: {
+        environmentId: "environment_123",
+        sourceSandboxId: "sandbox_123",
+        networkIsolation: "PRIVATE",
+      },
+    });
+  });
+
+  it("passes env into the fork input as runtime variables", async () => {
+    const { sandbox, calls } = await createThenQueue(forkResponse);
+    await sandbox.fork({ env: { FOO: "bar" } });
+
+    expect(calls[1]?.body.variables).toEqual({
+      input: {
+        environmentId: "environment_123",
+        sourceSandboxId: "sandbox_123",
+        variables: { FOO: "bar" },
+      },
+    });
+  });
+
+  it("delegates Sandbox.create(source) to fork, reusing the source engine", async () => {
+    // No fetch on the create(source) call: it must reuse the source's engine.
+    const { sandbox: source, calls } = await createThenQueue(forkResponse);
+    const forked = await Sandbox.create(source);
+
+    expect(forked.id).toBe("forked_123");
+    expectForkMutation(calls[1]);
+  });
+});
+
+describe("sandbox.fork readiness", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("polls until the fork is RUNNING", async () => {
+    const mock = createFetchMock([
+      { data: { sandboxCreate: sandboxInfo() } },
+      { data: { sandboxCreate: sandboxInfo({ id: "forked_123", status: "CREATING" }) } },
+      { data: { sandbox: sandboxInfo({ id: "forked_123", status: "CREATING" }) } },
+      { data: { sandbox: sandboxInfo({ id: "forked_123", status: "RUNNING" }) } },
+    ]);
+
+    const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch });
+    const promise = sandbox.fork();
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    const forked = await promise;
+
+    expect(forked.id).toBe("forked_123");
+    expect(forked.status).toBe("RUNNING");
+    expect(mock.calls).toHaveLength(4);
+    expect(mock.calls[1]?.body.query).toContain("mutation RailwaySandboxCreate");
+    expect(mock.calls[2]?.body.query).toContain("query RailwaySandbox");
+    expect(mock.calls[2]?.body.variables).toEqual({
+      id: "forked_123",
+      environmentId: "environment_123",
     });
   });
 });

@@ -16,8 +16,10 @@ import type {
   ExecOptions,
   ExecReattachTarget,
   ExecTarget,
+  ForkOptions,
   ListOptions,
   SandboxInfo,
+  SandboxNetworkIsolation,
   SandboxStatus,
 } from "./types.js";
 
@@ -42,6 +44,11 @@ export class Sandbox implements AsyncDisposable {
 
   get status(): SandboxStatus {
     return this.#info.status;
+  }
+
+  /** Network access mode: `ISOLATED` (NAT egress only) or `PRIVATE` (joins the environment private network). */
+  get networkIsolation(): SandboxNetworkIsolation {
+    return this.#info.networkIsolation;
   }
 
   get environmentId(): string {
@@ -69,16 +76,26 @@ export class Sandbox implements AsyncDisposable {
     template: SandboxTemplate,
     options?: CreateOptions,
   ): Promise<Sandbox>;
+  static create(source: Sandbox, options?: ForkOptions): Promise<Sandbox>;
   static create(options?: CreateOptions): Promise<Sandbox>;
   static async create(
-    sourceOrOptions: SandboxTemplate | CreateOptions = {},
+    sourceOrOptions: SandboxTemplate | Sandbox | CreateOptions = {},
     maybeOptions: CreateOptions = {},
   ): Promise<Sandbox> {
+    if (sourceOrOptions instanceof Sandbox) {
+      return sourceOrOptions.fork(maybeOptions);
+    }
+
     if (isSandboxTemplate(sourceOrOptions)) {
       const engine = engineFromOptions(maybeOptions);
-      const instructions = compileSandboxTemplate(sourceOrOptions);
-      await engine.buildTemplateUntilReady(instructions);
-      const info = await engine.create(maybeOptions, instructions);
+      const compiled = compileSandboxTemplate(sourceOrOptions);
+      if (compiled.instructions.length === 0) {
+        // No build steps → nothing to build. Build-time variables have no
+        // effect; runtime env still comes from `create({ env })`.
+        return new Sandbox(engine, await engine.create(maybeOptions));
+      }
+      await engine.buildTemplateUntilReady(compiled);
+      const info = await engine.create(maybeOptions, compiled);
       return new Sandbox(engine, info);
     }
 
@@ -117,6 +134,15 @@ export class Sandbox implements AsyncDisposable {
   exec(target: ExecReattachTarget, options?: ExecOptions): ExecHandle;
   exec(target: ExecTarget, options: ExecOptions = {}): ExecHandle {
     return this.#engine.exec(this.id, target, options);
+  }
+
+  /**
+   * Fork this running sandbox into a new, independent one. Clones the
+   * filesystem (a fresh boot, not live processes) into the same environment.
+   */
+  async fork(options?: ForkOptions): Promise<Sandbox> {
+    const info = await this.#engine.fork(this.id, options);
+    return new Sandbox(this.#engine, info);
   }
 
   async destroy(): Promise<void> {

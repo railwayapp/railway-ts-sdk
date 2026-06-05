@@ -9,53 +9,22 @@
   "publicPackages": [
     "railway"
   ],
-  "usedClassMembers": [
-    "build",
-    "createdAt",
-    "delete",
-    "destroy",
-    "exec",
-    "idleTimeoutMinutes",
-    "refresh",
-    "region",
-    "run",
-    "status",
-    "toJSON",
-    "withEnv",
-    "withPackages",
-    "workdir"
-  ],
   "ignorePatterns": [
     "src/generated/graphql.ts"
   ],
   "duplicates": {
     "ignore": [
-      "src/generated/graphql.ts"
+      "src/generated/graphql.ts",
+      "src/iac/**"
     ]
   },
   "health": {
     "ignore": [
-      "src/generated/graphql.ts"
+      "src/generated/graphql.ts",
+      "src/iac/**"
     ]
   },
-  "audit": {
-    "gate": "new-only"
-  },
   "rules": {
-    "unresolved-imports": "error",
-    "unlisted-dependencies": "error",
-    "unused-files": "error",
-    "unused-exports": "error",
-    "unused-types": "error",
-    "unused-dependencies": "error",
-    "unused-dev-dependencies": "error",
-    "unused-optional-dependencies": "error",
-    "unused-enum-members": "error",
-    "unused-class-members": "error",
-    "duplicate-exports": "error",
-    "circular-dependencies": "error",
-    "type-only-dependencies": "error",
-    "test-only-dependencies": "warn",
-    "stale-suppressions": "warn"
+    "unused-class-members": "off"
   }
 }

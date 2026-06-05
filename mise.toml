@@ -71,3 +71,7 @@ run = "pnpm exec tsx examples/sandboxes/template.ts"
 description = "Start a durable command, detach, and reattach by sessionName from a fresh connection"
 run = "pnpm exec tsx examples/sandboxes/exec.ts"
 
+[tasks."example:fork"]
+description = "Create a sandbox, fork it, and read forked filesystem state using .env credentials"
+run = "pnpm exec tsx examples/sandboxes/fork.ts"
+

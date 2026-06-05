@@ -9,6 +9,7 @@ export function clearRailwayEnv(): void {
   vi.stubEnv("RAILWAY_ENVIRONMENT_ID", "");
   vi.stubEnv("RAILWAY_GRAPHQL_ENDPOINT", "");
   vi.stubEnv("RAILWAY_TCP_PROXY_WS_ENDPOINT", "");
+  vi.stubEnv("RAILWAY_VERBOSE", "");
 }
 
 export interface FetchCall {
@@ -48,6 +49,7 @@ export function sandboxInfo(overrides: Partial<SandboxInfo> = {}): SandboxInfo {
   return {
     id: "sandbox_123",
     status: "RUNNING",
+    networkIsolation: "ISOLATED",
     environmentId: "environment_123",
     region: "us-west2",
     idleTimeoutMinutes: 5,
