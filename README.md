@@ -89,8 +89,8 @@ const result = await sandbox.exec({ sessionName }, {
 });
 ```
 
-See `examples/sandboxes/exec-durable.ts` for reattaching from a fresh
-`Sandbox.connect(id)` and contrasting full replay with `resumeFromLastRead`.
+See `examples/sandboxes/exec.ts` for detaching and reattaching by `sessionName`
+from a fresh `Sandbox.connect(id)`.
 
 If the WebSocket cannot be established, `exec` rejects with
 `RailwayConnectionError`. In non-Node runtimes without a global `WebSocket`,

@@ -66,19 +66,7 @@ run = "pnpm exec tsx examples/sandboxes/quickstart.ts"
 description = "Create a sandbox from a template, then destroy it using .env credentials"
 run = "pnpm exec tsx examples/sandboxes/template.ts"
 
-[tasks."example:exec-long"]
-description = "Stream a random 60-120s command and verify every log line arrives in order"
-run = "pnpm exec tsx examples/sandboxes/exec-long.ts"
-
-[tasks."example:exec-reattach"]
-description = "Reattach to a running exec mid-command and verify the full log history is captured"
-run = "pnpm exec tsx examples/sandboxes/exec-reattach.ts"
-
-[tasks."example:exec-kill"]
-description = "Kill a running command mid-stream and verify it terminates (vs detach, which keeps it running)"
-run = "pnpm exec tsx examples/sandboxes/exec-kill.ts"
-
-[tasks."example:exec-durable"]
-description = "Reattach from a fresh Sandbox.connect twice: full replay vs resumeFromLastRead"
-run = "pnpm exec tsx examples/sandboxes/exec-durable.ts"
+[tasks."example:exec"]
+description = "Start a durable command, detach, and reattach by sessionName from a fresh connection"
+run = "pnpm exec tsx examples/sandboxes/exec.ts"
 
