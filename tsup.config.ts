@@ -8,7 +8,7 @@ export default defineConfig({
     __RAILWAY_SDK_VERSION__: JSON.stringify(pkg.version),
   },
   dts: true,
-  entry: ["src/index.ts"],
+  entry: ["src/index.ts", "src/iac/index.ts", "src/iac/bin.ts"],
   format: ["esm", "cjs"],
   sourcemap: true,
   splitting: false,

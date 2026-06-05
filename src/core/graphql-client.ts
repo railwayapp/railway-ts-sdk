@@ -22,7 +22,7 @@ export async function requestGraphQL<TResult, TVariables>(
     method: "POST",
     headers: {
       Accept: "application/json",
-      Authorization: `Bearer ${config.token}`,
+      ...authHeader(config),
       "Content-Type": "application/json",
       "User-Agent": USER_AGENT,
     },
@@ -55,6 +55,11 @@ export async function requestGraphQL<TResult, TVariables>(
   }
 
   return body.data;
+}
+
+function authHeader(config: NormalizedRailwayClientConfig): Record<string, string> {
+  if (config.authType === "project-token") return { "project-access-token": config.token };
+  return { Authorization: `Bearer ${config.token}` };
 }
 
 async function parseGraphQLResponse<TResult>(

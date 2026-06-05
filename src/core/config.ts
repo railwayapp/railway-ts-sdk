@@ -7,14 +7,20 @@ const RAILWAY_TOKEN_ENV = "RAILWAY_API_TOKEN";
 const RAILWAY_ENVIRONMENT_ENV = "RAILWAY_ENVIRONMENT_ID";
 const RAILWAY_ENDPOINT_ENV = "RAILWAY_GRAPHQL_ENDPOINT";
 
+export type RailwayAuthType = "bearer" | "project-token";
+
 export interface RailwayClientConfig {
   token?: string;
+  authType?: RailwayAuthType;
   endpoint?: string;
+  /** Alias used by IaC flows. Prefer endpoint for the stable SDK surface. */
+  graphqlEndpoint?: string;
   fetch?: typeof fetch;
 }
 
 export interface NormalizedRailwayClientConfig {
   token: string;
+  authType: RailwayAuthType;
   endpoint: string;
   fetch: typeof fetch;
 }
@@ -36,10 +42,18 @@ export function normalizeRailwayClientConfig(
   }
 
   const endpoint =
-    firstNonEmpty(config.endpoint, readEnv(RAILWAY_ENDPOINT_ENV)) ??
-    DEFAULT_RAILWAY_GRAPHQL_ENDPOINT;
+    firstNonEmpty(
+      config.endpoint,
+      config.graphqlEndpoint,
+      readEnv(RAILWAY_ENDPOINT_ENV),
+    ) ?? DEFAULT_RAILWAY_GRAPHQL_ENDPOINT;
 
-  return { token, endpoint, fetch: fetchImpl };
+  return {
+    token,
+    authType: config.authType ?? "bearer",
+    endpoint,
+    fetch: fetchImpl,
+  };
 }
 
 export function resolveEnvironmentId(explicit?: string): string {
