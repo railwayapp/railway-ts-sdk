@@ -74,3 +74,7 @@ run = "pnpm exec tsx examples/sandboxes/exec-long.ts"
 description = "Reattach to a running exec mid-command and verify the full log history is captured"
 run = "pnpm exec tsx examples/sandboxes/exec-reattach.ts"
 
+[tasks."example:exec-kill"]
+description = "Kill a running command mid-stream and verify it terminates (vs detach, which keeps it running)"
+run = "pnpm exec tsx examples/sandboxes/exec-kill.ts"
+

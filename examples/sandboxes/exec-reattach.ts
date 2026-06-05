@@ -10,7 +10,8 @@ import {
 // Starts a ~60s command, watches the live stream briefly, then `detach()`es —
 // stops streaming and closes the socket while the command keeps running — and
 // reconnects to it via `exec({ sessionName })`. The reconnect replays the full
-// log (the default) and follows live to the end, capturing every line.
+// log (the default) and follows live to the end, capturing every line. To
+// terminate the command instead of detaching, see exec-kill.ts.
 await runExample(async () => {
   const totalLines = 120; // 0.5s/line => ~60s
 
