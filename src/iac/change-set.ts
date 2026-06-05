@@ -88,6 +88,14 @@ export function diffGraphs({ current, desired }: { current: RailwayGraph; desire
 
   for (const resource of desired.resources) {
     const previous = currentByAddress.get(resource.address);
+    if (previous && isManagedByRepoConfig(previous)) {
+      diagnostics.push({
+        severity: "error",
+        path: `resources.${resource.address}.configFile`,
+        message: `${previous.name} is already managed by ${String((previous as { configFile?: string }).configFile)}. Remove or migrate the repo config before managing this service from .railway/railway.ts.`,
+      });
+      continue;
+    }
     if (!previous) {
       changes.push({
         kind: "resource.create",
@@ -391,6 +399,12 @@ function normalizeVariableForDiff(value: VariableValue | undefined, resourcesByA
   if (value?.type !== "reference") return value;
   const name = resourcesByAddress.get(value.resource)?.name ?? value.resource.split(".").slice(1).join(".") ?? value.resource;
   return { type: "literal", value: `\${{${name}.${value.output}}}` };
+}
+
+function isManagedByRepoConfig(resource: ResourceNode): boolean {
+  if (resource.type !== "service" && resource.type !== "database") return false;
+  const configFile = (resource as { configFile?: string | null }).configFile;
+  return typeof configFile === "string" && /railway\.(json|toml)$/i.test(configFile);
 }
 
 function bucketRegion(resource: ResourceNode): string | undefined {
