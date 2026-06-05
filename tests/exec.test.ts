@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { deriveTcpProxyWsEndpoint } from "../src/core/config.js";
-import { ExecHandle, Sandbox } from "../src/index.js";
+import {
+  ExecHandle,
+  Sandbox,
+  type ExecOptions,
+  type ExecTarget,
+} from "../src/index.js";
 import { clearRailwayEnv, createFetchMock, sandboxInfo } from "./test-helpers.js";
 import { createExecWsMock } from "./exec-ws-mock.js";
 
@@ -31,6 +36,22 @@ async function wsSandbox(responses: unknown[] = []) {
   return { sandbox, ws, mock };
 }
 
+/** Creates a ws-backed sandbox, starts an exec, and waits for its socket. */
+async function execSocket(
+  target: ExecTarget,
+  options?: ExecOptions,
+  responses: unknown[] = [shellToken("jwt_abc")],
+) {
+  const { sandbox, ws, mock } = await wsSandbox(responses);
+  const handle =
+    typeof target === "string"
+      ? sandbox.exec(target, options)
+      : sandbox.exec(target, options);
+  const socket = await ws.nextSocket();
+  await tick();
+  return { sandbox, ws, mock, handle, socket };
+}
+
 describe("deriveTcpProxyWsEndpoint", () => {
   it("maps a backboard endpoint to the ssh exec endpoint", () => {
     expect(
@@ -47,12 +68,8 @@ describe("deriveTcpProxyWsEndpoint", () => {
 
 describe("exec", () => {
   it("mints a shell-scoped token and opens /ws/exec with the command init frame", async () => {
-    const { sandbox, ws, mock } = await wsSandbox([shellToken("jwt_abc")]);
-
-    const handle = sandbox.exec("echo hi");
+    const { mock, handle, socket } = await execSocket("echo hi");
     expect(handle).toBeInstanceOf(ExecHandle);
-    const socket = await ws.nextSocket();
-    await tick();
 
     expect(mock.calls[1]?.body.variables).toEqual({
       input: {
@@ -86,10 +103,7 @@ describe("exec", () => {
   });
 
   it("rejects sessionName when the server assigns no durable session", async () => {
-    const { sandbox, ws } = await wsSandbox([shellToken("jwt_abc")]);
-    const handle = sandbox.exec("echo hi");
-    const socket = await ws.nextSocket();
-    await tick();
+    const { handle, socket } = await execSocket("echo hi");
 
     // No durable_session frame ⇒ the server can't do durable sessions.
     socket.serverStdout("hi\n");
@@ -101,15 +115,12 @@ describe("exec", () => {
   });
 
   it("keeps stdout and stderr separate and reports the real exit code", async () => {
-    const { sandbox, ws } = await wsSandbox([shellToken("jwt_abc")]);
     const out: string[] = [];
     const err: string[] = [];
-    const handle = sandbox.exec("build", {
+    const { handle, socket } = await execSocket("build", {
       onStdout: c => out.push(c),
       onStderr: c => err.push(c),
     });
-    const socket = await ws.nextSocket();
-    await tick();
 
     socket.serverStdout("compiling\n");
     socket.serverStderr("warning: x\n");
@@ -141,10 +152,7 @@ describe("exec", () => {
   });
 
   it("surfaces the VM-assigned durable session name as sessionName", async () => {
-    const { sandbox, ws } = await wsSandbox([shellToken("jwt_abc")]);
-    const handle = sandbox.exec("echo hi");
-    const socket = await ws.nextSocket();
-    await tick();
+    const { handle, socket } = await execSocket("echo hi");
 
     socket.serverDurableSession("sess_xyz");
     socket.serverStdout("hi\n");
@@ -155,10 +163,7 @@ describe("exec", () => {
   });
 
   it("kill() sends a signal frame (default TERM) and settles on the exit", async () => {
-    const { sandbox, ws } = await wsSandbox([shellToken("jwt_abc")]);
-    const handle = sandbox.exec("sleep 100");
-    const socket = await ws.nextSocket();
-    await tick();
+    const { handle, socket } = await execSocket("sleep 100");
 
     await expect(handle.kill()).resolves.toBe(true);
     expect(socket.sentText).toContainEqual({
@@ -173,10 +178,7 @@ describe("exec", () => {
   });
 
   it("kill('KILL') sends SIGKILL", async () => {
-    const { sandbox, ws } = await wsSandbox([shellToken("jwt_abc")]);
-    const handle = sandbox.exec("sleep 100");
-    const socket = await ws.nextSocket();
-    await tick();
+    const { handle, socket } = await execSocket("sleep 100");
 
     await handle.kill("KILL");
     expect(socket.sentText).toContainEqual({
@@ -189,10 +191,7 @@ describe("exec", () => {
   });
 
   it("detach() closes the socket and resolves the durable session name", async () => {
-    const { sandbox, ws } = await wsSandbox([shellToken("jwt_abc")]);
-    const handle = sandbox.exec("sleep 100");
-    const socket = await ws.nextSocket();
-    await tick();
+    const { handle, socket } = await execSocket("sleep 100");
 
     socket.serverDurableSession("sess_detach");
     socket.serverStdout("partial\n");
@@ -207,10 +206,7 @@ describe("exec", () => {
   });
 
   it("reattaches by sending the durable session id with a placeholder command", async () => {
-    const { sandbox, ws } = await wsSandbox([shellToken("jwt_abc")]);
-    const handle = sandbox.exec({ sessionName: "sess_xyz" });
-    const socket = await ws.nextSocket();
-    await tick();
+    const { handle, socket } = await execSocket({ sessionName: "sess_xyz" });
 
     // Default reattach is full replay — no resume_from_last_read on the wire.
     expect(socket.sentText[0]).toEqual({
@@ -232,13 +228,10 @@ describe("exec", () => {
   });
 
   it("sends resume_from_last_read when the caller opts in", async () => {
-    const { sandbox, ws } = await wsSandbox([shellToken("jwt_abc")]);
-    const handle = sandbox.exec(
+    const { handle, socket } = await execSocket(
       { sessionName: "sess_xyz" },
       { resumeFromLastRead: true },
     );
-    const socket = await ws.nextSocket();
-    await tick();
 
     expect(socket.sentText[0]).toEqual({
       type: "init_exec",

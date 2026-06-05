@@ -96,36 +96,8 @@ export function connectExecWs(args: {
 
     socket.onmessage = event => {
       const { data } = event;
-      if (data instanceof ArrayBuffer) {
-        const view = new Uint8Array(data);
-        if (view.length <= 1) return;
-        if (view[0] === STDOUT_FRAME) handlers.onStdout(view.subarray(1));
-        else if (view[0] === STDERR_FRAME) handlers.onStderr(view.subarray(1));
-        return;
-      }
-      if (typeof data === "string") {
-        let frame: {
-          type?: string;
-          data?: {
-            exit_code?: number;
-            reason?: string;
-            durable_session_name?: string;
-          };
-        };
-        try {
-          frame = JSON.parse(data);
-        } catch {
-          return;
-        }
-        if (frame.type === "exit") {
-          handlers.onExit(frame.data?.exit_code ?? 0, frame.data?.reason ?? "");
-        } else if (
-          frame.type === "durable_session" &&
-          frame.data?.durable_session_name
-        ) {
-          handlers.onDurableSession?.(frame.data.durable_session_name);
-        }
-      }
+      if (data instanceof ArrayBuffer) handleBinaryFrame(data, handlers);
+      else if (typeof data === "string") handleTextFrame(data, handlers);
     };
 
     socket.onclose = event => {
@@ -153,4 +125,48 @@ export function connectExecWs(args: {
       );
     };
   });
+}
+
+/** Binary frame: a leading tag byte selects the stream, the rest is payload. */
+function handleBinaryFrame(buffer: ArrayBuffer, handlers: ExecWsHandlers): void {
+  const view = new Uint8Array(buffer);
+  if (view.length <= 1) return;
+  if (view[0] === STDOUT_FRAME) handlers.onStdout(view.subarray(1));
+  else if (view[0] === STDERR_FRAME) handlers.onStderr(view.subarray(1));
+}
+
+interface ControlFrameData {
+  exit_code?: number;
+  reason?: string;
+  durable_session_name?: string;
+}
+
+/** Text frame: JSON control message — exit, or a durable session assignment. */
+function handleTextFrame(text: string, handlers: ExecWsHandlers): void {
+  let frame: { type?: string; data?: ControlFrameData };
+  try {
+    frame = JSON.parse(text);
+  } catch {
+    return;
+  }
+  if (frame.type === "exit") emitExit(frame.data, handlers);
+  else if (frame.type === "durable_session") {
+    emitDurableSession(frame.data, handlers);
+  }
+}
+
+function emitExit(
+  data: ControlFrameData | undefined,
+  handlers: ExecWsHandlers,
+): void {
+  handlers.onExit(data?.exit_code ?? 0, data?.reason ?? "");
+}
+
+function emitDurableSession(
+  data: ControlFrameData | undefined,
+  handlers: ExecWsHandlers,
+): void {
+  if (data?.durable_session_name) {
+    handlers.onDurableSession?.(data.durable_session_name);
+  }
 }

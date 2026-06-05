@@ -22,16 +22,16 @@ description = "Typecheck source, tests, and examples"
 run = "pnpm run typecheck"
 
 [tasks.test]
-description = "Run unit tests"
-run = "pnpm run test"
+description = "Run tests; loads .env so the live e2e runs when RAILWAY_API_TOKEN + RAILWAY_ENVIRONMENT_ID are set (else it skips)"
+run = "if [ -f .env ]; then set -a; . ./.env; set +a; fi; pnpm run test"
 
 [tasks.test-watch]
 description = "Run unit tests in watch mode"
 run = "pnpm run test:watch"
 
 [tasks.e2e]
-description = "Run the live exec e2e against .env credentials (sets SANDBOX_E2E=1, uses the system CA store for dev certs)"
-run = "if [ -f .env ]; then set -a; . ./.env; set +a; fi; SANDBOX_E2E=1 NODE_OPTIONS=--use-system-ca pnpm exec vitest run tests/exec.e2e.test.ts"
+description = "Run only the live exec e2e against .env credentials (uses the system CA store for dev certs)"
+run = "if [ -f .env ]; then set -a; . ./.env; set +a; fi; pnpm exec vitest run tests/exec.e2e.test.ts"
 
 [tasks.codegen]
 description = "Regenerate GraphQL types from the configured schema"
@@ -51,8 +51,9 @@ description = "Remove build/test artifacts"
 run = "pnpm run clean"
 
 [tasks.check]
-description = "Run typecheck, tests, and build"
-depends = ["typecheck", "test", "build"]
+description = "Run typecheck, offline unit tests, and build (forces e2e off — clears creds)"
+depends = ["typecheck", "build"]
+run = "RAILWAY_API_TOKEN='' RAILWAY_ENVIRONMENT_ID='' pnpm run test"
 
 [tasks.example]
 description = "Run the default manual example using .env credentials"

@@ -6,6 +6,9 @@ import { RailwayAuthError, RailwayGraphQLError } from "../../src/index.ts";
 // over ambient RAILWAY_* shell credentials.
 config({ override: true });
 
+export const sleep = (ms: number): Promise<void> =>
+  new Promise(resolve => setTimeout(resolve, ms));
+
 export async function runExample(example: () => Promise<void>): Promise<void> {
   try {
     await example();

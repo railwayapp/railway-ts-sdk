@@ -1,16 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { Sandbox } from "../src/index.js";
+import { Sandbox, type ExecHandle } from "../src/index.js";
 
 /**
- * Live end-to-end exec tests over the `/ws/exec` transport. Skipped unless
- * explicitly enabled so the unit suite stays offline:
- *
- *   SANDBOX_E2E=1 RAILWAY_API_TOKEN=... RAILWAY_ENVIRONMENT_ID=... \
- *     [RAILWAY_GRAPHQL_ENDPOINT=...] pnpm vitest run tests/exec.e2e.test.ts
+ * Live end-to-end exec tests over the `/ws/exec` transport. They run whenever
+ * RAILWAY_API_TOKEN + RAILWAY_ENVIRONMENT_ID are set (e.g. loaded from .env by
+ * `mise run test` / `mise run e2e`); without credentials they skip so the unit
+ * suite stays offline.
  */
 const live =
-  process.env.SANDBOX_E2E === "1" &&
   Boolean(process.env.RAILWAY_API_TOKEN) &&
   Boolean(process.env.RAILWAY_ENVIRONMENT_ID);
 
@@ -26,6 +24,62 @@ function expectSequential(stdout: string): void {
   const numbers = lineNumbers(stdout);
   expect(numbers.length).toBeGreaterThan(0);
   numbers.forEach((value, index) => expect(value).toBe(index + 1));
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function waitFor(
+  predicate: () => boolean,
+  timeoutMs: number,
+  label: string,
+): Promise<void> {
+  const start = Date.now();
+  while (!predicate()) {
+    if (Date.now() - start > timeoutMs) throw new Error(`timed out: ${label}`);
+    await sleep(200);
+  }
+}
+
+const lineSet = (chunks: string[]): Set<number> =>
+  new Set(lineNumbers(chunks.join("")));
+
+/** Starts a `line-1..line-total` (0.5s/line) command, waiting until `untilLines` stream live. */
+async function streamSeq(
+  sandbox: Sandbox,
+  total: number,
+  untilLines: number,
+): Promise<{ live: string[]; handle: ExecHandle }> {
+  const chunks: string[] = [];
+  const handle = sandbox.exec(
+    `for i in $(seq 1 ${total}); do echo line-$i; sleep 0.5; done`,
+    { onStdout: c => chunks.push(c) },
+  );
+  await waitFor(
+    () => lineSet(chunks).size >= untilLines,
+    60_000,
+    `${untilLines} live lines`,
+  );
+  return { live: chunks, handle };
+}
+
+/** Reattaches by sessionName and asserts the pre/post-detach lines together cover 1..total. */
+async function reattachAndExpectAll(
+  sandbox: Sandbox,
+  sessionName: string,
+  before: string[],
+  total: number,
+): Promise<void> {
+  const after: string[] = [];
+  const result = await sandbox.exec(
+    { sessionName },
+    { onStdout: c => after.push(c) },
+  );
+  expect(result.exitCode).toBe(0);
+  const union = new Set([...lineSet(before), ...lineSet(after)]);
+  expect(union.size).toBe(total);
+  for (let i = 1; i <= total; i++) expect(union.has(i)).toBe(true);
 }
 
 describe.runIf(live)("exec e2e (live)", () => {
@@ -71,42 +125,10 @@ describe.runIf(live)("exec e2e (live)", () => {
     expect(result.timedOut).toBe(true);
     expect(result.stdout).toContain("start");
   }, 60_000);
-});
 
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-async function waitFor(
-  predicate: () => boolean,
-  timeoutMs: number,
-  label: string,
-): Promise<void> {
-  const start = Date.now();
-  while (!predicate()) {
-    if (Date.now() - start > timeoutMs) throw new Error(`timed out: ${label}`);
-    await sleep(200);
-  }
-}
-
-const lineSet = (chunks: string[]): Set<number> =>
-  new Set(lineNumbers(chunks.join("")));
-
-/**
- * Durable reattach over `/ws/exec`. Requires durable sessions enabled
- * server-side (capability negotiation / v2 tunnel); on a non-durable bridge a
- * fresh exec's `sessionName` rejects and these fail loudly rather than silently.
- */
-describe.runIf(live)("exec durable reattach (live)", () => {
-  let sandbox: Sandbox;
-
-  beforeAll(async () => {
-    sandbox = await Sandbox.create({ idleTimeoutMinutes: 10 });
-  }, 240_000);
-
-  afterAll(async () => {
-    await sandbox?.destroy().catch(() => {});
-  });
+  // Durable reattach over `/ws/exec`. Requires durable sessions enabled
+  // server-side (capability negotiation / v2 tunnel); on a non-durable bridge a
+  // fresh exec's `sessionName` rejects and these fail loudly rather than silently.
 
   it("fire-and-forget: start a command without reading it, then reconnect and harvest the full output", async () => {
     // Start, capture the durable id, and detach *before* any output is
@@ -131,12 +153,7 @@ describe.runIf(live)("exec durable reattach (live)", () => {
 
   it("reattaches a running exec and replays without losing output", async () => {
     const total = 60; // ~30s at 0.5s/line
-    const live1: string[] = [];
-    const handle = sandbox.exec(
-      `for i in $(seq 1 ${total}); do echo line-$i; sleep 0.5; done`,
-      { onStdout: c => live1.push(c) },
-    );
-    await waitFor(() => lineSet(live1).size >= 8, 60_000, "8 live lines");
+    const { live: before, handle } = await streamSeq(sandbox, total, 8);
     const sessionName = await handle.detach(); // detach mid-run, keep it running
     expect(sessionName).toBeTruthy();
     await sleep(3_000); // more lines produced while detached
@@ -144,25 +161,16 @@ describe.runIf(live)("exec durable reattach (live)", () => {
     // Default reattach is full replay — loses nothing across the seam. (Opt-in
     // `resumeFromLastRead: true` is exact but can drop in-flight output at an
     // abrupt detach: the server advances its cursor on write, not on receipt.)
-    const live2: string[] = [];
-    const result = await sandbox.exec(
-      { sessionName },
-      { onStdout: c => live2.push(c) },
-    );
-    expect(result.exitCode).toBe(0);
-
-    const union = new Set([...lineSet(live1), ...lineSet(live2)]);
-    expect(union.size).toBe(total);
-    for (let i = 1; i <= total; i++) expect(union.has(i)).toBe(true);
+    await reattachAndExpectAll(sandbox, sessionName, before, total);
   }, 120_000);
 
   it("delivers the real exit code after a mid-run detach", async () => {
-    const live1: string[] = [];
+    const before: string[] = [];
     const handle = sandbox.exec(
       "for i in $(seq 1 40); do echo line-$i; sleep 0.5; done; exit 7",
-      { onStdout: c => live1.push(c) },
+      { onStdout: c => before.push(c) },
     );
-    await waitFor(() => lineSet(live1).size >= 5, 60_000, "5 live lines");
+    await waitFor(() => lineSet(before).size >= 5, 60_000, "5 live lines");
     const sessionName = await handle.detach(); // detach mid-run, keep it running
 
     const result = await sandbox.exec({ sessionName });
@@ -208,40 +216,22 @@ describe.runIf(live)("exec durable reattach (live)", () => {
 
   it("detach() stops streaming and a reconnect resumes the running command", async () => {
     const total = 60;
-    const live1: string[] = [];
-    const handle = sandbox.exec(
-      `for i in $(seq 1 ${total}); do echo line-$i; sleep 0.5; done`,
-      { onStdout: c => live1.push(c) },
-    );
-    await waitFor(() => lineSet(live1).size >= 8, 60_000, "8 live lines");
+    const { live: before, handle } = await streamSeq(sandbox, total, 8);
 
     const sessionName = await handle.detach();
     expect(sessionName).toBeTruthy();
-    const seenAtDetach = lineSet(live1).size;
+    const seenAtDetach = lineSet(before).size;
     await sleep(3_000); // command keeps running while detached
 
     // Nothing more streams to the detached handle.
-    expect(lineSet(live1).size).toBe(seenAtDetach);
+    expect(lineSet(before).size).toBe(seenAtDetach);
 
-    const live2: string[] = [];
-    const result = await sandbox.exec(
-      { sessionName },
-      { onStdout: c => live2.push(c) },
-    );
-    expect(result.exitCode).toBe(0);
-    const union = new Set([...lineSet(live1), ...lineSet(live2)]);
-    expect(union.size).toBe(total);
-    for (let i = 1; i <= total; i++) expect(union.has(i)).toBe(true);
+    await reattachAndExpectAll(sandbox, sessionName, before, total);
   }, 120_000);
 
   it("kill() stops the command", async () => {
     const total = 30; // 0.5s/line => ~15s
-    const live1: string[] = [];
-    const handle = sandbox.exec(
-      `for i in $(seq 1 ${total}); do echo line-$i; sleep 0.5; done`,
-      { onStdout: c => live1.push(c) },
-    );
-    await waitFor(() => lineSet(live1).size >= 4, 60_000, "4 live lines");
+    const { handle } = await streamSeq(sandbox, total, 4);
 
     await handle.kill();
     const result = await handle;

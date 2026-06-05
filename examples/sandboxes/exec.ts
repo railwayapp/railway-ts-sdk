@@ -1,5 +1,5 @@
 import { Sandbox } from "../../src/index.ts";
-import { runExample } from "./helpers.ts";
+import { runExample, sleep } from "./helpers.ts";
 
 // Durable exec: a command runs on the sandbox independently of any client.
 // Start one, detach, then reattach from a fresh connection (even another
@@ -7,10 +7,15 @@ import { runExample } from "./helpers.ts";
 await runExample(async () => {
   await using sandbox = await Sandbox.create();
 
-  const handle = sandbox.exec("for i in $(seq 1 20); do echo line-$i; sleep 0.5; done");
+  const handle = sandbox.exec(
+    "for i in $(seq 1 20); do echo line-$i; sleep 0.5; done",
+  );
   const sessionName = await handle.sessionName;
   await handle.detach(); // stop watching; the command keeps running (kill() ends it)
   console.log(`detached — ${sessionName} keeps running\n`);
+
+  // The command runs on the sandbox while we're away — reconnect after a beat.
+  await sleep(1_000);
 
   // Reattach by sessionName: replays the log so far, then follows live.
   // (pass resumeFromLastRead: true for only new output instead of a full replay.)
