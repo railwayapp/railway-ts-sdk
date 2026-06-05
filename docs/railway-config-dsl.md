@@ -35,7 +35,7 @@ export default defineRailway((ctx) => {
   const web = service("web");
 
   return project("my-project", {
-    services: [web],
+    resources: [web],
   });
 });
 ```
@@ -45,7 +45,7 @@ Zero-argument programs are also valid:
 ```ts
 export default defineRailway(() => {
   return project("my-project", {
-    services: [service("web")],
+    resources: [service("web")],
   });
 });
 ```
@@ -94,7 +94,7 @@ export default defineRailway((ctx) => {
   });
 
   return project("my-app", {
-    services: [web],
+    resources: [web],
   });
 });
 ```
@@ -103,15 +103,15 @@ export default defineRailway((ctx) => {
 
 ```ts
 project(name: string, definition: {
-  services: ResourceNode[];
+  resources: ResourceNode[];
 })
 ```
 
-Today `services` is the collection for all top-level resources, including services, databases, buckets, volumes, and groups.
+`resources` is the collection for all top-level resources, including services, databases, buckets, volumes, and groups.
 
 ```ts
 return project("acme", {
-  services: [web, worker, db, cache, media],
+  resources: [web, worker, db, cache, media],
 });
 ```
 
@@ -479,7 +479,7 @@ const backend = group("Backend", [
 ]);
 
 return project("acme", {
-  services: [backend, web],
+  resources: [backend, web],
 });
 ```
 
@@ -499,7 +499,7 @@ Compatibility form for group metadata only:
 const backend = group("Backend", { color: "blue" });
 ```
 
-When passed resources, `group()` returns the group plus those resources with group membership attached, so `services: [group("Backend", [api, worker])]` is valid.
+When passed resources, `group()` returns the group plus those resources with group membership attached, so `resources: [group("Backend", [api, worker])]` is valid.
 
 ## Variables and references
 

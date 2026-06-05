@@ -118,7 +118,9 @@ export type ProjectResourceInput = ResourceNode | ResourceNode[];
 export interface ProjectDefinition {
   name: string;
   environments?: string[];
-  services: ProjectResourceInput[];
+  resources?: ProjectResourceInput[];
+  /** @deprecated Use resources instead. */
+  services?: ProjectResourceInput[];
 }
 
 export interface GraphCompileOptions {

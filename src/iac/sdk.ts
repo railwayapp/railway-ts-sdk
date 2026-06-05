@@ -49,7 +49,8 @@ export function defineRailway(program: RailwayProgram): RailwayProgram {
 export const define = defineRailway;
 
 export function project(name: string, definition: Omit<ProjectDefinition, "name">): ProjectDefinition {
-  return { name, ...definition, services: definition.services.flat() };
+  const resources = (definition.resources ?? definition.services ?? []).flat();
+  return { name, ...definition, resources };
 }
 
 export function createRailwayContext(input: RailwayContextInput = {}): RailwayContext {

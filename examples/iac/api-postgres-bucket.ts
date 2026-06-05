@@ -12,7 +12,7 @@ export default defineRailway(() => {
   const uploads = bucket("uploads");
 
   return project("api-with-data", {
-    services: [
+    resources: [
       db,
       uploads,
 

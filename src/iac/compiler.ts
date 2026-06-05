@@ -12,7 +12,7 @@ import type {
 import type { EnvironmentConfig, ServiceConfig, ServiceNetworking, VariableConfig, VariableValues } from "./schema.js";
 
 export function projectDefinitionToGraph(definition: ProjectDefinition): RailwayGraph {
-  const resources = definition.services.flat();
+  const resources = (definition.resources ?? definition.services ?? []).flat();
   const edges: Edge[] = [];
   for (const resource of resources) {
     if (resource.type !== "service" && resource.type !== "database") continue;
@@ -173,7 +173,7 @@ export function environmentConfigToGraph(
 
   return projectDefinitionToGraph({
     name: options.projectName ?? "imported-project",
-    services: resources,
+    resources,
   });
 }
 

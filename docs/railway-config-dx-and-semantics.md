@@ -53,7 +53,7 @@ export default defineRailway(() => {
   });
 
   return project("tiny-app", {
-    services: [web],
+    resources: [web],
   });
 });
 ```
@@ -72,7 +72,7 @@ export default defineRailway(() => {
   });
 
   return project("acme-site", {
-    services: [web],
+    resources: [web],
   });
 });
 ```
@@ -97,7 +97,7 @@ export default defineRailway(() => {
   });
 
   return project("acme-api", {
-    services: [db, api],
+    resources: [db, api],
   });
 });
 ```
@@ -129,7 +129,7 @@ export default defineRailway(() => {
   });
 
   return project("acme-app", {
-    services: [cache, api, web],
+    resources: [cache, api, web],
   });
 });
 ```
@@ -148,7 +148,7 @@ export default defineRailway(() => {
   });
 
   return project("worker", {
-    services: [worker],
+    resources: [worker],
   });
 });
 ```
@@ -169,7 +169,7 @@ export default defineRailway((ctx) => {
   });
 
   return project("regional-web", {
-    services: [web],
+    resources: [web],
   });
 });
 ```
@@ -190,7 +190,7 @@ export default defineRailway(() => {
   });
 
   return project("media-app", {
-    services: [media, web],
+    resources: [media, web],
   });
 });
 ```
@@ -215,7 +215,7 @@ export default defineRailway(() => {
   });
 
   return project("acme", {
-    services: [db, cache, api],
+    resources: [db, cache, api],
   });
 });
 ```
@@ -270,7 +270,7 @@ export default defineRailway((ctx) => {
   const storage = group("Storage", [uploads]);
 
   return project("acme", {
-    services: [backend, storage, web],
+    resources: [backend, storage, web],
   });
 });
 ```
@@ -518,7 +518,7 @@ This skips configuration apply and behaves like normal deploy.
 
 ## Open DX questions before release
 
-- Should `project(..., { services: [...] })` be renamed/expanded to `resources` while keeping `services` as compat?
+- Should `project(..., { resources: [...] })` be renamed/expanded to `resources` while keeping `services` as compat?
 - Should string custom domains default to port `8080`, or should the backend infer the service port?
 - Should `preserve()` be allowed for missing variables as a no-op, or should it warn that there is nothing to preserve?
 - Which deploy fields deserve first-class DSL aliases beyond `start`, `healthcheck`, `replicas`?

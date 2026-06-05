@@ -4,7 +4,7 @@ export default defineRailway(() => {
   const queue = redis("queue");
 
   return project("background-workers", {
-    services: [
+    resources: [
       queue,
 
       service("worker", {
