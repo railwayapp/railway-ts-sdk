@@ -79,12 +79,12 @@ async function main() {
   }
 
   const serviceCases = [
-    ["github-source", `  const web = service("web", { source: github("railwayapp-templates/expressjs", { branch: "main" }) });\n  return project("iac-e2e-github", { environments: ["production"], services: [web] });`],
-    ["image-source", `  const web = service("web", { source: image("nginx:latest") });\n  return project("iac-e2e-image", { environments: ["production"], services: [web] });`],
-    ["empty-build-start-health", `  const web = service("web", { build: "pnpm build", start: "pnpm start", healthcheck: "/health", healthcheckTimeout: 30 });\n  return project("iac-e2e-empty", { environments: ["production"], services: [web] });`],
-    ["replicas-placement", `  const web = service("web", { replicas: { "us-west2": 1, "europe-west4": 1 } });\n  return project("iac-e2e-replicas", { environments: ["production"], services: [web] });`],
-    ["env-literals", `  const web = service("web", { env: { LITERAL: "hello", COUNT: "1", ENABLED: "true" } });\n  return project("iac-e2e-env", { environments: ["production"], services: [web] });`],
-    ["db-refs", `  const db = postgres("postgres");\n  const cache = redis("redis");\n  const web = service("web", { env: { DATABASE_URL: db.env.DATABASE_URL, REDIS_URL: cache.env.REDIS_URL } });\n  return project("iac-e2e-refs", { environments: ["production"], services: [db, cache, web] });`],
+    ["github-source", `  const web = service("web", { source: github("railwayapp-templates/expressjs", { branch: "main" }) });\n  return project("iac-e2e-github", { services: [web] });`],
+    ["image-source", `  const web = service("web", { source: image("nginx:latest") });\n  return project("iac-e2e-image", { services: [web] });`],
+    ["empty-build-start-health", `  const web = service("web", { build: "pnpm build", start: "pnpm start", healthcheck: "/health", healthcheckTimeout: 30 });\n  return project("iac-e2e-empty", { services: [web] });`],
+    ["replicas-placement", `  const web = service("web", { replicas: { "us-west2": 1, "europe-west4": 1 } });\n  return project("iac-e2e-replicas", { services: [web] });`],
+    ["env-literals", `  const web = service("web", { env: { LITERAL: "hello", COUNT: "1", ENABLED: "true" } });\n  return project("iac-e2e-env", { services: [web] });`],
+    ["db-refs", `  const db = postgres("postgres");\n  const cache = redis("redis");\n  const web = service("web", { env: { DATABASE_URL: db.env.DATABASE_URL, REDIS_URL: cache.env.REDIS_URL } });\n  return project("iac-e2e-refs", { services: [db, cache, web] });`],
   ];
 
   for (const [label, source] of serviceCases) {
@@ -101,7 +101,7 @@ async function main() {
 
   for (const db of ["postgres", "redis", "mysql", "mongo"]) {
     const dir = projectDir(`iac-db-${db}`);
-    writeConfig(dir, ts(`  const data = ${db}("${db}");\n  const web = service("web", { env: { URL: data.env.${db === "postgres" ? "DATABASE_URL" : db === "redis" ? "REDIS_URL" : db === "mysql" ? "MYSQL_URL" : "MONGO_URL"} } });\n  return project("iac-e2e-${db}", { environments: ["production"], services: [data, web] });`));
+    writeConfig(dir, ts(`  const data = ${db}("${db}");\n  const web = service("web", { env: { URL: data.env.${db === "postgres" ? "DATABASE_URL" : db === "redis" ? "REDIS_URL" : db === "mysql" ? "MYSQL_URL" : "MONGO_URL"} } });\n  return project("iac-e2e-${db}", { services: [data, web] });`));
     if (!mutating) {
       results.push({ name: `database ${db}: skipped mutating matrix`, ok: true, status: 0, out: dir });
       continue;
@@ -111,22 +111,22 @@ async function main() {
   }
 
   const groupDir = projectDir("iac-groups");
-  writeConfig(groupDir, ts(`  const api = service("api");\n  const worker = service("worker");\n  const backend = group("Backend", [api, worker]);\n  return project("iac-e2e-groups", { environments: ["production"], services: [backend] });`));
+  writeConfig(groupDir, ts(`  const api = service("api");\n  const worker = service("worker");\n  const backend = group("Backend", [api, worker]);\n  return project("iac-e2e-groups", { services: [backend] });`));
   if (mutating) {
     initRailwayProject(groupDir, uniqueProjectName("groups"));
     planApplyNoop(groupDir, "groups create");
-    writeConfig(groupDir, ts(`  const api = service("api");\n  const worker = service("worker");\n  const frontend = group("Frontend", [api]);\n  const backend = group("Backend", [worker]);\n  return project("iac-e2e-groups", { environments: ["production"], services: [frontend, backend] });`));
+    writeConfig(groupDir, ts(`  const api = service("api");\n  const worker = service("worker");\n  const frontend = group("Frontend", [api]);\n  const backend = group("Backend", [worker]);\n  return project("iac-e2e-groups", { services: [frontend, backend] });`));
     planApplyNoop(groupDir, "groups move service");
   } else {
     results.push({ name: "groups matrix: skipped mutating matrix", ok: true, status: 0, out: groupDir });
   }
 
   const bucketDir = projectDir("iac-bucket");
-  writeConfig(bucketDir, ts(`  const media = bucket("media", { region: "iad" });\n  return project("iac-e2e-bucket", { environments: ["production"], services: [media] });`));
+  writeConfig(bucketDir, ts(`  const media = bucket("media", { region: "iad" });\n  return project("iac-e2e-bucket", { services: [media] });`));
   if (mutating) {
     initRailwayProject(bucketDir, uniqueProjectName("bucket"));
     planApplyNoop(bucketDir, "bucket create");
-    writeConfig(bucketDir, ts(`  const media = bucket("media", { region: "sjc" });\n  return project("iac-e2e-bucket", { environments: ["production"], services: [media] });`));
+    writeConfig(bucketDir, ts(`  const media = bucket("media", { region: "sjc" });\n  return project("iac-e2e-bucket", { services: [media] });`));
     const bucketRegionChange = run("bucket immutable region feedback", ["config", "plan", "--verbose"], bucketDir, { allowFailure: true });
     check("bucket region change rejected", /Bucket region cannot be changed after creation/i.test(bucketRegionChange), bucketRegionChange);
   } else {

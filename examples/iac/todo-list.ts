@@ -5,7 +5,6 @@ export default defineRailway(() => {
   const repo = "futurepastori/todo-iac-example";
 
   return project("todo-list", {
-    environments: ["production"],
     services: [
       cache,
 

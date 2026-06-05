@@ -24,7 +24,7 @@ export function projectDefinitionToGraph(definition: ProjectDefinition): Railway
   return {
     version: RAILWAY_GRAPH_VERSION,
     project: { name: definition.name },
-    environments: definition.environments.map(name => ({ name })),
+    environments: (definition.environments ?? []).map(name => ({ name })),
     resources: resources.map(stripRuntimeHelpers),
     edges,
   };
@@ -173,7 +173,6 @@ export function environmentConfigToGraph(
 
   return projectDefinitionToGraph({
     name: options.projectName ?? "imported-project",
-    environments: ["imported-environment"],
     services: resources,
   });
 }

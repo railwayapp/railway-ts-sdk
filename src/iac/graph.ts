@@ -117,7 +117,7 @@ export type ProjectResourceInput = ResourceNode | ResourceNode[];
 
 export interface ProjectDefinition {
   name: string;
-  environments: string[];
+  environments?: string[];
   services: ProjectResourceInput[];
 }
 

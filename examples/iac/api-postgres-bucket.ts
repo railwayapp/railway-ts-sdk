@@ -12,7 +12,6 @@ export default defineRailway(() => {
   const uploads = bucket("uploads");
 
   return project("api-with-data", {
-    environments: ["production", "staging"],
     services: [
       db,
       uploads,

@@ -53,7 +53,6 @@ export default defineRailway(() => {
   });
 
   return project("tiny-app", {
-    environments: ["production"],
     services: [web],
   });
 });
@@ -73,7 +72,6 @@ export default defineRailway(() => {
   });
 
   return project("acme-site", {
-    environments: ["production", "staging"],
     services: [web],
   });
 });
@@ -99,7 +97,6 @@ export default defineRailway(() => {
   });
 
   return project("acme-api", {
-    environments: ["production", "staging"],
     services: [db, api],
   });
 });
@@ -132,7 +129,6 @@ export default defineRailway(() => {
   });
 
   return project("acme-app", {
-    environments: ["production", "staging"],
     services: [cache, api, web],
   });
 });
@@ -152,7 +148,6 @@ export default defineRailway(() => {
   });
 
   return project("worker", {
-    environments: ["production"],
     services: [worker],
   });
 });
@@ -174,7 +169,6 @@ export default defineRailway((ctx) => {
   });
 
   return project("regional-web", {
-    environments: ["production", "staging"],
     services: [web],
   });
 });
@@ -196,7 +190,6 @@ export default defineRailway(() => {
   });
 
   return project("media-app", {
-    environments: ["production"],
     services: [media, web],
   });
 });
@@ -222,7 +215,6 @@ export default defineRailway(() => {
   });
 
   return project("acme", {
-    environments: ["production", "staging"],
     services: [db, cache, api],
   });
 });
@@ -278,7 +270,6 @@ export default defineRailway((ctx) => {
   const storage = group("Storage", [uploads]);
 
   return project("acme", {
-    environments: ["production", "staging"],
     services: [backend, storage, web],
   });
 });

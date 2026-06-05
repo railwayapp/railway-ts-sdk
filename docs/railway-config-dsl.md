@@ -35,7 +35,6 @@ export default defineRailway((ctx) => {
   const web = service("web");
 
   return project("my-project", {
-    environments: ["production"],
     services: [web],
   });
 });
@@ -46,7 +45,6 @@ Zero-argument programs are also valid:
 ```ts
 export default defineRailway(() => {
   return project("my-project", {
-    environments: ["production"],
     services: [service("web")],
   });
 });
@@ -92,13 +90,10 @@ export default defineRailway((ctx) => {
   const prod = ctx.isEnvironment("production");
 
   const web = service("web", {
-    regions: prod
-      ? { "us-west2": 2, "europe-west4": 1 }
-      : { "us-west2": 1 },
+    replicas: prod ? { "us-west2": 2, "europe-west4": 1 } : 1,
   });
 
   return project("my-app", {
-    environments: ["production", "staging"],
     services: [web],
   });
 });
@@ -108,7 +103,6 @@ export default defineRailway((ctx) => {
 
 ```ts
 project(name: string, definition: {
-  environments: string[];
   services: ResourceNode[];
 })
 ```
@@ -117,7 +111,6 @@ Today `services` is the collection for all top-level resources, including servic
 
 ```ts
 return project("acme", {
-  environments: ["production", "staging"],
   services: [web, worker, db, cache, media],
 });
 ```
@@ -486,7 +479,6 @@ const backend = group("Backend", [
 ]);
 
 return project("acme", {
-  environments: ["production"],
   services: [backend, web],
 });
 ```
