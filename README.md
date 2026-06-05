@@ -167,6 +167,7 @@ then an environment variable, then a default. Pass explicit values to override.
 | `environmentId` | `RAILWAY_ENVIRONMENT_ID` | _(required)_ |
 | `endpoint` | `RAILWAY_GRAPHQL_ENDPOINT` | `https://backboard.railway.com/graphql/v2` |
 | `fetch` | n/a | `globalThis.fetch` |
+| `verbose` | `RAILWAY_VERBOSE` | `false` |
 
 ```ts
 const sandbox = await Sandbox.create({
@@ -179,6 +180,12 @@ const sandbox = await Sandbox.create({
 
 Environment variables are read only where a runtime exposes them, so the SDK is safe to
 import in the browser and edge runtimes; provide credentials explicitly there.
+
+### Verbose logging
+
+Set `verbose: true` (or `RAILWAY_VERBOSE=1`) to print human-readable progress to **stderr** —
+GraphQL requests, readiness polling, and lifecycle events. Useful when a `create`, `fork`, or
+template build seems stuck. Tokens and `env` values are never logged.
 
 ## Errors
 

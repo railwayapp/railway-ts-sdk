@@ -117,10 +117,16 @@ export class SandboxEngine {
       input.variables = options.env;
     }
 
+    this.#config.log(creationLine(input));
+
     const data = await requestGraphQL<
       RailwaySandboxCreateMutation,
       RailwaySandboxCreateMutationVariables
     >(this.#config, RailwaySandboxCreateDocument, { input });
+
+    this.#config.log(
+      `created sandbox ${data.sandboxCreate.id} status=${data.sandboxCreate.status}`,
+    );
 
     return this.#waitForRunning(data.sandboxCreate);
   }
@@ -154,8 +160,17 @@ export class SandboxEngine {
   async buildTemplateUntilReady(
     template: CompiledTemplate,
   ): Promise<SandboxTemplateInfo> {
+    const varCount = template.variables
+      ? Object.keys(template.variables).length
+      : 0;
+    this.#config.log(
+      `build template (${template.instructions.length} steps, vars=${varCount})`,
+    );
     const built = await this.buildTemplate(template);
-    if (built.status === "READY") return built;
+    if (built.status === "READY") {
+      this.#config.log(`template ${built.id} ready (cached)`);
+      return built;
+    }
     if (built.status === "FAILED") {
       throw new SandboxTemplateBuildError({
         templateId: built.id,
@@ -167,6 +182,7 @@ export class SandboxEngine {
       poll: () => this.getTemplate(built.id),
       isReady: template => template.status === "READY",
       isTerminal: template => template.status === "FAILED",
+      describe: template => `template ${template.id} status=${template.status}`,
       onTerminal: template => {
         throw new SandboxTemplateBuildError({
           templateId: template.id,
@@ -194,6 +210,7 @@ export class SandboxEngine {
       poll: () => this.#getOrThrow(created.id),
       isReady: info => info.status === "RUNNING",
       isTerminal: info => isSandboxTerminal(info.status),
+      describe: info => `sandbox ${info.id} status=${info.status}`,
       onTerminal: info => {
         throw new SandboxFailedError({ id: info.id, status: info.status });
       },
@@ -222,17 +239,35 @@ export class SandboxEngine {
     isTerminal: (value: T) => boolean;
     onTerminal: (value: T) => never;
     onTimeout: (value: T) => never;
+    describe?: (value: T) => string;
   }): Promise<T> {
     const start = Date.now();
+    const describe = args.describe;
     let delay = POLL_INITIAL_DELAY_MS;
     let last: T;
     do {
       await sleep(delay);
       last = await args.poll();
-      if (args.isReady(last)) return last;
-      if (args.isTerminal(last)) return args.onTerminal(last);
+      const elapsedSec = ((Date.now() - start) / 1000).toFixed(1);
+      if (args.isReady(last)) {
+        if (describe) this.#config.log(`${describe(last)} ready after ${elapsedSec}s`);
+        return last;
+      }
+      if (args.isTerminal(last)) {
+        if (describe) this.#config.log(`${describe(last)} hit terminal state`);
+        return args.onTerminal(last);
+      }
       delay = Math.min(delay * 2, POLL_MAX_DELAY_MS);
+      if (describe) {
+        this.#config.log(
+          `waiting on ${describe(last)}, retry in ${delay}ms (elapsed ${elapsedSec}s)`,
+        );
+      }
     } while (Date.now() - start < READINESS_TIMEOUT_MS);
+    if (describe) {
+      const elapsedSec = ((Date.now() - start) / 1000).toFixed(1);
+      this.#config.log(`${describe(last)} timed out after ${elapsedSec}s`);
+    }
     return args.onTimeout(last);
   }
 
@@ -248,12 +283,21 @@ export class SandboxEngine {
     };
     if (options.timeoutSec !== undefined) variables.timeoutSec = options.timeoutSec;
 
+    this.#config.log(
+      `exec ${id}: ${truncate(command, 80)} timeout=${options.timeoutSec ?? "none"}`,
+    );
+
     const data = await requestGraphQL<
       RailwaySandboxExecMutation,
       RailwaySandboxExecMutationVariables
     >(this.#config, RailwaySandboxExecDocument, variables);
 
-    return data.sandboxExec;
+    const result = data.sandboxExec;
+    this.#config.log(
+      `exec ${id} done exit=${result.exitCode} timedOut=${result.timedOut} (stdout ${result.stdout.length}b / stderr ${result.stderr.length}b)`,
+    );
+
+    return result;
   }
 
   async destroy(id: string): Promise<void> {
@@ -261,6 +305,7 @@ export class SandboxEngine {
       id,
       environmentId: this.#config.environmentId,
     };
+    this.#config.log(`destroy sandbox ${id}`);
     await requestGraphQL<
       RailwaySandboxDestroyMutation,
       RailwaySandboxDestroyMutationVariables
@@ -277,7 +322,11 @@ export class SandboxEngine {
       RailwaySandboxQueryVariables
     >(this.#config, RailwaySandboxDocument, variables);
 
-    return data.sandbox ?? null;
+    const info = data.sandbox ?? null;
+    if (!info) {
+      this.#config.log(`sandbox ${id} not found (env=${this.environmentId})`);
+    }
+    return info;
   }
 
   async list(options: ListOptions = {}): Promise<SandboxInfo[]> {
@@ -305,6 +354,31 @@ function toTemplateInput(template: CompiledTemplate): SandboxTemplateInput {
     instructions: [...template.instructions],
     ...(template.variables && { variables: template.variables }),
   };
+}
+
+/** Verbose line for a create/fork/template create. Logs env key names, never values. */
+function creationLine(
+  input: RailwaySandboxCreateMutationVariables["input"],
+): string {
+  const kind = input.sourceSandboxId
+    ? "fork"
+    : input.template
+      ? "create-from-template"
+      : "create";
+  const envKeys = input.variables ? Object.keys(input.variables) : [];
+  const parts = [
+    kind,
+    `env=${input.environmentId}`,
+    `idleTimeout=${input.idleTimeoutMinutes ?? "none"}`,
+    `network=${input.networkIsolation ?? "default"}`,
+    `envKeys=[${envKeys.join(",")}]`,
+  ];
+  if (input.sourceSandboxId) parts.push(`source=${input.sourceSandboxId}`);
+  return parts.join(" ");
+}
+
+function truncate(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max)}…`;
 }
 
 export function engineFromOptions(options: SandboxOptions = {}): SandboxEngine {

@@ -1,4 +1,5 @@
 import { RailwayAuthError } from "./errors.js";
+import { createLogger, type Logger } from "./logger.js";
 
 export const DEFAULT_RAILWAY_GRAPHQL_ENDPOINT =
   "https://backboard.railway.com/graphql/v2";
@@ -6,6 +7,7 @@ export const DEFAULT_RAILWAY_GRAPHQL_ENDPOINT =
 const RAILWAY_TOKEN_ENV = "RAILWAY_API_TOKEN";
 const RAILWAY_ENVIRONMENT_ENV = "RAILWAY_ENVIRONMENT_ID";
 const RAILWAY_ENDPOINT_ENV = "RAILWAY_GRAPHQL_ENDPOINT";
+const RAILWAY_VERBOSE_ENV = "RAILWAY_VERBOSE";
 
 export type RailwayAuthType = "bearer" | "project-token";
 
@@ -16,6 +18,11 @@ export interface RailwayClientConfig {
   /** Alias used by IaC flows. Prefer endpoint for the stable SDK surface. */
   graphqlEndpoint?: string;
   fetch?: typeof fetch;
+  /**
+   * Print human-readable progress to stderr (requests, polling, lifecycle).
+   * Also enabled by `RAILWAY_VERBOSE`. Tokens and env values are never logged.
+   */
+  verbose?: boolean;
 }
 
 export interface NormalizedRailwayClientConfig {
@@ -23,6 +30,7 @@ export interface NormalizedRailwayClientConfig {
   authType: RailwayAuthType;
   endpoint: string;
   fetch: typeof fetch;
+  log: Logger;
 }
 
 /**
@@ -48,12 +56,18 @@ export function normalizeRailwayClientConfig(
       readEnv(RAILWAY_ENDPOINT_ENV),
     ) ?? DEFAULT_RAILWAY_GRAPHQL_ENDPOINT;
 
-  return {
+  const verbose = config.verbose ?? isTruthyEnv(readEnv(RAILWAY_VERBOSE_ENV));
+  const normalized: NormalizedRailwayClientConfig = {
     token,
     authType: config.authType ?? "bearer",
     endpoint,
     fetch: fetchImpl,
+    log: createLogger(verbose),
   };
+  normalized.log(
+    `config resolved: endpoint=${endpoint} authType=${normalized.authType}`,
+  );
+  return normalized;
 }
 
 export function resolveEnvironmentId(explicit?: string): string {
@@ -72,6 +86,13 @@ export function resolveEnvironmentId(explicit?: string): string {
 function readEnv(name: string): string | undefined {
   if (typeof process === "undefined") return undefined;
   return process.env?.[name];
+}
+
+/** Treats `1`/`true`/`yes` as on so `RAILWAY_VERBOSE=0` doesn't accidentally enable. */
+function isTruthyEnv(value: string | undefined): boolean {
+  if (value === undefined) return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
 }
 
 function firstNonEmpty(...values: (string | undefined)[]): string | undefined {
