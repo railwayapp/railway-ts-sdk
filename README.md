@@ -187,20 +187,6 @@ Set `verbose: true` (or `RAILWAY_VERBOSE=1`) to print human-readable progress to
 GraphQL requests, readiness polling, and lifecycle events. Useful when a `create`, `fork`, or
 template build seems stuck. Tokens and `env` values are never logged.
 
-```ts
-const sandbox = await Sandbox.create({ verbose: true });
-// [railway] create env=… idleTimeout=none network=default envKeys=[]
-// [railway] → RailwaySandboxCreate POST https://backboard.railway.com/graphql/v2
-// [railway] ← RailwaySandboxCreate ok in 142ms
-// [railway] created sandbox sandbox_… status=BUILDING
-// [railway] waiting on sandbox sandbox_… status=BUILDING, retry in 1000ms (elapsed 0.5s)
-// [railway] sandbox sandbox_… status=RUNNING ready after 3.2s
-```
-
-```sh
-RAILWAY_VERBOSE=1 node my-script.js
-```
-
 ## Errors
 
 All errors extend `RailwayError`:
