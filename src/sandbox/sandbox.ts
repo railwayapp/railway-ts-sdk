@@ -9,11 +9,13 @@ import {
   isSandboxTemplate,
   type SandboxTemplate,
 } from "./template.js";
+import type { ExecHandle } from "./exec.js";
 import type {
   ConnectOptions,
   CreateOptions,
   ExecOptions,
-  ExecResult,
+  ExecReattachTarget,
+  ExecTarget,
   ForkOptions,
   ListOptions,
   SandboxInfo,
@@ -119,8 +121,19 @@ export class Sandbox implements AsyncDisposable {
     return engine.list(options);
   }
 
-  exec(command: string, options: ExecOptions = {}): Promise<ExecResult> {
-    return this.#engine.exec(this.id, command, options);
+  /**
+   * Run a command. Awaiting the handle resolves the final `ExecResult` —
+   * short commands return directly, long-running ones transparently stream
+   * output (see `ExecOptions.onStdout`/`onStderr`) until the command exits.
+   * The handle also exposes `sessionName` and `kill()`. A `timeoutSec` deadline
+   * kills the command and resolves with `timedOut: true` rather than
+   * rejecting.
+   */
+  exec(command: string, options?: ExecOptions): ExecHandle;
+  /** Reattach to a running exec by session name; resumes the retained output. */
+  exec(target: ExecReattachTarget, options?: ExecOptions): ExecHandle;
+  exec(target: ExecTarget, options: ExecOptions = {}): ExecHandle {
+    return this.#engine.exec(this.id, target, options);
   }
 
   /**

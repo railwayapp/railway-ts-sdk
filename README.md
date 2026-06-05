@@ -57,12 +57,45 @@ non-zero exit code; inspect `exitCode` instead.
 ```ts
 const result = await sandbox.exec("npm run build", { timeoutSec: 120 });
 
-result.exitCode; // number
+result.exitCode; // number | null; null if the session ended without one
 result.stdout; // string
 result.stderr; // string
-result.truncated; // true if output exceeded the capture limit
-result.timedOut; // true if the command hit timeoutSec
+result.truncated; // true if the server cut the output
+result.timedOut; // true if the command hit timeoutSec (enforced client-side)
 ```
+
+Every exec runs over a WebSocket bridge to the sandbox, with separated
+stdout/stderr and a real exit code. Short commands resolve when they exit;
+passing `onStdout`/`onStderr` streams output live from the first byte. The
+handle also exposes the `sessionName` and a `kill()`:
+
+```ts
+const handle = sandbox.exec("npm run test:slow", {
+  onStdout: chunk => process.stdout.write(chunk),
+});
+
+const sessionName = await handle.sessionName; // save to reattach later
+await handle.kill(); // terminate it — SIGTERM by default (pass "KILL" to force)
+const result = await handle; // same ExecResult shape as above
+```
+
+When durable sessions are enabled for the sandbox, reattach to a running exec
+from anywhere — even another process — with the saved name. By default it
+replays the retained log, then continues live (pass `resumeFromLastRead: true`
+to resume from the last-read cursor instead):
+
+```ts
+const result = await sandbox.exec({ sessionName }, {
+  onStdout: chunk => process.stdout.write(chunk),
+});
+```
+
+See `examples/sandboxes/exec.ts` for detaching and reattaching by `sessionName`
+from a fresh `Sandbox.connect(id)`.
+
+If the WebSocket cannot be established, `exec` rejects with
+`RailwayConnectionError`. In non-Node runtimes without a global `WebSocket`,
+pass an implementation via the `webSocketImpl` config option.
 
 ## Forking
 

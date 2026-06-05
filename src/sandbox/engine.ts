@@ -10,15 +10,12 @@ import {
   RailwaySandboxDestroyDocument,
   RailwaySandboxDocument,
   RailwaySandboxesDocument,
-  RailwaySandboxExecDocument,
   RailwaySandboxTemplateBuildDocument,
   RailwaySandboxTemplateDocument,
   type RailwaySandboxCreateMutation,
   type RailwaySandboxCreateMutationVariables,
   type RailwaySandboxDestroyMutation,
   type RailwaySandboxDestroyMutationVariables,
-  type RailwaySandboxExecMutation,
-  type RailwaySandboxExecMutationVariables,
   type RailwaySandboxesQuery,
   type RailwaySandboxesQueryVariables,
   type RailwaySandboxQuery,
@@ -35,11 +32,12 @@ import {
   SandboxTemplateBuildError,
   SandboxTimeoutError,
 } from "./errors.js";
+import { startExec, type ExecContext, type ExecHandle } from "./exec.js";
 import type {
   CompiledTemplate,
   CreateOptions,
   ExecOptions,
-  ExecResult,
+  ExecTarget,
   ForkOptions,
   ListOptions,
   SandboxCreationOptions,
@@ -271,33 +269,13 @@ export class SandboxEngine {
     return args.onTimeout(last);
   }
 
-  async exec(
-    id: string,
-    command: string,
-    options: ExecOptions = {},
-  ): Promise<ExecResult> {
-    const variables: RailwaySandboxExecMutationVariables = {
-      id,
-      command,
+  exec(id: string, target: ExecTarget, options: ExecOptions = {}): ExecHandle {
+    const context: ExecContext = {
+      config: this.#config,
       environmentId: this.#config.environmentId,
+      sandboxId: id,
     };
-    if (options.timeoutSec !== undefined) variables.timeoutSec = options.timeoutSec;
-
-    this.#config.log(
-      `exec ${id}: ${truncate(command, 80)} timeout=${options.timeoutSec ?? "none"}`,
-    );
-
-    const data = await requestGraphQL<
-      RailwaySandboxExecMutation,
-      RailwaySandboxExecMutationVariables
-    >(this.#config, RailwaySandboxExecDocument, variables);
-
-    const result = data.sandboxExec;
-    this.#config.log(
-      `exec ${id} done exit=${result.exitCode} timedOut=${result.timedOut} (stdout ${result.stdout.length}b / stderr ${result.stderr.length}b)`,
-    );
-
-    return result;
+    return startExec(context, target, options);
   }
 
   async destroy(id: string): Promise<void> {
@@ -375,10 +353,6 @@ function creationLine(
   ];
   if (input.sourceSandboxId) parts.push(`source=${input.sourceSandboxId}`);
   return parts.join(" ");
-}
-
-function truncate(text: string, max: number): string {
-  return text.length <= max ? text : `${text.slice(0, max)}…`;
 }
 
 export function engineFromOptions(options: SandboxOptions = {}): SandboxEngine {

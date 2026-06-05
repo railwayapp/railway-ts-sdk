@@ -22,12 +22,16 @@ description = "Typecheck source, tests, and examples"
 run = "pnpm run typecheck"
 
 [tasks.test]
-description = "Run unit tests"
-run = "pnpm run test"
+description = "Run tests; loads .env so the live e2e runs when RAILWAY_API_TOKEN + RAILWAY_ENVIRONMENT_ID are set (else it skips)"
+run = "if [ -f .env ]; then set -a; . ./.env; set +a; fi; pnpm run test"
 
 [tasks.test-watch]
 description = "Run unit tests in watch mode"
 run = "pnpm run test:watch"
+
+[tasks.e2e]
+description = "Run the live e2e suites against .env credentials (uses the system CA store for dev certs)"
+run = "if [ -f .env ]; then set -a; . ./.env; set +a; fi; pnpm exec vitest run tests/*.e2e.test.ts"
 
 [tasks.codegen]
 description = "Regenerate GraphQL types from the configured schema"
@@ -47,8 +51,9 @@ description = "Remove build/test artifacts"
 run = "pnpm run clean"
 
 [tasks.check]
-description = "Run typecheck, tests, and build"
-depends = ["typecheck", "test", "build"]
+description = "Run typecheck, offline unit tests, and build (forces e2e off — clears creds)"
+depends = ["typecheck", "build"]
+run = "RAILWAY_API_TOKEN='' RAILWAY_ENVIRONMENT_ID='' pnpm run test"
 
 [tasks.example]
 description = "Run the default manual example using .env credentials"
@@ -61,6 +66,10 @@ run = "pnpm exec tsx examples/sandboxes/quickstart.ts"
 [tasks."example:template"]
 description = "Create a sandbox from a template, then destroy it using .env credentials"
 run = "pnpm exec tsx examples/sandboxes/template.ts"
+
+[tasks."example:exec"]
+description = "Start a durable command, detach, and reattach by sessionName from a fresh connection"
+run = "pnpm exec tsx examples/sandboxes/exec.ts"
 
 [tasks."example:fork"]
 description = "Create a sandbox, fork it, and read forked filesystem state using .env credentials"

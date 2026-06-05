@@ -46,26 +46,6 @@ mutation RailwaySandboxCreate($input: SandboxCreateInput!) {
   }
 }
 
-mutation RailwaySandboxExec(
-  $id: String!
-  $environmentId: String!
-  $command: String!
-  $timeoutSec: Int
-) {
-  sandboxExec(
-    id: $id
-    environmentId: $environmentId
-    command: $command
-    timeoutSec: $timeoutSec
-  ) {
-    exitCode
-    stdout
-    stderr
-    truncated
-    timedOut
-  }
-}
-
 mutation RailwaySandboxDestroy($id: String!, $environmentId: String!) {
   sandboxDestroy(id: $id, environmentId: $environmentId) {
     ...RailwaySandboxFields

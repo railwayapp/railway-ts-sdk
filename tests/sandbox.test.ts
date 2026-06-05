@@ -8,6 +8,7 @@ import {
   SandboxTimeoutError,
 } from "../src/index.js";
 import { compileSandboxTemplate } from "../src/sandbox/template.js";
+import { createExecWsMock } from "./exec-ws-mock.js";
 import {
   clearRailwayEnv,
   createFetchMock,
@@ -113,31 +114,32 @@ describe("Sandbox.create", () => {
 
 describe("sandbox instance", () => {
   it("execs commands", async () => {
+    const ws = createExecWsMock();
     const mock = createFetchMock([
       { data: { sandboxCreate: sandboxInfo() } },
-      {
-        data: {
-          sandboxExec: {
-            exitCode: 0,
-            stdout: "/\n",
-            stderr: "",
-            truncated: false,
-            timedOut: false,
-          },
-        },
-      },
+      { data: { generateShellToken: "jwt_abc" } },
     ]);
 
-    const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch });
-    const result = await sandbox.exec("pwd", { timeoutSec: 30 });
+    const sandbox = await Sandbox.create({
+      ...auth,
+      fetch: mock.fetch,
+      webSocketImpl: ws.webSocketImpl,
+    });
+    const handle = sandbox.exec("pwd");
+    const socket = await ws.nextSocket();
+    await new Promise(resolve => setTimeout(resolve, 0));
 
+    socket.serverStdout("/\n");
+    socket.serverExit(0);
+
+    const result = await handle;
     expect(result.stdout).toBe("/\n");
-    expect(mock.calls[1]?.body.query).toContain("mutation RailwaySandboxExec");
-    expect(mock.calls[1]?.body.variables).toEqual({
-      id: "sandbox_123",
-      environmentId: "environment_123",
-      command: "pwd",
-      timeoutSec: 30,
+    expect(mock.calls[1]?.body.query).toContain(
+      "mutation RailwayGenerateShellToken",
+    );
+    expect(socket.sentText[0]).toEqual({
+      type: "init_exec",
+      data: { command: "pwd" },
     });
   });
 

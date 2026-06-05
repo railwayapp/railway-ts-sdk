@@ -5,6 +5,7 @@ export {
 } from "./core/config.js";
 export {
   RailwayAuthError,
+  RailwayConnectionError,
   RailwayError,
   RailwayGraphQLError,
   type RailwayGraphQLErrorItem,
@@ -71,6 +72,7 @@ export {
   type VariableValue,
 } from "./iac/index.js";
 export {
+  ExecHandle,
   Sandbox,
   SandboxFailedError,
   SandboxNotFoundError,
@@ -79,7 +81,10 @@ export {
   type ConnectOptions,
   type CreateOptions,
   type ExecOptions,
+  type ExecReattachTarget,
   type ExecResult,
+  type ExecSignal,
+  type ExecTarget,
   type ForkOptions,
   type ListOptions,
   type SandboxInfo,

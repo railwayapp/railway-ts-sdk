@@ -14,12 +14,14 @@
   ],
   "duplicates": {
     "ignore": [
-      "src/generated/graphql.ts"
+      "src/generated/graphql.ts",
+      "src/iac/**"
     ]
   },
   "health": {
     "ignore": [
-      "src/generated/graphql.ts"
+      "src/generated/graphql.ts",
+      "src/iac/**"
     ]
   },
   "rules": {

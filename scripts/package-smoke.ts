@@ -20,6 +20,7 @@ try {
   renameSync(join(tempDir, "package"), join(nodeModules, "railway"));
 
   linkNodeModule("graphql");
+  linkNodeModule("graphql-ws");
   linkNodeModule("@graphql-typed-document-node/core");
 
   writeFileSync(

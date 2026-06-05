@@ -8,6 +8,6 @@ await runExample(async () => {
 
   await using fork = await source.fork();
 
-  // The fork boots from a clone of the source's disk, so the file is there.
+  // The fork boots from a clone of the source's disk.
   console.log((await fork.exec("cat /tmp/state.txt")).stdout);
 });
