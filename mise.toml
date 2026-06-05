@@ -78,3 +78,7 @@ run = "pnpm exec tsx examples/sandboxes/exec-reattach.ts"
 description = "Kill a running command mid-stream and verify it terminates (vs detach, which keeps it running)"
 run = "pnpm exec tsx examples/sandboxes/exec-kill.ts"
 
+[tasks."example:exec-durable"]
+description = "Reattach from a fresh Sandbox.connect twice: full replay vs resumeFromLastRead"
+run = "pnpm exec tsx examples/sandboxes/exec-durable.ts"
+
