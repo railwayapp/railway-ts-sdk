@@ -92,6 +92,15 @@ export interface RailwayIacApplyResponse extends Omit<RailwayIacStageResponse, "
 
 export type RailwayIacRunnerResponse = RailwayIacEvaluateResponse | RailwayIacTypegenResponse | RailwayIacCurrentResponse | RailwayIacPlanResponse | RailwayIacStageResponse | RailwayIacApplyResponse;
 
+type RunnerCommand = NonNullable<RailwayIacRunnerRequest["command"]>;
+
+interface EvaluatedCommandInput {
+  request: RailwayIacRunnerRequest;
+  file: string;
+  graph: RailwayGraph;
+  diagnostics: RailwayIacRunnerDiagnostic[];
+}
+
 export async function runRailwayIac(request: RailwayIacRunnerRequest = {}): Promise<RailwayIacRunnerResponse> {
   const command = request.command ?? "evaluate";
   const cwd = request.cwd ?? process.cwd();
@@ -99,85 +108,65 @@ export async function runRailwayIac(request: RailwayIacRunnerRequest = {}): Prom
 
   try {
     const evaluated = await evaluateRailwayProject({ file, context: runnerContext(request, command) });
-    const diagnostics = graphDiagnostics(evaluated.graph);
-
-    if (command === "typegen") {
-      return {
-        ok: diagnostics.every(diagnostic => diagnostic.severity !== "error"),
-        command,
-        file: evaluated.file,
-        graphTypes: renderRailwayGraphTypes(evaluated.graph),
-        diagnostics,
-      };
-    }
-
-    if (command === "evaluate") {
-      return {
-        ok: diagnostics.every(diagnostic => diagnostic.severity !== "error"),
-        command,
-        file: evaluated.file,
-        graph: evaluated.graph,
-        ...(request.includeTypes ? { graphTypes: renderRailwayGraphTypes(evaluated.graph) } : {}),
-        diagnostics,
-      };
-    }
-
-    if (command === "current") return await currentRailwayIac({ file: evaluated.file, desiredGraph: evaluated.graph, request, diagnostics });
-
-    const planned = await planRailwayIac({ file: evaluated.file, desiredGraph: evaluated.graph, request, diagnostics });
-    if (command === "plan") return planned;
-
-    if (!planned.ok || !planned.changeSet || planned.changeSet.changes.length === 0) return { ...planned, command: command === "apply" ? "apply" : "stage" };
-    const context = requireBackboardContext(request.backboard, command === "apply" ? "apply" : "stage");
-    const client = new IacClient(clientConfig(context));
-    if (command === "stage") {
-      return { ...planned, command: "stage" };
-    }
-    const applyResult = await client.applyChangeSet({
-      environmentId: context.environmentId,
-      changeSet: planned.changeSet,
-      commitMessage: "Apply Railway configuration",
-    });
-    return {
-      ...planned,
-      command: "apply",
-      applyResult,
-      ...(applyResult.deploymentId ? { deploymentId: applyResult.deploymentId } : {}),
-      ...(applyResult.stagedPatchId ? { stagedPatchId: applyResult.stagedPatchId } : {}),
+    const input = {
+      request,
+      file: evaluated.file,
+      graph: evaluated.graph,
+      diagnostics: graphDiagnostics(evaluated.graph),
     };
+    return await runEvaluatedCommand(command, input);
   } catch (error) {
-    return {
-      ok: false,
-      command: command === "apply" ? "apply" : command === "stage" ? "stage" : command === "plan" ? "plan" : command === "current" ? "current" : command === "typegen" ? "typegen" : "evaluate",
-      file,
-      ...(command === "plan" || command === "stage" || command === "current" ? { mode: "real" as const } : {}),
-      diagnostics: [{ severity: "error", path: "", message: error instanceof Error ? error.message : String(error) }],
-    } as RailwayIacRunnerResponse;
+    return errorResponse(command, file, error);
   }
 }
 
-async function currentRailwayIac({ file, desiredGraph, request, diagnostics }: {
-  file: string;
-  desiredGraph: RailwayGraph;
-  request: RailwayIacRunnerRequest;
-  diagnostics: RailwayIacRunnerDiagnostic[];
-}): Promise<RailwayIacCurrentResponse> {
+async function runEvaluatedCommand(command: RunnerCommand, input: EvaluatedCommandInput): Promise<RailwayIacRunnerResponse> {
+  switch (command) {
+    case "typegen":
+      return typegenRailwayIac(input);
+    case "evaluate":
+      return evaluateRailwayIac(input);
+    case "current":
+      return currentRailwayIac(input);
+    case "plan":
+      return planRailwayIac(input);
+    case "stage":
+      return stageRailwayIac(input);
+    case "apply":
+      return applyRailwayIac(input);
+  }
+}
+
+function typegenRailwayIac({ file, graph, diagnostics }: EvaluatedCommandInput): RailwayIacTypegenResponse {
+  return {
+    ok: hasNoErrors(diagnostics),
+    command: "typegen",
+    file,
+    graphTypes: renderRailwayGraphTypes(graph),
+    diagnostics,
+  };
+}
+
+function evaluateRailwayIac({ request, file, graph, diagnostics }: EvaluatedCommandInput): RailwayIacEvaluateResponse {
+  return {
+    ok: hasNoErrors(diagnostics),
+    command: "evaluate",
+    file,
+    graph,
+    ...(request.includeTypes ? { graphTypes: renderRailwayGraphTypes(graph) } : {}),
+    diagnostics,
+  };
+}
+
+async function currentRailwayIac({ file, graph: desiredGraph, request, diagnostics }: EvaluatedCommandInput): Promise<RailwayIacCurrentResponse> {
   const context = requireBackboardContext(request.backboard, "plan");
   const client = new IacClient(clientConfig(context));
-  const current = await client.getCurrentEnvironment(
-    context.environmentId,
-    context.decryptVariables === undefined ? {} : { decryptVariables: context.decryptVariables },
-  );
-  const currentGraph = environmentConfigToGraph(current.config, {
-    projectName: current.projectName ?? desiredGraph.project.name,
-    serviceNamesById: current.serviceNamesById,
-    bucketNamesById: current.bucketNamesById,
-    customDomainsByServiceId: current.customDomainsByServiceId,
-  });
+  const current = await readCurrentEnvironment(client, context);
+  const currentGraph = graphFromCurrentEnvironment(current, desiredGraph);
   const { config: _config, ...currentEnvironment } = current;
 
   return {
-    ok: diagnostics.every(diagnostic => diagnostic.severity !== "error"),
+    ok: hasNoErrors(diagnostics),
     command: "current",
     file,
     mode: "real",
@@ -189,32 +178,15 @@ async function currentRailwayIac({ file, desiredGraph, request, diagnostics }: {
   };
 }
 
-async function planRailwayIac({ file, desiredGraph, request, diagnostics }: {
-  file: string;
-  desiredGraph: RailwayGraph;
-  request: RailwayIacRunnerRequest;
-  diagnostics: RailwayIacRunnerDiagnostic[];
-}): Promise<RailwayIacPlanResponse> {
+async function planRailwayIac({ file, graph: desiredGraph, request, diagnostics }: EvaluatedCommandInput): Promise<RailwayIacPlanResponse> {
   const context = requireBackboardContext(request.backboard, "plan");
   const client = new IacClient(clientConfig(context));
-  const current = await client.getCurrentEnvironment(
-    context.environmentId,
-    context.decryptVariables === undefined ? {} : { decryptVariables: context.decryptVariables },
-  );
-  const currentGraph = environmentConfigToGraph(current.config, {
-    projectName: current.projectName ?? desiredGraph.project.name,
-    serviceNamesById: current.serviceNamesById,
-    bucketNamesById: current.bucketNamesById,
-    customDomainsByServiceId: current.customDomainsByServiceId,
-  });
+  const current = await readCurrentEnvironment(client, context);
+  const currentGraph = graphFromCurrentEnvironment(current, desiredGraph);
   const changeSet = diffGraphs({ current: currentGraph, desired: desiredGraph });
-  const allDiagnostics = [...diagnostics, ...changeSet.diagnostics.map(diagnostic => ({
-    severity: diagnostic.severity,
-    path: diagnostic.path,
-    message: diagnostic.message,
-  } satisfies RailwayIacRunnerDiagnostic))];
+  const allDiagnostics = [...diagnostics, ...changeSetDiagnostics(changeSet)];
   const { config: _config, ...currentEnvironment } = current;
-  const hasErrors = allDiagnostics.some(diagnostic => diagnostic.severity === "error");
+  const hasErrors = !hasNoErrors(allDiagnostics);
   const preview = !hasErrors && changeSet.changes.length > 0
     ? await client.previewChangeSet({ environmentId: context.environmentId, changeSet })
     : undefined;
@@ -234,6 +206,65 @@ async function planRailwayIac({ file, desiredGraph, request, diagnostics }: {
     ...(request.includeTypes ? { graphTypes: renderRailwayGraphTypes(desiredGraph) } : {}),
     diagnostics: allDiagnostics,
   };
+}
+
+async function stageRailwayIac(input: EvaluatedCommandInput): Promise<RailwayIacStageResponse> {
+  const planned = await planRailwayIac(input);
+  if (!planned.ok || !planned.changeSet || planned.changeSet.changes.length === 0) {
+    return { ...planned, command: "stage" };
+  }
+  requireBackboardContext(input.request.backboard, "stage");
+  return { ...planned, command: "stage" };
+}
+
+async function applyRailwayIac(input: EvaluatedCommandInput): Promise<RailwayIacApplyResponse> {
+  const planned = await planRailwayIac(input);
+  if (!planned.ok || !planned.changeSet || planned.changeSet.changes.length === 0) {
+    return { ...planned, command: "apply" };
+  }
+
+  const context = requireBackboardContext(input.request.backboard, "apply");
+  const client = new IacClient(clientConfig(context));
+  const applyResult = await client.applyChangeSet({
+    environmentId: context.environmentId,
+    changeSet: planned.changeSet,
+    commitMessage: "Apply Railway configuration",
+  });
+
+  return {
+    ...planned,
+    command: "apply",
+    applyResult,
+    ...(applyResult.deploymentId ? { deploymentId: applyResult.deploymentId } : {}),
+    ...(applyResult.stagedPatchId ? { stagedPatchId: applyResult.stagedPatchId } : {}),
+  };
+}
+
+async function readCurrentEnvironment(
+  client: IacClient,
+  context: Required<Pick<RailwayIacBackboardContext, "token" | "environmentId">> & RailwayIacBackboardContext,
+): Promise<CurrentEnvironmentResult> {
+  return client.getCurrentEnvironment(
+    context.environmentId,
+    context.decryptVariables === undefined ? {} : { decryptVariables: context.decryptVariables },
+  );
+}
+
+function graphFromCurrentEnvironment(current: CurrentEnvironmentResult, desiredGraph: RailwayGraph): RailwayGraph {
+  return environmentConfigToGraph(current.config, {
+    projectName: current.projectName ?? desiredGraph.project.name,
+    serviceNamesById: current.serviceNamesById,
+    bucketNamesById: current.bucketNamesById,
+    customDomainsByServiceId: current.customDomainsByServiceId,
+  });
+}
+
+function changeSetDiagnostics(changeSet: RailwayChangeSet): RailwayIacRunnerDiagnostic[] {
+  return changeSet.diagnostics.map(diagnostic => ({
+    severity: diagnostic.severity,
+    path: diagnostic.path,
+    message: diagnostic.message,
+  } satisfies RailwayIacRunnerDiagnostic));
 }
 
 function runnerContext(request: RailwayIacRunnerRequest, command: string): RailwayContextInput {
@@ -261,4 +292,18 @@ function clientConfig(context: RailwayIacBackboardContext & { token: string }) {
 
 function graphDiagnostics(graph: RailwayGraph): RailwayIacRunnerDiagnostic[] {
   return validateGraph(graph).map(message => ({ severity: "error", path: "graph", message }));
+}
+
+function hasNoErrors(diagnostics: RailwayIacRunnerDiagnostic[]): boolean {
+  return diagnostics.every(diagnostic => diagnostic.severity !== "error");
+}
+
+function errorResponse(command: RunnerCommand, file: string, error: unknown): RailwayIacRunnerResponse {
+  return {
+    ok: false,
+    command,
+    file,
+    ...(command === "plan" || command === "stage" || command === "apply" || command === "current" ? { mode: "real" as const } : {}),
+    diagnostics: [{ severity: "error", path: "", message: error instanceof Error ? error.message : String(error) }],
+  } as RailwayIacRunnerResponse;
 }

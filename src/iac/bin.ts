@@ -46,73 +46,95 @@ function parseArgs(argv: string[]): RailwayIacRunnerRequest {
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]!;
-    if (arg === "evaluate" || arg === "typegen" || arg === "current" || arg === "plan" || arg === "stage" || arg === "apply") {
-      parsed.command = arg;
-      continue;
-    }
-    if (arg === "--include-types") {
-      parsed.includeTypes = true;
-      continue;
-    }
-    if (arg === "--compact") {
-      parsed.pretty = false;
-      continue;
-    }
-    if (arg === "--pretty") {
-      parsed.pretty = true;
-      continue;
-    }
-    if (arg === "--decrypt-variables") {
-      backboard.decryptVariables = true;
-      continue;
-    }
-    if (arg === "--replace") {
-      backboard.merge = false;
-      continue;
-    }
-    if (arg === "--merge") {
-      backboard.merge = true;
-      continue;
-    }
-    if (arg === "--cwd") {
-      const cwd = argv[++i];
-      if (cwd) parsed.cwd = cwd;
-      continue;
-    }
-    if (arg === "--file") {
-      const file = argv[++i];
-      if (file) parsed.file = file;
-      continue;
-    }
-    if (arg === "--endpoint") {
-      const endpoint = argv[++i];
-      if (endpoint) backboard.endpoint = endpoint;
-      continue;
-    }
-    if (arg === "--token") {
-      const token = argv[++i];
-      if (token) backboard.token = token;
-      continue;
-    }
-    if (arg === "--auth-type") {
-      const authType = argv[++i];
-      if (authType === "bearer" || authType === "project-token") backboard.authType = authType;
-      continue;
-    }
-    if (arg === "--project-id") {
-      const projectId = argv[++i];
-      if (projectId) backboard.projectId = projectId;
-      continue;
-    }
-    if (arg === "--environment-id") {
-      const environmentId = argv[++i];
-      if (environmentId) backboard.environmentId = environmentId;
-      continue;
-    }
+    const consumed = applyFlag(arg, argv[i + 1], parsed, backboard);
+    if (consumed) i += consumed - 1;
   }
 
   if (Object.keys(backboard).length > 0) parsed.backboard = backboard;
   return parsed;
+}
+
+function applyFlag(
+  arg: string,
+  value: string | undefined,
+  parsed: RailwayIacRunnerRequest,
+  backboard: NonNullable<RailwayIacRunnerRequest["backboard"]>,
+): number {
+  if (isRunnerCommand(arg)) {
+    parsed.command = arg;
+    return 1;
+  }
+
+  if (setBooleanFlag(arg, parsed, backboard)) return 1;
+  return setValueFlag(arg, value, parsed, backboard);
+}
+
+function isRunnerCommand(arg: string): arg is NonNullable<RailwayIacRunnerRequest["command"]> {
+  return arg === "evaluate" || arg === "typegen" || arg === "current" || arg === "plan" || arg === "stage" || arg === "apply";
+}
+
+function setBooleanFlag(
+  arg: string,
+  parsed: RailwayIacRunnerRequest,
+  backboard: NonNullable<RailwayIacRunnerRequest["backboard"]>,
+): boolean {
+  switch (arg) {
+    case "--include-types":
+      parsed.includeTypes = true;
+      return true;
+    case "--compact":
+      parsed.pretty = false;
+      return true;
+    case "--pretty":
+      parsed.pretty = true;
+      return true;
+    case "--decrypt-variables":
+      backboard.decryptVariables = true;
+      return true;
+    case "--replace":
+      backboard.merge = false;
+      return true;
+    case "--merge":
+      backboard.merge = true;
+      return true;
+    default:
+      return false;
+  }
+}
+
+function setValueFlag(
+  arg: string,
+  value: string | undefined,
+  parsed: RailwayIacRunnerRequest,
+  backboard: NonNullable<RailwayIacRunnerRequest["backboard"]>,
+): number {
+  if (!value) return 1;
+
+  switch (arg) {
+    case "--cwd":
+      parsed.cwd = value;
+      return 2;
+    case "--file":
+      parsed.file = value;
+      return 2;
+    case "--endpoint":
+      backboard.endpoint = value;
+      return 2;
+    case "--token":
+      backboard.token = value;
+      return 2;
+    case "--auth-type":
+      if (value === "bearer" || value === "project-token") backboard.authType = value;
+      return 2;
+    case "--project-id":
+      backboard.projectId = value;
+      return 2;
+    case "--environment-id":
+      backboard.environmentId = value;
+      return 2;
+    default:
+      return 1;
+  }
 }
 
 function mergeRequest(stdin: RailwayIacRunnerRequest, args: RailwayIacRunnerRequest): RailwayIacRunnerRequest {
