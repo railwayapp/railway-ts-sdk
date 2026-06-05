@@ -242,13 +242,13 @@ export class SandboxEngine {
     describe?: (value: T) => string;
   }): Promise<T> {
     const start = Date.now();
+    const describe = args.describe;
     let delay = POLL_INITIAL_DELAY_MS;
     let last: T;
     do {
       await sleep(delay);
       last = await args.poll();
       const elapsedSec = ((Date.now() - start) / 1000).toFixed(1);
-      const describe = args.describe;
       if (args.isReady(last)) {
         if (describe) this.#config.log(`${describe(last)} ready after ${elapsedSec}s`);
         return last;
@@ -264,9 +264,9 @@ export class SandboxEngine {
         );
       }
     } while (Date.now() - start < READINESS_TIMEOUT_MS);
-    if (args.describe) {
+    if (describe) {
       const elapsedSec = ((Date.now() - start) / 1000).toFixed(1);
-      this.#config.log(`${args.describe(last)} timed out after ${elapsedSec}s`);
+      this.#config.log(`${describe(last)} timed out after ${elapsedSec}s`);
     }
     return args.onTimeout(last);
   }
