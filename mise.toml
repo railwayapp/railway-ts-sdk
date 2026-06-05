@@ -30,8 +30,8 @@ description = "Run unit tests in watch mode"
 run = "pnpm run test:watch"
 
 [tasks.e2e]
-description = "Run only the live exec e2e against .env credentials (uses the system CA store for dev certs)"
-run = "if [ -f .env ]; then set -a; . ./.env; set +a; fi; pnpm exec vitest run tests/exec.e2e.test.ts"
+description = "Run the live e2e suites against .env credentials (uses the system CA store for dev certs)"
+run = "if [ -f .env ]; then set -a; . ./.env; set +a; fi; pnpm exec vitest run tests/*.e2e.test.ts"
 
 [tasks.codegen]
 description = "Regenerate GraphQL types from the configured schema"
