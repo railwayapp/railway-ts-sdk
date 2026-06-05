@@ -1,4 +1,5 @@
 import type { NormalizedRailwayClientConfig } from "../core/config.js";
+import { RailwayError } from "../core/errors.js";
 import {
   connectExecWs,
   type ExecWsConnection,
@@ -9,7 +10,7 @@ import {
   type RailwayGenerateShellTokenMutation,
   type RailwayGenerateShellTokenMutationVariables,
 } from "../generated/graphql.js";
-import type { ExecOptions, ExecResult, ExecTarget } from "./types.js";
+import type { ExecOptions, ExecResult, ExecSignal, ExecTarget } from "./types.js";
 
 const decoder = () => new TextDecoder();
 
@@ -23,34 +24,38 @@ const REATTACH_PLACEHOLDER_COMMAND = ":";
 
 /** Module-internal access to ExecHandle's private constructor. */
 let constructHandle: (args: {
-  execId: Promise<string>;
+  sessionName: Promise<string>;
   result: Promise<ExecResult>;
-  kill: () => Promise<boolean>;
+  kill: (signal: ExecSignal) => Promise<boolean>;
+  detach: () => Promise<string>;
 }) => ExecHandle;
 
 /**
  * An in-flight exec. Awaiting it (or any Promise method) yields the final
- * `ExecResult`; `execId` and `kill()` manage the command while it runs.
+ * `ExecResult`; `sessionName` and `kill()` manage the command while it runs.
  */
 export class ExecHandle implements Promise<ExecResult> {
-  /** Server-assigned id for this exec; use it to reattach via `exec({ execId })`. */
-  readonly execId: Promise<string>;
+  /** Durable session name for this exec; reattach via `exec({ sessionName })`. */
+  readonly sessionName: Promise<string>;
   readonly [Symbol.toStringTag] = "ExecHandle";
   readonly #result: Promise<ExecResult>;
-  readonly #kill: () => Promise<boolean>;
+  readonly #kill: (signal: ExecSignal) => Promise<boolean>;
+  readonly #detach: () => Promise<string>;
 
   /** Constructed by `Sandbox.exec`; not constructible from outside the SDK. */
   private constructor(args: {
-    execId: Promise<string>;
+    sessionName: Promise<string>;
     result: Promise<ExecResult>;
-    kill: () => Promise<boolean>;
+    kill: (signal: ExecSignal) => Promise<boolean>;
+    detach: () => Promise<string>;
   }) {
-    this.execId = args.execId;
+    this.sessionName = args.sessionName;
     this.#result = args.result;
     this.#kill = args.kill;
+    this.#detach = args.detach;
     // Side taps: a handle held only for kill()/callbacks must not surface
     // unhandled rejections. Awaiting the handle still rejects normally.
-    this.execId.catch(() => {});
+    this.sessionName.catch(() => {});
     this.#result.catch(() => {});
   }
 
@@ -85,15 +90,28 @@ export class ExecHandle implements Promise<ExecResult> {
   }
 
   /**
-   * Stop the running command by closing its session. Resolves with whether a
-   * session was open to close; the handle itself still settles when the
-   * command exits. With durable sessions enabled server-side this only
-   * detaches (the process keeps running, reattachable via `exec({ execId })`).
+   * Terminate the running command with a signal (default `TERM`) delivered to
+   * its process group — a real kill, regardless of durable sessions. The handle
+   * then settles with the command's exit (a signalled process reports exit code
+   * `-1`). To stop streaming WITHOUT ending the command, use `detach()`.
    */
   // Public SDK API; consumed by library users, not in-repo code.
   // fallow-ignore-next-line unused-class-member
-  kill(): Promise<boolean> {
-    return this.#kill();
+  kill(signal: ExecSignal = "TERM"): Promise<boolean> {
+    return this.#kill(signal);
+  }
+
+  /**
+   * Stop streaming and close the WebSocket without ending the command — the
+   * durable session keeps running server-side. Resolves with its `sessionName`
+   * so you can reattach later via `exec({ sessionName })`; rejects if the server
+   * assigned no durable session (reattach is impossible). The handle itself
+   * settles with the output captured up to the detach.
+   */
+  // Public SDK API; consumed by library users, not in-repo code.
+  // fallow-ignore-next-line unused-class-member
+  detach(): Promise<string> {
+    return this.#detach();
   }
 
   static {
@@ -109,7 +127,8 @@ export interface ExecContext {
 
 interface ExecControl {
   connection?: ExecWsConnection;
-  killed: boolean;
+  pendingSignal?: ExecSignal;
+  detached: boolean;
 }
 
 /**
@@ -118,8 +137,9 @@ interface ExecControl {
  * `generateShellToken`) authorizes the path.
  *
  * When durable sessions are enabled server-side, the VM-assigned id is surfaced
- * as `execId` and `exec({ execId })` reattaches to it (replaying the retained
- * output tail, then following live). `kill()`/`timeoutSec` close the socket —
+ * as `sessionName` and `exec({ sessionName })` reattaches to it (replaying the
+ * retained output tail, then following live). `kill()`/`timeoutSec` close the
+ * socket —
  * with durable on that only detaches (the process keeps running, reattachable);
  * with it off the session is torn down.
  */
@@ -128,54 +148,71 @@ export function startExec(
   target: ExecTarget,
   options: ExecOptions,
 ): ExecHandle {
-  let resolveExecId!: (value: string) => void;
-  let rejectExecId!: (reason?: unknown) => void;
-  const execId = new Promise<string>((resolve, reject) => {
-    resolveExecId = resolve;
-    rejectExecId = reject;
+  let resolveSessionName!: (value: string) => void;
+  let rejectSessionName!: (reason?: unknown) => void;
+  const sessionName = new Promise<string>((resolve, reject) => {
+    resolveSessionName = resolve;
+    rejectSessionName = reject;
   });
 
-  const control: ExecControl = { killed: false };
+  const control: ExecControl = { detached: false };
 
-  const kill = async (): Promise<boolean> => {
-    control.killed = true;
-    if (!control.connection) return false;
-    control.connection.close();
-    return true;
+  const kill = async (signal: ExecSignal): Promise<boolean> => {
+    if (!control.connection) {
+      control.pendingSignal = signal; // delivered once the socket exists
+      return true;
+    }
+    try {
+      control.connection.signal(signal);
+      return true;
+    } catch {
+      return false;
+    }
   };
 
-  const result = runExec(context, target, options, resolveExecId, control).catch(
-    error => {
-      rejectExecId(error);
-      throw error;
-    },
-  );
+  const detach = async (): Promise<string> => {
+    control.detached = true;
+    control.connection?.close();
+    return sessionName;
+  };
 
-  return constructHandle({ execId, result, kill });
+  const result = runExec(
+    context,
+    target,
+    options,
+    resolveSessionName,
+    rejectSessionName,
+    control,
+  ).catch(error => {
+    rejectSessionName(error);
+    throw error;
+  });
+
+  return constructHandle({ sessionName, result, kill, detach });
 }
 
 async function runExec(
   context: ExecContext,
   target: ExecTarget,
   options: ExecOptions,
-  onExecId: (id: string) => void,
+  onSessionName: (name: string) => void,
+  onNoSessionName: (reason: unknown) => void,
   control: ExecControl,
 ): Promise<ExecResult> {
   const reattach = typeof target !== "string";
   const command = reattach ? REATTACH_PLACEHOLDER_COMMAND : target;
-  const durableSessionId = reattach ? target.execId : undefined;
+  const sessionName = reattach ? target.sessionName : undefined;
 
-  // Resolve execId once: to the resume id immediately on reattach, otherwise to
-  // the VM-assigned durable id when it arrives, falling back to a client id if
-  // durable sessions are off (no assigned id is ever sent).
-  let execIdResolved = false;
-  const resolveExecIdOnce = (id: string) => {
-    if (execIdResolved) return;
-    execIdResolved = true;
-    onExecId(id);
+  // Resolve the session name once: to the resume name immediately on reattach,
+  // otherwise to the VM-assigned durable name when it arrives, falling back to a
+  // client id if durable sessions are off (no assigned name is ever sent).
+  let sessionNameResolved = false;
+  const resolveSessionNameOnce = (name: string) => {
+    if (sessionNameResolved) return;
+    sessionNameResolved = true;
+    onSessionName(name);
   };
-  if (reattach) resolveExecIdOnce(durableSessionId!);
-  const fallbackExecId = globalThis.crypto.randomUUID();
+  if (reattach) resolveSessionNameOnce(sessionName!);
 
   const input: RailwayGenerateShellTokenMutationVariables["input"] = {
     environmentId: context.environmentId,
@@ -208,7 +245,17 @@ async function runExec(
   const settle = (outcome: ExecResult | { error: unknown }) => {
     if (settled) return;
     settled = true;
-    resolveExecIdOnce(fallbackExecId);
+    // Durable sessions assign a name up front; if none arrived by the time the
+    // exec settles, the server can't do durable — fail `sessionName` rather than
+    // hand back a fabricated id that can never reattach.
+    if (!sessionNameResolved) {
+      sessionNameResolved = true;
+      onNoSessionName(
+        new RailwayError(
+          "Server did not return a durable session for this exec.",
+        ),
+      );
+    }
     if (timer) clearTimeout(timer);
     try {
       control.connection?.close();
@@ -223,12 +270,16 @@ async function runExec(
     config: context.config,
     jwt,
     command,
-    ...(durableSessionId ? { durableSessionId } : {}),
+    ...(sessionName
+      ? {
+          sessionName,
+          resumeFromLastRead: options.resumeFromLastRead ?? false,
+        }
+      : {}),
     handlers: {
-      onDurableSession: id => resolveExecIdOnce(id),
+      onDurableSession: name => resolveSessionNameOnce(name),
       onStdout: bytes => {
         if (settled) return;
-        resolveExecIdOnce(fallbackExecId);
         try {
           const chunk = stdoutDecoder.decode(bytes, { stream: true });
           stdout += chunk;
@@ -239,7 +290,6 @@ async function runExec(
       },
       onStderr: bytes => {
         if (settled) return;
-        resolveExecIdOnce(fallbackExecId);
         try {
           const chunk = stderrDecoder.decode(bytes, { stream: true });
           stderr += chunk;
@@ -258,12 +308,13 @@ async function runExec(
   });
   control.connection = connection;
 
-  // A kill() that landed during token mint / connect has no socket to signal;
-  // honor it now that one exists.
-  if (control.killed) {
+  // A detach()/kill() that landed during token mint / connect has no socket
+  // yet; honor it now that one exists.
+  if (control.detached) {
     connection.close();
     return done;
   }
+  if (control.pendingSignal) connection.signal(control.pendingSignal);
 
   // The SDK provides no stdin; EOF it so commands reading stdin can finish.
   connection.closeStdin();

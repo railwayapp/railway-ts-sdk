@@ -32,7 +32,7 @@ await runExample(async () => {
       },
     },
   );
-  console.log(`execId: ${await handle.execId}\n`);
+  console.log(`sessionName: ${await handle.sessionName}\n`);
 
   const result = await handle;
   const elapsedSec = Math.round((Date.now() - started) / 1000);

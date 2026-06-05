@@ -66,24 +66,25 @@ result.timedOut; // true if the command hit timeoutSec (enforced client-side)
 Every exec runs over a WebSocket bridge to the sandbox, with separated
 stdout/stderr and a real exit code. Short commands resolve when they exit;
 passing `onStdout`/`onStderr` streams output live from the first byte. The
-handle also exposes the `execId` and a `kill()`:
+handle also exposes the `sessionName` and a `kill()`:
 
 ```ts
 const handle = sandbox.exec("npm run test:slow", {
   onStdout: chunk => process.stdout.write(chunk),
 });
 
-const execId = await handle.execId; // save to reattach later
-await handle.kill(); // close the session
+const sessionName = await handle.sessionName; // save to reattach later
+await handle.kill(); // terminate it — SIGTERM by default (pass "KILL" to force)
 const result = await handle; // same ExecResult shape as above
 ```
 
 When durable sessions are enabled for the sandbox, reattach to a running exec
-from anywhere — even another process — with the saved id. The stream replays
-the retained output tail, then continues live:
+from anywhere — even another process — with the saved name. By default it
+replays the retained log, then continues live (pass `resumeFromLastRead: true`
+to resume from the last-read cursor instead):
 
 ```ts
-const result = await sandbox.exec({ execId }, {
+const result = await sandbox.exec({ sessionName }, {
   onStdout: chunk => process.stdout.write(chunk),
 });
 ```

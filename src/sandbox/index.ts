@@ -13,6 +13,7 @@ export type {
   ExecOptions,
   ExecReattachTarget,
   ExecResult,
+  ExecSignal,
   ExecTarget,
   ListOptions,
   SandboxInfo,

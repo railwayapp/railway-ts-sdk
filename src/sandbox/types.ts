@@ -36,12 +36,15 @@ export interface ListOptions extends RailwayClientConfig {
   after?: string;
 }
 
-/** Reattach to an exec started earlier (its id comes from `ExecHandle.execId`). */
+/** Reattach to an exec started earlier (its name comes from `ExecHandle.sessionName`). */
 export interface ExecReattachTarget {
-  execId: string;
+  sessionName: string;
 }
 
 export type ExecTarget = string | ExecReattachTarget;
+
+/** Signal names accepted by `ExecHandle.kill()` (sent to the process group). */
+export type ExecSignal = "HUP" | "INT" | "QUIT" | "KILL" | "TERM";
 
 export interface ExecOptions {
   /**
@@ -53,6 +56,14 @@ export interface ExecOptions {
   onStdout?: (chunk: string) => void;
   /** Receives each stderr chunk as it arrives. A throw rejects the exec. */
   onStderr?: (chunk: string) => void;
+  /**
+   * On reattach (`exec({ sessionName })`), set `true` to resume from the
+   * server's last-read cursor — exact, but lossy if a previous reading client
+   * didn't keep up before detaching. Defaults to `false`: replay all retained
+   * logs for the session (lossless, may repeat output an earlier reader saw).
+   * Ignored on a fresh exec.
+   */
+  resumeFromLastRead?: boolean;
 }
 
 export interface TemplateBuildOptions extends RailwayClientConfig {

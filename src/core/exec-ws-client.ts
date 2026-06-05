@@ -44,6 +44,8 @@ export interface ExecWsHandlers {
 export interface ExecWsConnection {
   /** Half-close stdin (EOF) so commands that read stdin can finish. */
   closeStdin(): void;
+  /** Deliver a signal to the command's process group (e.g. "TERM", "KILL"). */
+  signal(name: string): void;
   close(): void;
 }
 
@@ -57,11 +59,13 @@ export function connectExecWs(args: {
   config: NormalizedRailwayClientConfig;
   jwt: string;
   command: string;
-  /** Resume an existing durable session; omit/empty to start fresh. */
-  durableSessionId?: string;
+  /** Resume an existing durable session by name; omit/empty to start fresh. */
+  sessionName?: string;
+  /** Resume from the server's last-read cursor. Note some loss if previous clients read didn't keep up */
+  resumeFromLastRead?: boolean;
   handlers: ExecWsHandlers;
 }): Promise<ExecWsConnection> {
-  const { config, jwt, command, durableSessionId, handlers } = args;
+  const { config, jwt, command, sessionName, resumeFromLastRead, handlers } = args;
   const WS: WebSocketConstructor = resolveWebSocketImpl(config);
 
   return new Promise<ExecWsConnection>((resolve, reject) => {
@@ -74,11 +78,18 @@ export function connectExecWs(args: {
 
     socket.onopen = () => {
       opened = true;
-      const data: { command: string; durable_session_id?: string } = { command };
-      if (durableSessionId) data.durable_session_id = durableSessionId;
+      const data: {
+        command: string;
+        durable_session_name?: string;
+        resume_from_last_read?: boolean;
+      } = { command };
+      if (sessionName) data.durable_session_name = sessionName;
+      if (resumeFromLastRead) data.resume_from_last_read = true;
       socket.send(JSON.stringify({ type: "init_exec", data }));
       resolve({
         closeStdin: () => socket.send(JSON.stringify({ type: "stdin_close" })),
+        signal: name =>
+          socket.send(JSON.stringify({ type: "signal", data: { signal: name } })),
         close: () => socket.close(1000, ""),
       });
     };
@@ -98,7 +109,7 @@ export function connectExecWs(args: {
           data?: {
             exit_code?: number;
             reason?: string;
-            durable_session_id?: string;
+            durable_session_name?: string;
           };
         };
         try {
@@ -108,8 +119,11 @@ export function connectExecWs(args: {
         }
         if (frame.type === "exit") {
           handlers.onExit(frame.data?.exit_code ?? 0, frame.data?.reason ?? "");
-        } else if (frame.type === "durable_session" && frame.data?.durable_session_id) {
-          handlers.onDurableSession?.(frame.data.durable_session_id);
+        } else if (
+          frame.type === "durable_session" &&
+          frame.data?.durable_session_name
+        ) {
+          handlers.onDurableSession?.(frame.data.durable_session_name);
         }
       }
     };

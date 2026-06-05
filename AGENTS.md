@@ -1,25 +1,106 @@
-# Agent Instructions
+# Railway Sandbox SDK — agent usage guide
 
-TypeScript SDK for Railway sandbox create/exec/destroy.
+How to drive ephemeral Railway sandboxes (create → run commands → destroy) with
+the `railway` package. The public API is small: `Sandbox` IS the sandbox — use
+the static factories, the constructor is private.
 
-- Use mise tasks, not direct package scripts: `mise run build`, `mise run test`, `mise run typecheck`, `mise run codegen`.
-- Install with `mise run install`.
-- Build/check with `mise run check` before handing off.
-- Run `mise run package-check` after touching package metadata, exports, build output, or public types.
-- Run `mise run fallow` after broad refactors, dependency changes, deleting/renaming files, touching public exports, or large generated-code-adjacent changes.
-- Agents should run `mise run fallow -- --format json` when they need structured Fallow output for parsing.
-- Keep Fallow local/manual only: do not add PR workflows, CI gates, git hooks, Claude hooks, or separate Fallow tasks unless explicitly requested.
-- Generated GraphQL lives in `src/generated/graphql.ts`; do not edit it manually.
-- Edit `src/graphql/operations/*.graphql`, then run `mise run codegen`.
-- Runtime default endpoint is prod: `https://backboard.railway.com/graphql/v2`.
-- Local examples use `.env`; copy `.env.example` to `.env`, fill credentials, then run `mise run example:quickstart`.
-- `mise.toml` enables Node's system CA store for local Railway development certificates.
-- Unit tests must stay offline and must not call Railway.
-- Public API: `Sandbox` IS the sandbox via static factories — `import { Sandbox } from "railway"`, then `Sandbox.create()` / `Sandbox.connect(id)` / `Sandbox.list()`. The constructor is private; never `new Sandbox(...)`.
-- `token`/`environmentId`/`endpoint` resolve explicit → env (`RAILWAY_API_TOKEN`/`RAILWAY_ENVIRONMENT_ID`/`RAILWAY_GRAPHQL_ENDPOINT`) → default; missing credentials throw `RailwayAuthError`.
-- Keep public SDK scope minimal: `Sandbox.create`, `exec`/`destroy`/`refresh` on the instance, `connect`/`list` statics, `await using` auto-destroy. Files, ports, and richer streaming are future (see `docs/sandbox-sdk-vision.md`).
-- `exec` runs over the tcp-proxy `/ws/exec` WebSocket bridge (the only transport): a `shell`-scoped JWT from `generateShellToken` authorizes the socket, which carries separated stdout/stderr and a real exit code. `exec()` returns an `ExecHandle` (await it for `ExecResult`; `.execId`/`.kill()`); `exec({ execId })` reattaches when durable sessions are enabled server-side (VM-assigned id, replays the retained tail then follows live). `kill()`/`timeoutSec` close the socket (with durable on this only detaches, the process keeps running). `timeoutSec` is client-side only (close + `timedOut: true`). The WS endpoint derives from `endpoint` (`backboard.<host>` → `wss://ssh.<host>:2226/ws/exec`); override via `tcpProxyWsEndpoint`/`RAILWAY_TCP_PROXY_WS_ENDPOINT`. Live e2e: `SANDBOX_E2E=1 pnpm vitest run tests/exec.e2e.test.ts` with `.env` creds.
-- Release: pushing a `v*.*.*` tag triggers `release.yml`, which publishes the `package.json` version **at the tagged commit** to npm. Invariant: `package.json` must already equal the tag's version in the commit the tag points to, or `npm publish` fails with "cannot publish over previously published versions".
-  - Easiest: run the `Create Release` workflow (Actions → workflow_dispatch, `bump: patch`) — bumps `package.json`, commits to `main`, tags, pushes.
-  - Manual: on `main`, `npm version <x.y.z> --no-git-tag-version`, commit the bump, push `main`, then `git tag v<x.y.z>` on that commit and push the tag.
-  - Do NOT push a tag off a commit whose `package.json` version is stale (the original release-process mistake).
+## Setup
+
+```ts
+import { Sandbox } from "railway";
+```
+
+Credentials resolve explicit option → environment variable:
+
+- `RAILWAY_API_TOKEN` — an account/personal token (it must resolve to a user; a
+  project token may be rejected when minting exec sessions).
+- `RAILWAY_ENVIRONMENT_ID` — the environment to create sandboxes in.
+
+Missing credentials throw `RailwayAuthError`. In a non-Node runtime without a
+global `WebSocket`, pass `webSocketImpl` (e.g. the `ws` package) in the options.
+
+## Create, run, destroy
+
+```ts
+await using sandbox = await Sandbox.create(); // resolves once RUNNING
+const result = await sandbox.exec("echo hello");
+result.exitCode; // 0
+// destroyed automatically when the scope exits (await using)
+```
+
+- `Sandbox.create(options?)` — new sandbox; resolves when it is `RUNNING`.
+- `Sandbox.create(template, options?)` — from a template (see below).
+- `Sandbox.connect(id, options?)` — reattach to an existing sandbox by id.
+- `Sandbox.list(options?)` — list sandboxes in the environment.
+- `sandbox.destroy()` — tear down; `await using` does this on scope exit.
+- `sandbox.refresh()` — re-read `status` and fields in place.
+
+## Running commands
+
+`exec` returns an `ExecHandle`; await it for the `ExecResult`. It does NOT throw
+on a non-zero exit — inspect `exitCode`.
+
+```ts
+const r = await sandbox.exec("npm run build", { timeoutSec: 120 });
+r.exitCode; // number | null (null if the session ended without one)
+r.stdout; // string
+r.stderr; // string, kept separate from stdout
+r.truncated; // true if the server cut the output
+r.timedOut; // true if timeoutSec fired (kills the command client-side)
+```
+
+Stream long-running output live with callbacks (a throw from one rejects exec):
+
+```ts
+const result = await sandbox.exec("npm run test:slow", {
+  onStdout: chunk => process.stdout.write(chunk),
+  onStderr: chunk => process.stderr.write(chunk),
+});
+```
+
+## Durable sessions (reconnect)
+
+When durable sessions are enabled for the sandbox, a command survives a
+disconnect and you can reconnect to it later — even from another process.
+
+```ts
+const handle = sandbox.exec("long-running-task");
+const sessionName = await handle.sessionName; // save this to reconnect
+```
+
+- `handle.sessionName` → the durable session name (a Promise). It **rejects** if
+  the server assigned none (durable unavailable); the command still runs.
+- `handle.detach()` — stop streaming and close the socket WITHOUT ending the
+  command; resolves the `sessionName` to reconnect with.
+- `handle.kill(signal?)` — terminate the command (a real signal to its process
+  group; default `"TERM"`, e.g. `kill("KILL")` to force).
+- Reconnect with `sandbox.exec({ sessionName }, options?)`. By default it replays
+  all retained logs (lossless; may repeat output an earlier reader saw) — so a
+  plain reattach harvests the full output, even of a command you never read. Pass
+  `resumeFromLastRead: true` to resume from the last-read cursor instead (exact,
+  but can drop output if a previous reader didn't keep up before detaching).
+
+```ts
+// fire-and-forget, then harvest the whole output later:
+const result = await sandbox.exec({ sessionName });
+```
+
+## Templates
+
+A reusable base image, built once and cached:
+
+```ts
+const base = Sandbox.template().withPackages("ffmpeg").workdir("/app");
+const sandbox = await Sandbox.create(base);
+```
+
+## Errors
+
+- `RailwayAuthError` — missing/invalid credentials.
+- `RailwayConnectionError` — WebSocket/network failure (e.g. the exec stream
+  could not be opened).
+- `RailwayGraphQLError` — an API error.
+- `SandboxNotFoundError` — `connect`/`refresh` to an id not in the environment.
+- `SandboxFailedError` — the sandbox hit a terminal state before becoming ready.
+- `SandboxTimeoutError` — a readiness wait timed out.
+- `SandboxTemplateBuildError` — a template build failed.

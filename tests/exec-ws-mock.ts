@@ -98,7 +98,7 @@ export function createExecWsMock(): ExecWsMock {
       this.deliver(
         JSON.stringify({
           type: "durable_session",
-          data: { durable_session_id: id },
+          data: { durable_session_name: id },
         }),
       );
     }
