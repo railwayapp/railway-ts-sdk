@@ -2,8 +2,7 @@ import { config } from "dotenv";
 
 import { RailwayAuthError, RailwayGraphQLError } from "../../src/index.ts";
 
-// The examples are documented to run against the project's .env, so it wins
-// over ambient RAILWAY_* shell credentials.
+// Prefer the project's .env over ambient RAILWAY_* shell credentials.
 config({ override: true });
 
 export const sleep = (ms: number): Promise<void> =>
