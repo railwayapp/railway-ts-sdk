@@ -1,80 +1,67 @@
 import { RailwayError } from "../core/errors.js";
+import type { SandboxStatus } from "./types.js";
 
-export type SandboxFileOperation =
-  | "read"
-  | "write"
-  | "info"
-  | "remove"
-  | "list"
-  | "move"
-  | "makeDir"
-  | "tree";
+export class SandboxNotFoundError extends RailwayError {
+  readonly id: string;
+  readonly environmentId: string;
 
-export interface RailwaySandboxFileErrorArgs {
-  message: string;
-  operation: SandboxFileOperation;
-  path: string;
-  status?: number | undefined;
-  responseBody?: unknown;
-  cause?: unknown;
+  constructor(args: { id: string; environmentId: string }) {
+    super(
+      `Sandbox "${args.id}" was not found in environment "${args.environmentId}".`,
+    );
+    this.id = args.id;
+    this.environmentId = args.environmentId;
+  }
 }
 
-export class RailwaySandboxFileError extends RailwayError {
-  readonly operation: SandboxFileOperation;
-  readonly path: string;
-  readonly status: number | undefined;
-  readonly responseBody: unknown;
+/** A sandbox reached FAILED/DESTROYING/DESTROYED before becoming RUNNING. */
+export class SandboxFailedError extends RailwayError {
+  readonly id: string;
+  readonly status: SandboxStatus;
 
-  constructor(args: RailwaySandboxFileErrorArgs) {
-    super(args.message, { cause: args.cause });
-    this.operation = args.operation;
-    this.path = args.path;
+  constructor(args: { id: string; status: SandboxStatus }) {
+    super(
+      `Sandbox "${args.id}" entered terminal state "${args.status}" before becoming ready.`,
+    );
+    this.id = args.id;
     this.status = args.status;
-    this.responseBody = args.responseBody;
   }
 }
 
-export class SandboxFileNotFoundError extends RailwaySandboxFileError {
-  constructor(args: {
-    operation: SandboxFileOperation;
-    path: string;
-    status?: number | undefined;
-    responseBody?: unknown;
-  }) {
-    super({
-      message: `Sandbox file not found: ${args.path}`,
-      operation: args.operation,
-      path: args.path,
-      status: args.status,
-      responseBody: args.responseBody,
-    });
+/** A server-side template build finished in the FAILED state. */
+export class SandboxTemplateBuildError extends RailwayError {
+  readonly templateId: string;
+  readonly environmentId: string;
+
+  constructor(args: { templateId: string; environmentId: string }) {
+    super(
+      `Sandbox template "${args.templateId}" failed to build in environment "${args.environmentId}".`,
+    );
+    this.templateId = args.templateId;
+    this.environmentId = args.environmentId;
   }
 }
 
-export class SandboxFileTooLargeError extends RailwaySandboxFileError {
-  readonly maxBytes: number;
-  readonly actualBytes: number | undefined;
+/** A readiness wait timed out. */
+export class SandboxTimeoutError extends RailwayError {
+  readonly resource: "sandbox" | "template";
+  readonly id: string;
+  readonly lastStatus: string;
+  readonly timeoutMs: number;
 
   constructor(args: {
-    operation: SandboxFileOperation;
-    path: string;
-    maxBytes: number;
-    actualBytes?: number;
-    status?: number | undefined;
-    responseBody?: unknown;
+    resource: "sandbox" | "template";
+    id: string;
+    lastStatus: string;
+    timeoutMs: number;
   }) {
-    const actual =
-      args.actualBytes === undefined ? "" : `, got ${args.actualBytes} bytes`;
-
-    super({
-      message: `Sandbox file is too large: max ${args.maxBytes} bytes${actual}`,
-      operation: args.operation,
-      path: args.path,
-      status: args.status,
-      responseBody: args.responseBody,
-    });
-
-    this.maxBytes = args.maxBytes;
-    this.actualBytes = args.actualBytes;
+    super(
+      `Timed out after ${args.timeoutMs}ms waiting for ${args.resource} "${args.id}" ` +
+        `to become ready (last status: ${args.lastStatus}).`,
+    );
+    this.resource = args.resource;
+    this.id = args.id;
+    this.lastStatus = args.lastStatus;
+    this.timeoutMs = args.timeoutMs;
   }
 }

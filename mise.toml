@@ -1,6 +1,6 @@
 [tools]
-node = "22"
-pnpm = "10"
+node = "24"
+"npm:pnpm" = "11.3.0"
 
 [env]
 NODE_OPTIONS = "--use-system-ca"
@@ -52,12 +52,17 @@ depends = ["typecheck", "test", "build"]
 
 [tasks.example]
 description = "Run the default manual example using .env credentials"
-depends = ["example:create-exec-delete"]
+depends = ["example:quickstart"]
 
-[tasks."example:create-exec-delete"]
-description = "Create a sandbox, exec a command, then delete it using .env credentials"
-run = "pnpm exec tsx examples/sandboxes/create-exec-delete.ts"
+[tasks."example:quickstart"]
+description = "Create a sandbox, exec a command, then destroy it using .env credentials"
+run = "pnpm exec tsx examples/sandboxes/quickstart.ts"
 
-[tasks."example:files"]
-description = "Create a sandbox and exercise sandbox file APIs using .env credentials"
-run = "pnpm exec tsx examples/sandboxes/files.ts"
+[tasks."example:template"]
+description = "Create a sandbox from a template, then destroy it using .env credentials"
+run = "pnpm exec tsx examples/sandboxes/template.ts"
+
+[tasks."example:fork"]
+description = "Create a sandbox, fork it, and read forked filesystem state using .env credentials"
+run = "pnpm exec tsx examples/sandboxes/fork.ts"
+

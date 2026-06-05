@@ -167,7 +167,7 @@ Template source is available in the DSL but still product-specific and not the m
 empty(): SourceConfig
 ```
 
-A source-less service is valid. `railway up` can deploy the current directory to it.
+A source-less service is valid when `.railway/railway.ts` should manage service settings but not declare a GitHub repository or Docker image.
 
 ```ts
 service("web", {

@@ -25,7 +25,7 @@ export default defineRailway(() => {
         build: "pnpm install --frozen-lockfile && pnpm --filter frontend build",
         start: "pnpm --filter frontend preview -- --port ${PORT:-4173}",
         preDeploy: "pnpm --filter frontend generate-sitemap",
-        regions: {
+        replicas: {
           "us-west1": 3,
           "europe-west4": 2,
         },

@@ -11,7 +11,7 @@ export default defineRailway(() => {
         source: github("acme/background-workers"),
         build: "pnpm build",
         start: "pnpm worker:start",
-        regions: {
+        replicas: {
           "us-west1": 4,
         },
         env: {

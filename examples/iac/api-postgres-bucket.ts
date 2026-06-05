@@ -21,8 +21,8 @@ export default defineRailway(() => {
         build: "pnpm --filter api build",
         start: "pnpm --filter api start",
         healthcheck: "/health",
-        regions: {
-          "us-west1": { replicas: 2 },
+        replicas: {
+          "us-west1": 2,
         },
         domains: [{ domain: "api.example.com", port: 3000 }],
         env: {

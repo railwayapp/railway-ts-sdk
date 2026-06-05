@@ -1,25 +1,6 @@
 import "dotenv/config";
 
-import type { SandboxConfig } from "../../src/index.ts";
-import { RailwayGraphQLError } from "../../src/index.ts";
-
-export function sandboxConfigFromEnv(): SandboxConfig {
-  const endpoint = process.env.RAILWAY_GRAPHQL_ENDPOINT;
-
-  return {
-    token: requiredEnv("RAILWAY_API_TOKEN"),
-    projectId: requiredEnv("RAILWAY_PROJECT_ID"),
-    environmentId: requiredEnv("RAILWAY_ENVIRONMENT_ID"),
-    ...(endpoint ? { endpoint } : {}),
-  };
-}
-
-export function exampleSandboxName(prefix?: string): string {
-  return (
-    process.env.RAILWAY_SANDBOX_NAME ??
-    `${prefix ?? "sdk-example"}-${Date.now()}`
-  );
-}
+import { RailwayAuthError, RailwayGraphQLError } from "../../src/index.ts";
 
 export async function runExample(example: () => Promise<void>): Promise<void> {
   try {
@@ -30,22 +11,21 @@ export async function runExample(example: () => Promise<void>): Promise<void> {
   }
 }
 
-function requiredEnv(name: string): string {
-  const value = process.env[name];
-  if (!value)
-    throw new Error(`Missing ${name}. Copy .env.example to .env first.`);
-  return value;
-}
-
 function formatError(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+
+  if (error instanceof RailwayAuthError) {
+    return `${error.message} Copy .env.example to .env first.`;
+  }
+
   if (error instanceof RailwayGraphQLError) {
     return `Railway GraphQL error: ${error.message}`;
   }
 
-  if (!(error instanceof Error)) {
-    return String(error);
-  }
+  return formatGenericError(error);
+}
 
+function formatGenericError(error: Error): string {
   if (hasErrorCode(error.cause, "SELF_SIGNED_CERT_IN_CHAIN")) {
     return `${error.message}: self-signed certificate in chain. Run examples with mise so Node uses the project CA settings.`;
   }

@@ -1,4 +1,14 @@
-import type { SandboxSnapshot } from "../src/index.js";
+import { vi } from "vitest";
+
+import type { SandboxInfo } from "../src/index.js";
+import type { SandboxTemplateInfo } from "../src/sandbox/types.js";
+
+/** Neutralizes ambient RAILWAY_* env vars so tests resolve config deterministically. */
+export function clearRailwayEnv(): void {
+  vi.stubEnv("RAILWAY_API_TOKEN", "");
+  vi.stubEnv("RAILWAY_ENVIRONMENT_ID", "");
+  vi.stubEnv("RAILWAY_GRAPHQL_ENDPOINT", "");
+}
 
 export interface FetchCall {
   input: string | URL | Request;
@@ -33,22 +43,33 @@ export function createFetchMock(responses: unknown[]): {
   return { fetch: fetchMock, calls };
 }
 
-export function sandboxSnapshot(
-  overrides: Partial<SandboxSnapshot> = {},
-): SandboxSnapshot {
+export function sandboxInfo(overrides: Partial<SandboxInfo> = {}): SandboxInfo {
   return {
     id: "sandbox_123",
-    name: "test-sandbox",
     status: "RUNNING",
-    instanceId: "instance_123",
-    region: "sjc",
-    projectId: "project_123",
+    networkIsolation: "ISOLATED",
     environmentId: "environment_123",
+    region: "us-west2",
     idleTimeoutMinutes: 5,
     createdAt: "2026-05-13T00:00:00.000Z",
-    updatedAt: "2026-05-13T00:00:00.000Z",
     ...overrides,
   };
+}
+
+export function templateInfo(
+  overrides: Partial<SandboxTemplateInfo> = {},
+): SandboxTemplateInfo {
+  return {
+    id: "template_123",
+    status: "READY",
+    environmentId: "environment_123",
+    ...overrides,
+  };
+}
+
+/** Repeats a single response `n` times — handy for poll/timeout sequences. */
+export function manyResponses(n: number, response: unknown): unknown[] {
+  return Array.from({ length: n }, () => response);
 }
 
 export function header(init: RequestInit | undefined, name: string): string | null {

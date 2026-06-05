@@ -1,6 +1,6 @@
 {
   "name": "railway",
-  "version": "3.0.0",
+  "version": "3.0.3",
   "description": "TypeScript SDK for Railway.",
   "type": "module",
   "license": "MIT",
@@ -24,7 +24,7 @@
   "engines": {
     "node": ">=22"
   },
-  "packageManager": "pnpm@10.12.4",
+  "packageManager": "pnpm@11.3.0",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -67,7 +67,6 @@
     "test:watch": "vitest",
     "codegen": "graphql-codegen --config codegen.ts",
     "demo:iac": "tsx examples/iac/demo.ts",
-    "iac:mock-cli": "tsx examples/iac/mock-railway-cli.ts",
     "package:check": "publint --strict --pack npm && npm pack --dry-run && tsx scripts/package-smoke.ts",
     "clean": "rm -rf dist coverage railway-*.tgz"
   },
@@ -84,7 +83,6 @@
     "@types/node": "^22.15.0",
     "dotenv": "^16.5.0",
     "fallow": "^2.67.0",
-    "picocolors": "^1.1.1",
     "publint": "^0.3.21",
     "tsup": "^8.5.0",
     "typescript": "^5.8.3",

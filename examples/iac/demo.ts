@@ -8,7 +8,7 @@ import {
   type RailwayGraph,
 } from "../../src/index.ts";
 
-const file = new URL("./.railway/railway.ts", import.meta.url).pathname;
+const file = new URL("./todo-list.ts", import.meta.url).pathname;
 const desired = await evaluateRailwayProject({ file });
 const current = mockCurrentGraph(desired.graph);
 const currentConfig = mockCurrentConfig();
@@ -23,7 +23,7 @@ const patch = changeSetToEnvironmentPatch({
 });
 
 section("1. authored source");
-console.log("examples/iac/.railway/railway.ts");
+console.log("examples/iac/todo-list.ts");
 console.log("TypeScript authoring stays ergonomic; evaluation is read-only.\n");
 
 section("2. deterministic graph");

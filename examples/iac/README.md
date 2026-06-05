@@ -9,7 +9,7 @@ The SDK keeps raw config buckets available (`source`, `build`, `deploy`, `networ
 - `start` instead of `deploy.startCommand`
 - `preDeploy` instead of `deploy.preDeployCommand`
 - `healthcheck` instead of `deploy.healthcheckPath`
-- `regions` instead of `deploy.multiRegionConfig`
+- `replicas` instead of `deploy.multiRegionConfig`
 - `env` instead of `variables`
 - `domains` / `tcp` for common networking
 

@@ -2,7 +2,7 @@ import type { CodegenConfig } from "@graphql-codegen/cli";
 
 const schema =
   process.env.RAILWAY_GRAPHQL_SCHEMA ??
-  "/Users/jr/dev/railway/mono/packages/backboard/src/graphql/v2/schema/schema.graphql";
+  "https://backboard.railway.app/graphql/v2";
 
 const config: CodegenConfig = {
   schema,

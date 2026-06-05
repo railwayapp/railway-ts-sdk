@@ -1,14 +1,43 @@
 fragment RailwaySandboxFields on Sandbox {
   id
-  name
   status
-  instanceId
-  region
-  projectId
+  networkIsolation
   environmentId
+  region
   idleTimeoutMinutes
   createdAt
-  updatedAt
+}
+
+query RailwaySandbox($environmentId: String!, $id: String!) {
+  sandbox(environmentId: $environmentId, id: $id) {
+    ...RailwaySandboxFields
+  }
+}
+
+query RailwaySandboxes(
+  $environmentId: String!
+  $first: Int
+  $after: String
+  $before: String
+  $last: Int
+) {
+  sandboxes(
+    environmentId: $environmentId
+    first: $first
+    after: $after
+    before: $before
+    last: $last
+  ) {
+    edges {
+      node {
+        ...RailwaySandboxFields
+      }
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
 }
 
 mutation RailwaySandboxCreate($input: SandboxCreateInput!) {
@@ -17,8 +46,18 @@ mutation RailwaySandboxCreate($input: SandboxCreateInput!) {
   }
 }
 
-mutation RailwaySandboxExec($id: String!, $command: String!, $timeoutSec: Int) {
-  sandboxExec(id: $id, command: $command, timeoutSec: $timeoutSec) {
+mutation RailwaySandboxExec(
+  $id: String!
+  $environmentId: String!
+  $command: String!
+  $timeoutSec: Int
+) {
+  sandboxExec(
+    id: $id
+    environmentId: $environmentId
+    command: $command
+    timeoutSec: $timeoutSec
+  ) {
     exitCode
     stdout
     stderr
@@ -27,8 +66,29 @@ mutation RailwaySandboxExec($id: String!, $command: String!, $timeoutSec: Int) {
   }
 }
 
-mutation RailwaySandboxDestroy($id: String!) {
-  sandboxDestroy(id: $id) {
+mutation RailwaySandboxDestroy($id: String!, $environmentId: String!) {
+  sandboxDestroy(id: $id, environmentId: $environmentId) {
     ...RailwaySandboxFields
+  }
+}
+
+fragment RailwaySandboxTemplateFields on SandboxTemplate {
+  id
+  status
+  environmentId
+}
+
+mutation RailwaySandboxTemplateBuild(
+  $environmentId: String!
+  $input: SandboxTemplateInput!
+) {
+  sandboxTemplateBuild(environmentId: $environmentId, input: $input) {
+    ...RailwaySandboxTemplateFields
+  }
+}
+
+query RailwaySandboxTemplate($environmentId: String!, $id: ID!) {
+  sandboxTemplate(environmentId: $environmentId, id: $id) {
+    ...RailwaySandboxTemplateFields
   }
 }
