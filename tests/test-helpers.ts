@@ -1,7 +1,10 @@
 import { vi } from "vitest";
 
 import type { SandboxInfo } from "../src/index.js";
-import type { SandboxTemplateInfo } from "../src/sandbox/types.js";
+import type {
+  SandboxCheckpointInfo,
+  SandboxTemplateBuildInfo,
+} from "../src/sandbox/types.js";
 
 /** Neutralizes ambient RAILWAY_* env vars so tests resolve config deterministically. */
 export function clearRailwayEnv(): void {
@@ -58,13 +61,25 @@ export function sandboxInfo(overrides: Partial<SandboxInfo> = {}): SandboxInfo {
   };
 }
 
-export function templateInfo(
-  overrides: Partial<SandboxTemplateInfo> = {},
-): SandboxTemplateInfo {
+export function buildInfo(
+  overrides: Partial<SandboxTemplateBuildInfo> = {},
+): SandboxTemplateBuildInfo {
   return {
-    id: "template_123",
+    id: "build_hash_123",
     status: "READY",
     environmentId: "environment_123",
+    ...overrides,
+  };
+}
+
+export function checkpointInfo(
+  overrides: Partial<SandboxCheckpointInfo> = {},
+): SandboxCheckpointInfo {
+  return {
+    id: "checkpoint_123",
+    key: "checkpoint_123",
+    environmentId: "environment_123",
+    createdAt: "2026-05-13T00:00:00.000Z",
     ...overrides,
   };
 }

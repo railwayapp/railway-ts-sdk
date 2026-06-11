@@ -10,11 +10,12 @@ import {
 import { compileSandboxTemplate } from "../src/sandbox/template.js";
 import { createExecWsMock } from "./exec-ws-mock.js";
 import {
+  buildInfo,
+  checkpointInfo,
   clearRailwayEnv,
   createFetchMock,
   manyResponses,
   sandboxInfo,
-  templateInfo,
   type FetchCall,
 } from "./test-helpers.js";
 
@@ -47,6 +48,13 @@ function expectForkMutation(call: FetchCall | undefined): void {
   expect(call?.body.variables).toEqual({
     input: { environmentId: "environment_123", sourceSandboxId: "sandbox_123" },
   });
+}
+
+/** Asserts exactly one fetch happened: a create mutation with this input. */
+function expectSingleCreate(calls: FetchCall[], input: unknown): void {
+  expect(calls).toHaveLength(1);
+  expect(calls[0]?.body.query).toContain("mutation RailwaySandboxCreate");
+  expect(calls[0]?.body.variables).toEqual({ input });
 }
 
 function silenceExpectedRejection<T>(promise: Promise<T>): Promise<T> {
@@ -342,7 +350,7 @@ describe("SandboxTemplate.build", () => {
 
   it("resolves immediately when the template is already READY", async () => {
     const mock = createFetchMock([
-      { data: { sandboxTemplateBuild: templateInfo({ status: "READY" }) } },
+      { data: { sandboxTemplateBuild: buildInfo({ status: "READY" }) } },
     ]);
 
     const base = Sandbox.template().withPackages("ffmpeg");
@@ -363,7 +371,7 @@ describe("SandboxTemplate.build", () => {
 
   it("passes withEnv through as build-time variables", async () => {
     const mock = createFetchMock([
-      { data: { sandboxTemplateBuild: templateInfo({ status: "READY" }) } },
+      { data: { sandboxTemplateBuild: buildInfo({ status: "READY" }) } },
     ]);
 
     await Sandbox.template()
@@ -389,9 +397,9 @@ describe("SandboxTemplate.build", () => {
 
   it("polls a template build until READY", async () => {
     const mock = createFetchMock([
-      { data: { sandboxTemplateBuild: templateInfo({ status: "BUILDING" }) } },
-      { data: { sandboxTemplate: templateInfo({ status: "BUILDING" }) } },
-      { data: { sandboxTemplate: templateInfo({ status: "READY" }) } },
+      { data: { sandboxTemplateBuild: buildInfo({ status: "BUILDING" }) } },
+      { data: { sandboxTemplateBuild:buildInfo({ status: "BUILDING" }) } },
+      { data: { sandboxTemplateBuild:buildInfo({ status: "READY" }) } },
     ]);
 
     const promise = Sandbox.template()
@@ -401,14 +409,14 @@ describe("SandboxTemplate.build", () => {
     await promise;
 
     expect(mock.calls).toHaveLength(3);
-    expect(mock.calls[1]?.body.query).toContain("query RailwaySandboxTemplate");
-    expect(mock.calls[2]?.body.query).toContain("query RailwaySandboxTemplate");
+    expect(mock.calls[1]?.body.query).toContain("query RailwaySandboxTemplateBuildStatus");
+    expect(mock.calls[2]?.body.query).toContain("query RailwaySandboxTemplateBuildStatus");
   });
 
   it("throws SandboxTemplateBuildError on FAILED", async () => {
     const mock = createFetchMock([
-      { data: { sandboxTemplateBuild: templateInfo({ status: "BUILDING" }) } },
-      { data: { sandboxTemplate: templateInfo({ status: "FAILED" }) } },
+      { data: { sandboxTemplateBuild: buildInfo({ status: "BUILDING" }) } },
+      { data: { sandboxTemplateBuild:buildInfo({ status: "FAILED" }) } },
     ]);
 
     const promise = silenceExpectedRejection(
@@ -421,9 +429,9 @@ describe("SandboxTemplate.build", () => {
 
   it("throws SandboxTimeoutError after the readiness timeout", async () => {
     const mock = createFetchMock([
-      { data: { sandboxTemplateBuild: templateInfo({ status: "BUILDING" }) } },
+      { data: { sandboxTemplateBuild: buildInfo({ status: "BUILDING" }) } },
       ...manyResponses(200, {
-        data: { sandboxTemplate: templateInfo({ status: "BUILDING" }) },
+        data: { sandboxTemplateBuild: buildInfo({ status: "BUILDING" }) },
       }),
     ]);
 
@@ -439,7 +447,7 @@ describe("SandboxTemplate.build", () => {
 describe("Sandbox.create(template)", () => {
   it("builds then forks, resolving at RUNNING", async () => {
     const mock = createFetchMock([
-      { data: { sandboxTemplateBuild: templateInfo({ status: "READY" }) } },
+      { data: { sandboxTemplateBuild: buildInfo({ status: "READY" }) } },
       { data: { sandboxCreate: sandboxInfo() } },
     ]);
 
@@ -465,7 +473,7 @@ describe("Sandbox.create(template)", () => {
 
   it("echoes build-time variables into both the build and the create template input", async () => {
     const mock = createFetchMock([
-      { data: { sandboxTemplateBuild: templateInfo({ status: "READY" }) } },
+      { data: { sandboxTemplateBuild: buildInfo({ status: "READY" }) } },
       { data: { sandboxCreate: sandboxInfo() } },
     ]);
 
@@ -491,11 +499,149 @@ describe("Sandbox.create(template)", () => {
     const sandbox = await Sandbox.create(base, { ...auth, fetch: mock.fetch });
 
     expect(sandbox.status).toBe("RUNNING");
-    expect(mock.calls).toHaveLength(1);
-    expect(mock.calls[0]?.body.query).toContain("mutation RailwaySandboxCreate");
     // Build-time env with no build steps has no effect and isn't sent.
+    expectSingleCreate(mock.calls, { environmentId: "environment_123" });
+  });
+});
+
+describe("Sandbox.create(name)", () => {
+  it("boots from a saved checkpoint without a build step", async () => {
+    const mock = createFetchMock([{ data: { sandboxCreate: sandboxInfo() } }]);
+
+    const sandbox = await Sandbox.create("my-checkpoint", {
+      ...auth,
+      fetch: mock.fetch,
+    });
+
+    expect(sandbox.status).toBe("RUNNING");
+    expectSingleCreate(mock.calls, {
+      environmentId: "environment_123",
+      template: { name: "my-checkpoint" },
+    });
+  });
+
+  it("threads creation knobs alongside the checkpoint name", async () => {
+    const mock = createFetchMock([{ data: { sandboxCreate: sandboxInfo() } }]);
+
+    await Sandbox.create("my-checkpoint", {
+      ...auth,
+      idleTimeoutMinutes: 10,
+      env: { FOO: "bar" },
+      fetch: mock.fetch,
+    });
+
     expect(mock.calls[0]?.body.variables).toEqual({
-      input: { environmentId: "environment_123" },
+      input: {
+        environmentId: "environment_123",
+        template: { name: "my-checkpoint" },
+        idleTimeoutMinutes: 10,
+        variables: { FOO: "bar" },
+      },
+    });
+  });
+
+  it("rejects an empty or whitespace name without calling the API", async () => {
+    const mock = createFetchMock([]);
+
+    await expect(
+      Sandbox.create("  ", { ...auth, fetch: mock.fetch }),
+    ).rejects.toBeInstanceOf(TypeError);
+    expect(mock.calls).toHaveLength(0);
+  });
+});
+
+describe("sandbox.checkpoint", () => {
+  it("captures a checkpoint with a single synchronous mutation", async () => {
+    const { sandbox, calls } = await createThenQueue({
+      data: { sandboxCheckpointCreate: checkpointInfo({ id: "snap", key: "snap" }) },
+    });
+
+    const checkpoint = await sandbox.checkpoint("snap");
+
+    expect(checkpoint.key).toBe("snap");
+    expect(calls).toHaveLength(2);
+    expect(calls[1]?.body.query).toContain(
+      "mutation RailwaySandboxCheckpointCreate",
+    );
+    expect(calls[1]?.body.variables).toEqual({
+      environmentId: "environment_123",
+      name: "snap",
+      sandboxId: "sandbox_123",
+    });
+  });
+
+  it("rejects an empty name without calling the API", async () => {
+    const { sandbox, calls } = await createThenQueue({});
+
+    await expect(sandbox.checkpoint(" ")).rejects.toBeInstanceOf(TypeError);
+    expect(calls).toHaveLength(1); // only the create
+  });
+});
+
+describe("Sandbox.checkpoints / renameCheckpoint / deleteCheckpoint", () => {
+  it("lists the environment's named checkpoints", async () => {
+    const mock = createFetchMock([
+      {
+        data: {
+          sandboxCheckpoints: [
+            checkpointInfo({ id: "a", key: "a" }),
+            checkpointInfo({ id: "b", key: "b" }),
+          ],
+        },
+      },
+    ]);
+
+    const checkpoints = await Sandbox.checkpoints({ ...auth, fetch: mock.fetch });
+
+    expect(checkpoints.map(checkpoint => checkpoint.key)).toEqual(["a", "b"]);
+    expect(mock.calls[0]?.body.query).toContain("query RailwaySandboxCheckpoints");
+    expect(mock.calls[0]?.body.variables).toEqual({
+      environmentId: "environment_123",
+    });
+  });
+
+  it("renames a checkpoint and returns the updated info", async () => {
+    const mock = createFetchMock([
+      { data: { sandboxCheckpointRename: checkpointInfo({ id: "fresh", key: "fresh" }) } },
+    ]);
+
+    const renamed = await Sandbox.renameCheckpoint("stale", "fresh", {
+      ...auth,
+      fetch: mock.fetch,
+    });
+
+    expect(renamed.key).toBe("fresh");
+    expect(mock.calls[0]?.body.query).toContain(
+      "mutation RailwaySandboxCheckpointRename",
+    );
+    expect(mock.calls[0]?.body.variables).toEqual({
+      environmentId: "environment_123",
+      id: "stale",
+      name: "fresh",
+    });
+  });
+
+  it("rejects renaming to an empty name without calling the API", async () => {
+    const mock = createFetchMock([]);
+
+    await expect(
+      Sandbox.renameCheckpoint("stale", " ", { ...auth, fetch: mock.fetch }),
+    ).rejects.toBeInstanceOf(TypeError);
+    expect(mock.calls).toHaveLength(0);
+  });
+
+  it("deletes a checkpoint by id and resolves void", async () => {
+    const mock = createFetchMock([{ data: { sandboxCheckpointDelete: true } }]);
+
+    await expect(
+      Sandbox.deleteCheckpoint("checkpoint_123", { ...auth, fetch: mock.fetch }),
+    ).resolves.toBeUndefined();
+    expect(mock.calls[0]?.body.query).toContain(
+      "mutation RailwaySandboxCheckpointDelete",
+    );
+    expect(mock.calls[0]?.body.variables).toEqual({
+      environmentId: "environment_123",
+      id: "checkpoint_123",
     });
   });
 });

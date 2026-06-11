@@ -11,6 +11,7 @@ import {
 } from "./template.js";
 import type { ExecHandle } from "./exec.js";
 import type {
+  CheckpointOptions,
   ConnectOptions,
   CreateOptions,
   ExecOptions,
@@ -18,6 +19,7 @@ import type {
   ExecTarget,
   ForkOptions,
   ListOptions,
+  SandboxCheckpointInfo,
   SandboxInfo,
   SandboxNetworkIsolation,
   SandboxStatus,
@@ -25,8 +27,9 @@ import type {
 
 /**
  * A live Railway sandbox. There is no separate client: a sandbox always comes
- * from somewhere — nothing (`Sandbox.create`), an id (`Sandbox.connect`), or a
- * reusable base (`Sandbox.template()`). The constructor is private; use the
+ * from somewhere — nothing (`Sandbox.create`), an id (`Sandbox.connect`), a
+ * reusable base (`Sandbox.template()`), or a saved checkpoint
+ * (`Sandbox.create(name)`). The constructor is private; use the
  * static factories.
  */
 export class Sandbox implements AsyncDisposable {
@@ -72,6 +75,8 @@ export class Sandbox implements AsyncDisposable {
     return createSandboxTemplate();
   }
 
+  /** Boot from a saved checkpoint (one captured with `checkpoint`). */
+  static create(checkpointName: string, options?: CreateOptions): Promise<Sandbox>;
   static create(
     template: SandboxTemplate,
     options?: CreateOptions,
@@ -79,9 +84,19 @@ export class Sandbox implements AsyncDisposable {
   static create(source: Sandbox, options?: ForkOptions): Promise<Sandbox>;
   static create(options?: CreateOptions): Promise<Sandbox>;
   static async create(
-    sourceOrOptions: SandboxTemplate | Sandbox | CreateOptions = {},
+    sourceOrOptions: string | SandboxTemplate | Sandbox | CreateOptions = {},
     maybeOptions: CreateOptions = {},
   ): Promise<Sandbox> {
+    if (typeof sourceOrOptions === "string") {
+      const name = sourceOrOptions.trim();
+      if (name === "") {
+        throw new TypeError("Checkpoint name must be a non-empty string.");
+      }
+      const engine = engineFromOptions(maybeOptions);
+      const info = await engine.create(maybeOptions, { name });
+      return new Sandbox(engine, info);
+    }
+
     if (sourceOrOptions instanceof Sandbox) {
       return sourceOrOptions.fork(maybeOptions);
     }
@@ -121,6 +136,34 @@ export class Sandbox implements AsyncDisposable {
     return engine.list(options);
   }
 
+  /** List the environment's named checkpoints (newest first). */
+  static async checkpoints(
+    options: CheckpointOptions = {},
+  ): Promise<SandboxCheckpointInfo[]> {
+    return engineFromOptions(options).listCheckpoints();
+  }
+
+  /** Rename a checkpoint by id; new sandboxes boot from it via the new name. */
+  static async renameCheckpoint(
+    id: string,
+    name: string,
+    options: CheckpointOptions = {},
+  ): Promise<SandboxCheckpointInfo> {
+    const trimmed = name.trim();
+    if (trimmed === "") {
+      throw new TypeError("Checkpoint name must be a non-empty string.");
+    }
+    return engineFromOptions(options).renameCheckpoint(id, trimmed);
+  }
+
+  /** Delete a checkpoint by id (find it by `key` via `Sandbox.checkpoints`). */
+  static async deleteCheckpoint(
+    id: string,
+    options: CheckpointOptions = {},
+  ): Promise<void> {
+    await engineFromOptions(options).deleteCheckpoint(id);
+  }
+
   /**
    * Run a command. Awaiting the handle resolves the final `ExecResult` —
    * short commands return directly, long-running ones transparently stream
@@ -143,6 +186,19 @@ export class Sandbox implements AsyncDisposable {
   async fork(options?: ForkOptions): Promise<Sandbox> {
     const info = await this.#engine.fork(this.id, options);
     return new Sandbox(this.#engine, info);
+  }
+
+  /**
+   * Capture this sandbox's current disk into a reusable named checkpoint,
+   * bootable as soon as this resolves. The sandbox must be running and the
+   * name unused. Boot new sandboxes from it with `Sandbox.create(name)`.
+   */
+  async checkpoint(name: string): Promise<SandboxCheckpointInfo> {
+    const trimmed = name.trim();
+    if (trimmed === "") {
+      throw new TypeError("Checkpoint name must be a non-empty string.");
+    }
+    return this.#engine.checkpoint(this.id, trimmed);
   }
 
   async destroy(): Promise<void> {

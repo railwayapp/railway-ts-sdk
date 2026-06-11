@@ -10,8 +10,20 @@ import {
   RailwaySandboxDestroyDocument,
   RailwaySandboxDocument,
   RailwaySandboxesDocument,
+  RailwaySandboxCheckpointCreateDocument,
+  RailwaySandboxCheckpointDeleteDocument,
+  RailwaySandboxCheckpointRenameDocument,
+  RailwaySandboxCheckpointsDocument,
   RailwaySandboxTemplateBuildDocument,
-  RailwaySandboxTemplateDocument,
+  RailwaySandboxTemplateBuildStatusDocument,
+  type RailwaySandboxCheckpointCreateMutation,
+  type RailwaySandboxCheckpointCreateMutationVariables,
+  type RailwaySandboxCheckpointDeleteMutation,
+  type RailwaySandboxCheckpointDeleteMutationVariables,
+  type RailwaySandboxCheckpointRenameMutation,
+  type RailwaySandboxCheckpointRenameMutationVariables,
+  type RailwaySandboxCheckpointsQuery,
+  type RailwaySandboxCheckpointsQueryVariables,
   type RailwaySandboxCreateMutation,
   type RailwaySandboxCreateMutationVariables,
   type RailwaySandboxDestroyMutation,
@@ -22,8 +34,8 @@ import {
   type RailwaySandboxQueryVariables,
   type RailwaySandboxTemplateBuildMutation,
   type RailwaySandboxTemplateBuildMutationVariables,
-  type RailwaySandboxTemplateQuery,
-  type RailwaySandboxTemplateQueryVariables,
+  type RailwaySandboxTemplateBuildStatusQuery,
+  type RailwaySandboxTemplateBuildStatusQueryVariables,
   type SandboxTemplateInput,
 } from "../generated/graphql.js";
 import {
@@ -40,9 +52,11 @@ import type {
   ExecTarget,
   ForkOptions,
   ListOptions,
+  SandboxCheckpointInfo,
   SandboxCreationOptions,
   SandboxInfo,
-  SandboxTemplateInfo,
+  SandboxTemplateBuildInfo,
+  TemplateSource,
 } from "./types.js";
 
 const READINESS_TIMEOUT_MS = 5 * 60_000;
@@ -76,14 +90,14 @@ export class SandboxEngine {
 
   async create(
     options: CreateOptions = {},
-    template?: CompiledTemplate,
+    template?: TemplateSource,
   ): Promise<SandboxInfo> {
     const input: RailwaySandboxCreateMutationVariables["input"] = {
       environmentId: this.#config.environmentId,
     };
     if (template !== undefined) {
-      // Echo the template's build-time variables so the backend hash matches
-      // the built snapshot and forks from it.
+      // For a compiled recipe, echo its build-time variables so the backend
+      // hash matches the built snapshot and forks from it.
       input.template = toTemplateInput(template);
     }
 
@@ -129,7 +143,9 @@ export class SandboxEngine {
     return this.#waitForRunning(data.sandboxCreate);
   }
 
-  async buildTemplate(template: CompiledTemplate): Promise<SandboxTemplateInfo> {
+  async buildTemplate(
+    template: CompiledTemplate,
+  ): Promise<SandboxTemplateBuildInfo> {
     const variables: RailwaySandboxTemplateBuildMutationVariables = {
       environmentId: this.#config.environmentId,
       input: toTemplateInput(template),
@@ -142,56 +158,127 @@ export class SandboxEngine {
     return data.sandboxTemplateBuild;
   }
 
-  async getTemplate(id: string): Promise<SandboxTemplateInfo> {
-    const variables: RailwaySandboxTemplateQueryVariables = {
+  async getTemplateBuild(id: string): Promise<SandboxTemplateBuildInfo> {
+    const variables: RailwaySandboxTemplateBuildStatusQueryVariables = {
       id,
       environmentId: this.#config.environmentId,
     };
     const data = await requestGraphQL<
-      RailwaySandboxTemplateQuery,
-      RailwaySandboxTemplateQueryVariables
-    >(this.#config, RailwaySandboxTemplateDocument, variables);
+      RailwaySandboxTemplateBuildStatusQuery,
+      RailwaySandboxTemplateBuildStatusQueryVariables
+    >(this.#config, RailwaySandboxTemplateBuildStatusDocument, variables);
 
-    return data.sandboxTemplate;
+    return data.sandboxTemplateBuild;
   }
 
   async buildTemplateUntilReady(
     template: CompiledTemplate,
-  ): Promise<SandboxTemplateInfo> {
+  ): Promise<SandboxTemplateBuildInfo> {
     const varCount = template.variables
       ? Object.keys(template.variables).length
       : 0;
     this.#config.log(
       `build template (${template.instructions.length} steps, vars=${varCount})`,
     );
-    const built = await this.buildTemplate(template);
-    if (built.status === "READY") {
-      this.#config.log(`template ${built.id} ready (cached)`);
-      return built;
+    return this.#waitForBuildReady(await this.buildTemplate(template));
+  }
+
+  /**
+   * Capture a running sandbox's disk into a named checkpoint. Synchronous on
+   * the backend: the checkpoint is bootable when this resolves.
+   */
+  async checkpoint(
+    sandboxId: string,
+    name: string,
+  ): Promise<SandboxCheckpointInfo> {
+    this.#config.log(`checkpoint sandbox ${sandboxId} -> "${name}"`);
+    const variables: RailwaySandboxCheckpointCreateMutationVariables = {
+      environmentId: this.#config.environmentId,
+      name,
+      sandboxId,
+    };
+    const data = await requestGraphQL<
+      RailwaySandboxCheckpointCreateMutation,
+      RailwaySandboxCheckpointCreateMutationVariables
+    >(this.#config, RailwaySandboxCheckpointCreateDocument, variables);
+
+    this.#config.log(`checkpoint ${data.sandboxCheckpointCreate.id} ready`);
+    return data.sandboxCheckpointCreate;
+  }
+
+  async listCheckpoints(): Promise<SandboxCheckpointInfo[]> {
+    const data = await requestGraphQL<
+      RailwaySandboxCheckpointsQuery,
+      RailwaySandboxCheckpointsQueryVariables
+    >(this.#config, RailwaySandboxCheckpointsDocument, {
+      environmentId: this.#config.environmentId,
+    });
+
+    return data.sandboxCheckpoints;
+  }
+
+  async renameCheckpoint(
+    id: string,
+    name: string,
+  ): Promise<SandboxCheckpointInfo> {
+    this.#config.log(`rename checkpoint ${id} -> "${name}"`);
+    const data = await requestGraphQL<
+      RailwaySandboxCheckpointRenameMutation,
+      RailwaySandboxCheckpointRenameMutationVariables
+    >(this.#config, RailwaySandboxCheckpointRenameDocument, {
+      environmentId: this.#config.environmentId,
+      id,
+      name,
+    });
+
+    return data.sandboxCheckpointRename;
+  }
+
+  async deleteCheckpoint(id: string): Promise<void> {
+    this.#config.log(`delete checkpoint ${id}`);
+    await requestGraphQL<
+      RailwaySandboxCheckpointDeleteMutation,
+      RailwaySandboxCheckpointDeleteMutationVariables
+    >(this.#config, RailwaySandboxCheckpointDeleteDocument, {
+      environmentId: this.#config.environmentId,
+      id,
+    });
+  }
+
+  /**
+   * Resolves once the build is READY (its checkpoint exists). PENDING (no
+   * workflow yet) and BUILDING keep polling; only FAILED is terminal.
+   */
+  async #waitForBuildReady(
+    build: SandboxTemplateBuildInfo,
+  ): Promise<SandboxTemplateBuildInfo> {
+    if (build.status === "READY") {
+      this.#config.log(`template build ${build.id} ready (cached)`);
+      return build;
     }
-    if (built.status === "FAILED") {
+    if (build.status === "FAILED") {
       throw new SandboxTemplateBuildError({
-        templateId: built.id,
+        templateId: build.id,
         environmentId: this.environmentId,
       });
     }
 
     return this.#pollUntilReady({
-      poll: () => this.getTemplate(built.id),
-      isReady: template => template.status === "READY",
-      isTerminal: template => template.status === "FAILED",
-      describe: template => `template ${template.id} status=${template.status}`,
-      onTerminal: template => {
+      poll: () => this.getTemplateBuild(build.id),
+      isReady: build => build.status === "READY",
+      isTerminal: build => build.status === "FAILED",
+      describe: build => `template build ${build.id} status=${build.status}`,
+      onTerminal: build => {
         throw new SandboxTemplateBuildError({
-          templateId: template.id,
+          templateId: build.id,
           environmentId: this.environmentId,
         });
       },
-      onTimeout: template => {
+      onTimeout: build => {
         throw new SandboxTimeoutError({
           resource: "template",
-          id: template.id,
-          lastStatus: template.status,
+          id: build.id,
+          lastStatus: build.status,
           timeoutMs: READINESS_TIMEOUT_MS,
         });
       },
@@ -327,22 +414,30 @@ function isSandboxTerminal(status: SandboxInfo["status"]): boolean {
   return status === "FAILED" || status === "DESTROYED" || status === "DESTROYING";
 }
 
-function toTemplateInput(template: CompiledTemplate): SandboxTemplateInput {
+function toTemplateInput(template: TemplateSource): SandboxTemplateInput {
+  if ("name" in template) {
+    return { name: template.name };
+  }
   return {
     instructions: [...template.instructions],
     ...(template.variables && { variables: template.variables }),
   };
 }
 
+function creationKind(
+  input: RailwaySandboxCreateMutationVariables["input"],
+): string {
+  if (input.sourceSandboxId) return "fork";
+  if (input.template?.name) return "create-from-checkpoint";
+  if (input.template) return "create-from-template";
+  return "create";
+}
+
 /** Verbose line for a create/fork/template create. Logs env key names, never values. */
 function creationLine(
   input: RailwaySandboxCreateMutationVariables["input"],
 ): string {
-  const kind = input.sourceSandboxId
-    ? "fork"
-    : input.template
-      ? "create-from-template"
-      : "create";
+  const kind = creationKind(input);
   const envKeys = input.variables ? Object.keys(input.variables) : [];
   const parts = [
     kind,
@@ -352,6 +447,7 @@ function creationLine(
     `envKeys=[${envKeys.join(",")}]`,
   ];
   if (input.sourceSandboxId) parts.push(`source=${input.sourceSandboxId}`);
+  if (input.template?.name) parts.push(`checkpoint="${input.template.name}"`);
   return parts.join(" ");
 }
 
