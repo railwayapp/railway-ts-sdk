@@ -157,15 +157,9 @@ export class SandboxFiles {
         await this.#writeOnce(target, start, source);
         break;
       } catch (error) {
-        // A dropped session — or the server losing its own stream to the
-        // sandbox — is retriable when the source can be replayed (the file
-        // is truncated again by the next write_start). One-shot streams
-        // can't be, so the error surfaces.
-        const retriable =
-          (error instanceof RailwayConnectionError || isTransientRemote(error)) &&
-          source.replayable &&
-          ++retries <= TRANSFER_MAX_RETRIES;
-        if (!retriable) throw this.#wrapError("write", target, error);
+        if (!canRetryWrite(error, source.replayable, ++retries)) {
+          throw this.#wrapError("write", target, error);
+        }
         this.#log(`files write ${target} retrying after connection loss`);
         await sleep(TRANSFER_RETRY_DELAY_MS);
       }
@@ -479,6 +473,23 @@ function requireIntegerAtLeast(
 }
 
 /**
+ * A dropped session — or the server losing its own stream to the sandbox —
+ * is retriable when the source can be replayed (the file is truncated again
+ * by the next write_start). One-shot streams can't be, so the error surfaces.
+ */
+function canRetryWrite(
+  error: unknown,
+  replayable: boolean,
+  retries: number,
+): boolean {
+  return (
+    (error instanceof RailwayConnectionError || isTransientRemote(error)) &&
+    replayable &&
+    retries <= TRANSFER_MAX_RETRIES
+  );
+}
+
+/**
  * Whether a failed pull attempt may resume: only transport-level failures
  * (dropped session or the server losing its stream to the sandbox), never a
  * direct (unsegmented) read that already delivered bytes — re-reading those
@@ -717,14 +728,25 @@ function uploadSource(data: FileWriteData): {
   if (isAsyncIterable(data)) {
     return { chunks: () => data, size: 0, replayable: false };
   }
+  if (typeof data === "function") {
+    // A factory produces fresh content per call, so the write may retry.
+    return { chunks: () => producedChunks(data()), size: 0, replayable: true };
+  }
   throw new TypeError(
     "Unsupported write data: pass a string, Uint8Array, ArrayBuffer, Blob, " +
-      "ReadableStream, or AsyncIterable of Uint8Array.",
+      "ReadableStream, AsyncIterable of Uint8Array, or a function returning " +
+      "a stream or iterable.",
   );
 }
 
 async function* single(bytes: Uint8Array): AsyncGenerator<Uint8Array> {
   if (bytes.length > 0) yield bytes;
+}
+
+function producedChunks(
+  produced: ReadableStream<Uint8Array> | AsyncIterable<Uint8Array>,
+): AsyncIterable<Uint8Array> {
+  return produced instanceof ReadableStream ? streamChunks(produced) : produced;
 }
 
 async function* streamChunks(

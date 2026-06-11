@@ -131,7 +131,10 @@ export interface FileReadOptions {
 
 /**
  * Content accepted by `files.write`. Streams and async iterables upload
- * without buffering, so arbitrarily large pushes stay memory-bounded.
+ * without buffering, so arbitrarily large pushes stay memory-bounded — but
+ * they are one-shot: a dropped session can't be retried. Pass a factory
+ * (`() => stream`) when the content can be produced again; the write is then
+ * retried automatically like the in-memory forms.
  */
 export type FileWriteData =
   | string
@@ -139,7 +142,8 @@ export type FileWriteData =
   | ArrayBuffer
   | Blob
   | ReadableStream<Uint8Array>
-  | AsyncIterable<Uint8Array>;
+  | AsyncIterable<Uint8Array>
+  | (() => ReadableStream<Uint8Array> | AsyncIterable<Uint8Array>);
 
 export interface FileWriteOptions {
   /**

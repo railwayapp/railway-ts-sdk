@@ -3,11 +3,9 @@ import { createHash, randomBytes } from "node:crypto";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import {
-  RailwayConnectionError,
   RailwayGraphQLError,
   Sandbox,
   SandboxFileNotFoundError,
-  SandboxFilesError,
   SandboxNotFoundError,
   type ExecHandle,
 } from "../src/index.js";
@@ -307,31 +305,20 @@ describe.runIf(live)("files e2e (live)", () => {
     const chunkBytes = 1024 * 1024;
     const chunkCount = 24;
 
-    // One-shot stream sources surface server session drops as connection
-    // errors by contract (no auto-retry). The server is known to drop a
-    // fraction of long upload sessions, so retry at the test level with a
-    // fresh generator; content integrity is what's under test here.
-    let pushHash!: ReturnType<typeof createHash>;
-    for (let attempt = 1; ; attempt++) {
-      pushHash = createHash("sha256");
-      async function* source(): AsyncGenerator<Uint8Array> {
-        for (let i = 0; i < chunkCount; i++) {
-          const chunk = randomBytes(chunkBytes);
-          pushHash.update(chunk);
-          yield new Uint8Array(chunk);
-        }
-      }
-      try {
-        await sandbox.files.write("/tmp/large.bin", source());
-        break;
-      } catch (error) {
-        const transient =
-          error instanceof RailwayConnectionError ||
-          (error instanceof SandboxFilesError &&
-            /connection lost/i.test(error.message));
-        if (!transient || attempt >= 4) throw error;
-      }
-    }
+    // A factory source is replayable, so the SDK itself retries the push if
+    // the server drops the session mid-transfer (a known failure mode of
+    // long uploads). Content is pre-generated so the hash is attempt-stable.
+    const chunks = Array.from({ length: chunkCount }, () =>
+      randomBytes(chunkBytes),
+    );
+    const pushHash = createHash("sha256");
+    for (const chunk of chunks) pushHash.update(chunk);
+
+    await sandbox.files.write("/tmp/large.bin", () =>
+      (async function* () {
+        for (const chunk of chunks) yield new Uint8Array(chunk);
+      })(),
+    );
 
     const entry = await sandbox.files.stat("/tmp/large.bin");
     expect(entry.size).toBe(chunkBytes * chunkCount);

@@ -110,16 +110,18 @@ const bytes = await sandbox.files.read("/data/model.bin", { format: "bytes" }); 
 await sandbox.files.write("/app/run.sh", "#!/bin/sh\n...", { mode: 0o755 });
 ```
 
-`write` accepts a `string`, `Uint8Array`, `ArrayBuffer`, `Blob`, `ReadableStream`, or any
-`AsyncIterable<Uint8Array>`, and creates missing parent directories automatically.
-Strings, bytes, and blobs are retried automatically if the connection drops mid-transfer.
-Stream sources are one-shot: a drop surfaces `RailwayConnectionError` and may leave a
-partial file. Streams upload without buffering, so a large file can be pushed from disk:
+`write` accepts a `string`, `Uint8Array`, `ArrayBuffer`, `Blob`, `ReadableStream`, any
+`AsyncIterable<Uint8Array>`, or a function returning a stream or iterable. It creates
+missing parent directories automatically. Strings, bytes, blobs, and function sources are
+retried automatically if the connection drops mid-transfer. A bare stream is one-shot: a
+drop surfaces `RailwayConnectionError` and may leave a partial file. Streams upload
+without buffering, so a large file can be pushed from disk; prefer the function form so
+a retry can read a fresh stream:
 
 ```ts
 import { createReadStream } from "node:fs";
 
-await sandbox.files.write("/data/dataset.bin", createReadStream("./dataset.bin"));
+await sandbox.files.write("/data/dataset.bin", () => createReadStream("./dataset.bin"));
 ```
 
 Pull large files as a stream (cancelling the stream aborts the transfer), or read a

@@ -680,6 +680,29 @@ describe("files.write", () => {
     await expect(promise).resolves.toBeUndefined();
   }, 15_000);
 
+  it("retries a factory stream source with fresh content after a drop", async () => {
+    const { sandbox, ws } = await filesSandbox(2);
+    let calls = 0;
+    const promise = sandbox.files.write("/f.bin", () => {
+      calls++;
+      const attempt = calls;
+      return (async function* () {
+        yield enc(`attempt-${attempt}`);
+      })();
+    });
+
+    const first = await ws.nextSocket();
+    const start = await first.nextRequest();
+    first.serverReply("write_ready", start.id!);
+    first.serverClose(1006, "gone");
+
+    const second = await ws.nextSocket();
+    await acceptWrite(second, 1);
+    expect(calls).toBe(2);
+    expect(second.sentBinary[0]?.payload).toEqual(enc("attempt-2"));
+    await expect(promise).resolves.toBeUndefined();
+  }, 15_000);
+
   it("does not retry one-shot stream sources after a drop", async () => {
     const { sandbox, ws } = await filesSandbox();
     async function* chunks() {

@@ -17,14 +17,16 @@ await runExample(async () => {
   });
   console.log("exec:", (await sandbox.exec("/app/run.sh")).stdout.trim());
 
-  // Push a large payload from an async iterable — nothing is buffered, so
-  // this works for files far bigger than memory.
+  // Push a large payload from an async iterable: nothing is buffered, so
+  // this works for files far bigger than memory. Passing the generator
+  // function (not a generator) makes the source replayable, letting the SDK
+  // retry the push if the session drops mid-transfer.
   const chunk = new Uint8Array(1024 * 1024).fill(7);
   async function* source() {
     for (let i = 0; i < 16; i++) yield chunk;
   }
   console.time("push 16MB");
-  await sandbox.files.write("/data/large.bin", source());
+  await sandbox.files.write("/data/large.bin", source);
   console.timeEnd("push 16MB");
 
   // Pull it back as a stream and count the bytes.
