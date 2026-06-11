@@ -255,6 +255,9 @@ function graphFromCurrentEnvironment(current: CurrentEnvironmentResult, desiredG
     projectName: current.projectName ?? desiredGraph.project.name,
     serviceNamesById: current.serviceNamesById,
     bucketNamesById: current.bucketNamesById,
+    groupNamesById: current.groupNamesById,
+    serviceGroupIdsById: current.serviceGroupIdsById,
+    bucketGroupIdsById: current.bucketGroupIdsById,
     customDomainsByServiceId: current.customDomainsByServiceId,
   });
 }

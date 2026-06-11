@@ -19,6 +19,9 @@ export interface CurrentEnvironmentResult {
   config: EnvironmentConfig;
   serviceNamesById: Record<string, string>;
   bucketNamesById: Record<string, string>;
+  groupNamesById: Record<string, string>;
+  serviceGroupIdsById: Record<string, string>;
+  bucketGroupIdsById: Record<string, string>;
   customDomainsByServiceId: Record<string, Record<string, { port?: number }>>;
 }
 
@@ -52,9 +55,10 @@ export interface ChangeSetApplyResult {
   stagedPatchId?: string | null;
 }
 
-export interface ProjectService { id: string; name: string }
+export interface ProjectService { id: string; name: string; groupId?: string | null }
 export interface ProjectVolume { id: string; name?: string | null; serviceId?: string | null }
-export interface ProjectBucket { id: string; name: string }
+export interface ProjectBucket { id: string; name: string; groupId?: string | null }
+export interface ProjectGroup { id: string; name: string }
 
 export interface EnsuredGraphResources {
   serviceIdsByName: Record<string, string>;
@@ -76,17 +80,22 @@ export class IacClient {
       environment(id: $environmentId) { id name projectId config(decryptVariables: $decryptVariables) }
     }`, { environmentId, decryptVariables: options.decryptVariables ?? false });
 
+    const projectName = data.environment.projectId ? await this.getProjectName(data.environment.projectId) : undefined;
     const services = data.environment.projectId ? await this.getProjectServices(data.environment.projectId) : [];
     const buckets = data.environment.projectId ? await this.getProjectBuckets(data.environment.projectId) : [];
+    const groups = data.environment.projectId ? await this.getProjectGroups(data.environment.projectId) : [];
     const customDomainsByServiceId = data.environment.projectId ? await this.getEnvironmentCustomDomains(data.environment.projectId, environmentId, services) : {};
     return {
       projectId: data.environment.projectId,
-      projectName: undefined,
+      projectName,
       environmentId: data.environment.id,
       environmentName: data.environment.name,
       config: data.environment.config ?? {},
       serviceNamesById: Object.fromEntries(services.map(service => [service.id, service.name])),
       bucketNamesById: Object.fromEntries(buckets.map(bucket => [bucket.id, bucket.name])),
+      groupNamesById: Object.fromEntries(groups.map(group => [group.id, group.name])),
+      serviceGroupIdsById: Object.fromEntries(services.filter(service => service.groupId).map(service => [service.id, service.groupId!])),
+      bucketGroupIdsById: Object.fromEntries(buckets.filter(bucket => bucket.groupId).map(bucket => [bucket.id, bucket.groupId!])),
       customDomainsByServiceId,
     };
   }
@@ -98,18 +107,32 @@ export class IacClient {
     return data.environmentStagedChanges;
   }
 
+  async getProjectName(projectId: string): Promise<string | undefined> {
+    const data = await gql<{ project: { name?: string | null } }, { projectId: string }>(this.#config, `query IacProjectName($projectId: String!) {
+      project(id: $projectId) { name }
+    }`, { projectId });
+    return data.project.name ?? undefined;
+  }
+
   async getProjectServices(projectId: string): Promise<ProjectService[]> {
     const data = await gql<{ project: { services: { edges: Array<{ node: ProjectService }> } } }, { projectId: string }>(this.#config, `query IacProjectServices($projectId: String!) {
-      project(id: $projectId) { services(first: 1000) { edges { node { id name } } } }
+      project(id: $projectId) { services(first: 1000) { edges { node { id name groupId } } } }
     }`, { projectId });
     return data.project.services.edges.map(edge => edge.node);
   }
 
   async getProjectBuckets(projectId: string): Promise<ProjectBucket[]> {
     const data = await gql<{ project: { buckets: { edges: Array<{ node: ProjectBucket }> } } }, { projectId: string }>(this.#config, `query IacProjectBuckets($projectId: String!) {
-      project(id: $projectId) { buckets(first: 1000) { edges { node { id name } } } }
+      project(id: $projectId) { buckets(first: 1000) { edges { node { id name groupId } } } }
     }`, { projectId });
     return data.project.buckets.edges.map(edge => edge.node);
+  }
+
+  async getProjectGroups(projectId: string): Promise<ProjectGroup[]> {
+    const data = await gql<{ project: { groups: { edges: Array<{ node: ProjectGroup }> } } }, { projectId: string }>(this.#config, `query IacProjectGroups($projectId: String!) {
+      project(id: $projectId) { groups(first: 1000) { edges { node { id name } } } }
+    }`, { projectId });
+    return data.project.groups.edges.map(edge => edge.node);
   }
 
   async getEnvironmentCustomDomains(projectId: string, environmentId: string, services: ProjectService[]): Promise<Record<string, Record<string, { port?: number }>>> {

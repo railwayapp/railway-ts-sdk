@@ -9,7 +9,7 @@ import type {
   ServiceNode,
   VariableValue,
 } from "./graph.js";
-import type { EnvironmentConfig, ServiceConfig, ServiceNetworking, VariableConfig, VariableValues } from "./schema.js";
+import type { DeployConfig, EnvironmentConfig, ServiceConfig, ServiceNetworking, VariableConfig, VariableValues } from "./schema.js";
 
 export function projectDefinitionToGraph(definition: ProjectDefinition): RailwayGraph {
   const resources = (definition.resources ?? definition.services ?? []).flat();
@@ -62,8 +62,9 @@ export function graphToEnvironmentConfig(graph: RailwayGraph, options: GraphComp
 
       const volumeId = options.volumeIdsByServiceName?.[resource.name];
       if (resource.type === "database" && volumeId != null) {
+        const region = databaseRegion(resource);
         config.volumes = config.volumes ?? {};
-        config.volumes[volumeId] = { isCreated: true };
+        config.volumes[volumeId] = { isCreated: true, ...(region ? { region } : {}) };
       }
       continue;
     }
@@ -99,12 +100,23 @@ export function graphToEnvironmentConfig(graph: RailwayGraph, options: GraphComp
 
 export function environmentConfigToGraph(
   config: EnvironmentConfig,
-  options: { projectName?: string; serviceNamesById?: Record<string, string>; bucketNamesById?: Record<string, string>; customDomainsByServiceId?: Record<string, Record<string, { port?: number }>> } = {},
+  options: {
+    projectName?: string;
+    serviceNamesById?: Record<string, string>;
+    bucketNamesById?: Record<string, string>;
+    groupNamesById?: Record<string, string>;
+    serviceGroupIdsById?: Record<string, string>;
+    bucketGroupIdsById?: Record<string, string>;
+    customDomainsByServiceId?: Record<string, Record<string, { port?: number }>>;
+  } = {},
 ): RailwayGraph {
   const resources: ResourceNode[] = [];
-  const groupNamesById = Object.fromEntries(
-    Object.entries(config.groups ?? {}).map(([groupId, groupConfig]) => [groupId, groupConfig?.name ?? groupId]),
-  );
+  const groupNamesById = {
+    ...options.groupNamesById,
+    ...Object.fromEntries(
+      Object.entries(config.groups ?? {}).map(([groupId, groupConfig]) => [groupId, groupConfig?.name ?? groupId]),
+    ),
+  };
 
   for (const [groupId, groupConfig] of Object.entries(config.groups ?? {})) {
     if (groupConfig == null || groupConfig.isDeleted) continue;
@@ -137,8 +149,9 @@ export function environmentConfigToGraph(
         image: imageName ?? "postgres:16",
         output: engine === "redis" ? "REDIS_URL" : engine === "mysql" ? "MYSQL_URL" : engine === "mongo" ? "MONGO_URL" : "DATABASE_URL",
         defaultMountPath: Object.keys(serviceConfig.volumeMounts ?? {}).length > 0 ? serviceConfig.deploy?.requiredMountPath : undefined,
+        ...(serviceConfig.deploy ? { deploy: serviceConfig.deploy } : {}),
         ...(serviceConfig.volumeMounts ? { volumeMounts: serviceConfig.volumeMounts } : {}),
-        ...(serviceConfig.groupId ? { groupId: groupNamesById[serviceConfig.groupId] ?? serviceConfig.groupId } : {}),
+        ...groupRef(options.serviceGroupIdsById?.[serviceId] ?? serviceConfig.groupId, groupNamesById),
       }) as ResourceNode);
       continue;
     }
@@ -154,20 +167,20 @@ export function environmentConfigToGraph(
       ...(serviceConfig.networking || options.customDomainsByServiceId?.[serviceId] ? { networking: pruneEmpty({ ...serviceConfig.networking, customDomains: options.customDomainsByServiceId?.[serviceId] ?? serviceConfig.networking?.customDomains }) as ServiceNetworking } : {}),
       ...(serviceConfig.volumeMounts ? { volumeMounts: serviceConfig.volumeMounts } : {}),
       ...(serviceConfig.configFile ? { configFile: serviceConfig.configFile } : {}),
-      ...(serviceConfig.groupId ? { groupId: groupNamesById[serviceConfig.groupId] ?? serviceConfig.groupId } : {}),
+      ...groupRef(options.serviceGroupIdsById?.[serviceId] ?? serviceConfig.groupId, groupNamesById),
     });
   }
 
   for (const [bucketId, bucketConfig] of Object.entries(config.buckets ?? {})) {
     if (bucketConfig == null || bucketConfig.isDeleted) continue;
     const name = options.bucketNamesById?.[bucketId] ?? bucketId;
-    const groupId = (bucketConfig as { groupId?: string | null }).groupId;
+    const groupId = options.bucketGroupIdsById?.[bucketId] ?? (bucketConfig as { groupId?: string | null }).groupId;
     resources.push({
       address: resourceAddress("bucket", name) as `bucket.${string}`,
       type: "bucket",
       name,
       config: bucketConfig,
-      ...(groupId ? { groupId: groupNamesById[groupId] ?? groupId } : {}),
+      ...groupRef(groupId, groupNamesById),
     });
   }
 
@@ -203,19 +216,36 @@ function addDeletionMarkers({ currentConfig, desiredConfig }: { currentConfig: E
   return next;
 }
 
+function groupRef(groupId: string | null | undefined, groupNamesById: Record<string, string>): { groupId?: string } {
+  return groupId ? { groupId: groupNamesById[groupId] ?? groupId } : {};
+}
+
+function databaseRegion(database: DatabaseNode): string | undefined {
+  const regions = Object.entries(database.deploy?.multiRegionConfig ?? {}).filter(([, config]) => config != null);
+  if (regions.length !== 1) return undefined;
+  return regions[0]?.[0];
+}
+
+function databaseDeploy(database: DatabaseNode, requiredMountPath: string): DeployConfig {
+  return {
+    requiredMountPath,
+    ...(database.deploy?.multiRegionConfig ? { multiRegionConfig: database.deploy.multiRegionConfig } : {}),
+  };
+}
+
 function databaseToEnvironmentConfig(database: DatabaseNode, options: { isNew: boolean; volumeId?: string }): ServiceConfig {
   if (database.engine !== "postgres") {
     return pruneEmpty({
       ...(options.isNew ? { isCreated: true } : {}),
       source: { image: database.image },
-      ...(database.defaultMountPath ? { deploy: { requiredMountPath: database.defaultMountPath } } : {}),
+      ...(database.defaultMountPath ? { deploy: databaseDeploy(database, database.defaultMountPath) } : {}),
       ...(options.volumeId && database.defaultMountPath ? { volumeMounts: { [options.volumeId]: { mountPath: database.defaultMountPath } } } : {}),
     });
   }
   return pruneEmpty({
     ...(options.isNew ? { isCreated: true } : {}),
     source: { image: database.image },
-    deploy: { requiredMountPath: "/var/lib/postgresql/data" },
+    deploy: databaseDeploy(database, "/var/lib/postgresql/data"),
     variables: {
       PGDATA: { value: "/var/lib/postgresql/data/pgdata" },
       PGHOST: { value: "${{RAILWAY_PRIVATE_DOMAIN}}" },
