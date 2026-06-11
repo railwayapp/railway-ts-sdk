@@ -76,12 +76,13 @@ export class IacClient {
       environment(id: $environmentId) { id name projectId config(decryptVariables: $decryptVariables) }
     }`, { environmentId, decryptVariables: options.decryptVariables ?? false });
 
+    const projectName = data.environment.projectId ? await this.getProjectName(data.environment.projectId) : undefined;
     const services = data.environment.projectId ? await this.getProjectServices(data.environment.projectId) : [];
     const buckets = data.environment.projectId ? await this.getProjectBuckets(data.environment.projectId) : [];
     const customDomainsByServiceId = data.environment.projectId ? await this.getEnvironmentCustomDomains(data.environment.projectId, environmentId, services) : {};
     return {
       projectId: data.environment.projectId,
-      projectName: undefined,
+      projectName,
       environmentId: data.environment.id,
       environmentName: data.environment.name,
       config: data.environment.config ?? {},
@@ -96,6 +97,13 @@ export class IacClient {
       environmentStagedChanges(environmentId: $environmentId) { id status patch(decryptVariables: $decryptVariables) meta }
     }`, { environmentId, decryptVariables: options.decryptVariables ?? false });
     return data.environmentStagedChanges;
+  }
+
+  async getProjectName(projectId: string): Promise<string | undefined> {
+    const data = await gql<{ project: { name?: string | null } }, { projectId: string }>(this.#config, `query IacProjectName($projectId: String!) {
+      project(id: $projectId) { name }
+    }`, { projectId });
+    return data.project.name ?? undefined;
   }
 
   async getProjectServices(projectId: string): Promise<ProjectService[]> {
