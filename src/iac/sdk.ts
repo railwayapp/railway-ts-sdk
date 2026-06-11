@@ -167,30 +167,35 @@ export function fn<const Env extends Record<string, string | VariableConfig | Va
   return withVariableRefs({ ...service(name, config), kind: "function" } as ServiceNode) as ReferencableServiceNode<RailwayProvidedVariable | Extract<keyof Env, string>>;
 }
 
-export function postgres(name: string): ReferencableDatabaseNode<"postgres"> {
+export interface DatabaseConfig {
+  region?: string;
+}
+
+export function postgres(name: string, config: DatabaseConfig = {}): ReferencableDatabaseNode<"postgres"> {
   return database(name, "postgres", {
     image: "ghcr.io/railwayapp-templates/postgres-ssl:18",
     output: "DATABASE_URL",
     defaultMountPath: "/var/lib/postgresql/data",
+    ...config,
   });
 }
 
-export function mysql(name: string): ReferencableDatabaseNode<"mysql"> {
-  return database(name, "mysql", { image: "mysql:9", output: "MYSQL_URL", defaultMountPath: "/var/lib/mysql" });
+export function mysql(name: string, config: DatabaseConfig = {}): ReferencableDatabaseNode<"mysql"> {
+  return database(name, "mysql", { image: "mysql:9", output: "MYSQL_URL", defaultMountPath: "/var/lib/mysql", ...config });
 }
 
-export function redis(name: string): ReferencableDatabaseNode<"redis"> {
-  return database(name, "redis", { image: "railwayapp/redis:8.2", output: "REDIS_URL", defaultMountPath: "/bitnami" });
+export function redis(name: string, config: DatabaseConfig = {}): ReferencableDatabaseNode<"redis"> {
+  return database(name, "redis", { image: "railwayapp/redis:8.2", output: "REDIS_URL", defaultMountPath: "/bitnami", ...config });
 }
 
-export function mongo(name: string): ReferencableDatabaseNode<"mongo"> {
-  return database(name, "mongo", { image: "mongo:8", output: "MONGO_URL", defaultMountPath: "/data/db" });
+export function mongo(name: string, config: DatabaseConfig = {}): ReferencableDatabaseNode<"mongo"> {
+  return database(name, "mongo", { image: "mongo:8", output: "MONGO_URL", defaultMountPath: "/data/db", ...config });
 }
 
 export function database<E extends DatabaseNode["engine"]>(
   name: string,
   engine: E,
-  options: { image: string; output?: string; defaultMountPath?: string },
+  options: { image: string; output?: string; defaultMountPath?: string; region?: string },
 ): ReferencableDatabaseNode<E> {
   const output = options.output ?? "DATABASE_URL";
   const node = {
@@ -203,6 +208,7 @@ export function database<E extends DatabaseNode["engine"]>(
     output,
     defaultMountPath: options.defaultMountPath,
     source: image(options.image),
+    ...(options.region ? { deploy: { multiRegionConfig: { [options.region]: { numReplicas: 1 } } } } : {}),
   } as DatabaseNode;
   return withVariableRefs(node) as ReferencableDatabaseNode<E>;
 }

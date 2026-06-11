@@ -116,7 +116,19 @@ export function diffGraphs({ current, desired }: { current: RailwayGraph; desire
     diffVariables({ previous, resource, changes, resourcesByAddress: desiredByAddress });
     diffTopLevelField({ previous, resource, field: "source", changes });
     diffTopLevelField({ previous, resource, field: "build", changes });
-    diffTopLevelField({ previous, resource, field: "deploy", changes });
+    if (previous.type === "database" && resource.type === "database" && databaseRegion(previous) !== databaseRegion(resource)) {
+      changes.push(update(
+        resource.address,
+        "deploy",
+        previous.deploy,
+        resource.deploy,
+        `Move database ${resource.name} to ${databaseRegion(resource) ?? "default region"}`,
+        changedLeafPaths(normalizeForDiff("deploy", previous.deploy), normalizeForDiff("deploy", resource.deploy), "deploy"),
+        "destructive",
+      ));
+    } else {
+      diffTopLevelField({ previous, resource, field: "deploy", changes });
+    }
     diffTopLevelField({ previous, resource, field: "groupId", changes });
     diffNetworking({ previous, resource, changes });
     // Volume lifecycle is not part of v0 authoring. Never plan an accidental unmount just
@@ -363,7 +375,7 @@ function flattenForDiff(value: unknown, prefix = ""): Record<string, unknown> {
   return Object.fromEntries(entries.flatMap(([key, child]) => Object.entries(flattenForDiff(child, prefix ? `${prefix}.${key}` : key))));
 }
 
-function update(address: ResourceAddress, field: string, before: unknown, after: unknown, summary: string, details?: string[]): UpdateResourceChange {
+function update(address: ResourceAddress, field: string, before: unknown, after: unknown, summary: string, details?: string[], severity: ChangeSeverity = "safe"): UpdateResourceChange {
   return {
     kind: "resource.update",
     address,
@@ -373,7 +385,7 @@ function update(address: ResourceAddress, field: string, before: unknown, after:
     ...(details && details.length > 0 ? { details } : {}),
     path: `resources.${address}.${field}`,
     summary,
-    severity: "safe",
+    severity,
     deployEffect: field === "config" || field === "groupId" ? "none" : "deploy",
   };
 }
@@ -411,6 +423,13 @@ function bucketRegion(resource: ResourceNode): string | undefined {
   if (resource.type !== "bucket") return undefined;
   const config = (resource as ResourceNode & { config?: { region?: string | null } }).config;
   return config?.region ?? undefined;
+}
+
+function databaseRegion(resource: ResourceNode): string | undefined {
+  if (resource.type !== "database") return undefined;
+  const regions = Object.entries(resource.deploy?.multiRegionConfig ?? {}).filter(([, config]) => config != null);
+  if (regions.length !== 1) return undefined;
+  return regions[0]?.[0];
 }
 
 function isEquivalentDatabaseSource(previous: ResourceNode, after: unknown): boolean {

@@ -122,8 +122,10 @@ export type VolumeConfig = {
   forkFromBaseEnvironment?: boolean | null;
 };
 
+export type BucketRegion = "sjc" | "iad" | "ams" | "sin";
+
 export type BucketConfig = {
-  region?: string | null;
+  region?: BucketRegion | null;
   isDeleted?: boolean | null;
   isCreated?: boolean | null;
 };
