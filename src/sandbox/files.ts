@@ -714,6 +714,19 @@ function uploadSource(data: FileWriteData): {
     const bytes = new Uint8Array(data);
     return { chunks: () => single(bytes), size: bytes.length, replayable: true };
   }
+  const streaming = streamingSource(data);
+  if (streaming) return streaming;
+  throw new TypeError(
+    "Unsupported write data: pass a string, Uint8Array, ArrayBuffer, Blob, " +
+      "ReadableStream, AsyncIterable of Uint8Array, or a function returning " +
+      "a stream or iterable.",
+  );
+}
+
+/** The streaming-shaped write inputs; undefined when `data` is none of them. */
+function streamingSource(data: FileWriteData):
+  | { chunks: () => AsyncIterable<Uint8Array>; size: number; replayable: boolean }
+  | undefined {
   if (typeof Blob !== "undefined" && data instanceof Blob) {
     return {
       chunks: () => streamChunks(data.stream()),
@@ -732,11 +745,7 @@ function uploadSource(data: FileWriteData): {
     // A factory produces fresh content per call, so the write may retry.
     return { chunks: () => producedChunks(data()), size: 0, replayable: true };
   }
-  throw new TypeError(
-    "Unsupported write data: pass a string, Uint8Array, ArrayBuffer, Blob, " +
-      "ReadableStream, AsyncIterable of Uint8Array, or a function returning " +
-      "a stream or iterable.",
-  );
+  return undefined;
 }
 
 async function* single(bytes: Uint8Array): AsyncGenerator<Uint8Array> {
