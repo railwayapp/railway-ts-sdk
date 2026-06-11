@@ -10,3 +10,4 @@ test/
 *.log
 .DS_Store
 .mise.local.toml
+*.tmp.ts
