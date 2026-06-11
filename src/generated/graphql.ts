@@ -49,12 +49,11 @@ export type ActiveFeatureFlag =
   | 'IN_DASHBOARD_SUPPORT'
   | 'MAGIC_CONFIG'
   | 'POSTGRES_PGBOUNCER'
-  | 'POSTGRES_PITR'
   | 'PRIORITY_BOARDING'
-  | 'PROJECT_SANDBOXES'
-  | 'TCPIP_DATABASE_CLIENT';
+  | 'PROJECT_SANDBOXES';
 
 export type ActivePlatformFlag =
+  | 'ALERT_SUS_USERS_CRON_KILLSWITCH'
   | 'BAN_APPEAL_FORM'
   | 'CHAT_SANDBOX'
   | 'CTRD_IMAGE_STORE_ROLLOUT'
@@ -70,7 +69,6 @@ export type ActivePlatformFlag =
   | 'SPLIT_USAGE_QUERIES'
   | 'STRIPE_METERS_NEW_ACCOUNTS'
   | 'STRIPE_METERS_SHADOW_ENABLED'
-  | 'TCPIP_DATABASE_CLIENT'
   | 'UPDATED_VM_QUERIES';
 
 export type ActiveProjectFeatureFlag =
@@ -355,6 +353,7 @@ export type CliAuthEventTrackInput = {
   sessionId?: InputMaybe<Scalars['String']['input']>;
   success: Scalars['Boolean']['input'];
   transport: Scalars['String']['input'];
+  transportReason?: InputMaybe<Scalars['String']['input']>;
 };
 
 export type CliEventTrackInput = {
@@ -885,6 +884,7 @@ export type EdgeConfig = {
   id: Scalars['String']['output'];
   purgeEpoch: Scalars['Int']['output'];
   purgeEpochByKind: Scalars['JSON']['output'];
+  underAttackModeUntil?: Maybe<Scalars['Int']['output']>;
 };
 
 export type EdgeConfigInput = {
@@ -905,8 +905,24 @@ export type EgressGatewayCreateInput = {
 };
 
 export type EgressGatewayServiceTargetInput = {
+  allEnvironments?: InputMaybe<Scalars['Boolean']['input']>;
   environmentId: Scalars['String']['input'];
   serviceId: Scalars['String']['input'];
+};
+
+export type EgressMigrationEnvironmentResult = {
+  __typename?: 'EgressMigrationEnvironmentResult';
+  environmentId: Scalars['String']['output'];
+  environmentName: Scalars['String']['output'];
+  error?: Maybe<Scalars['String']['output']>;
+  gateways: Array<EgressGateway>;
+  success: Scalars['Boolean']['output'];
+};
+
+export type EgressMigrationResult = {
+  __typename?: 'EgressMigrationResult';
+  environments: Array<EgressMigrationEnvironmentResult>;
+  ips: Array<EgressGateway>;
 };
 
 export type EnableServiceCdnInput = {
@@ -1237,6 +1253,12 @@ export type GitHubPrInfo = {
   mergeable?: Maybe<Scalars['Boolean']['output']>;
   state: Scalars['String']['output'];
   title: Scalars['String']['output'];
+};
+
+export type GitHubPrInfoResult = {
+  __typename?: 'GitHubPRInfoResult';
+  error?: Maybe<Scalars['String']['output']>;
+  prInfo?: Maybe<GitHubPrInfo>;
 };
 
 export type GitHubRepo = {
@@ -1683,9 +1705,11 @@ export type Mutation = {
   egressGatewayAssociationCreate: Array<EgressGateway>;
   /** Clear all egress gateway associations for a service instance */
   egressGatewayAssociationsClear: Scalars['Boolean']['output'];
-  /** Rollback from HA static IPs to legacy. Creates legacy association, clears HA, and redeploys. */
+  /** Preview the HA static egress IPs that would be assigned, without applying them. Set allEnvironments to cover all of the service's environments. */
+  egressGatewayHAMigrationPreview: EgressMigrationResult;
+  /** Switch a service from HA static egress IPs back to a standard static IP. Set allEnvironments to apply to all of the service's environments. */
   egressGatewayRollbackFromHA: Array<EgressGateway>;
-  /** Upgrade static IPs from legacy to HA. Creates HA associations, clears legacy, and redeploys. */
+  /** Enable HA static egress IPs for a service. Set allEnvironments to apply to all of the service's environments. */
   egressGatewayUpgradeToHA: Array<EgressGateway>;
   /** Change the User's account email if there is a valid change email request. */
   emailChangeConfirm: Scalars['Boolean']['output'];
@@ -1871,6 +1895,12 @@ export type Mutation = {
   recoveryCodeValidate: Scalars['Boolean']['output'];
   /** Updates the ReferralInfo for the authenticated user. */
   referralInfoUpdate: ReferralInfo;
+  /** Capture a running sandbox's current disk into a reusable, named checkpoint. Synchronous: the checkpoint is ready when this returns. */
+  sandboxCheckpointCreate: SandboxCheckpoint;
+  /** Delete a sandbox checkpoint. */
+  sandboxCheckpointDelete: Scalars['Boolean']['output'];
+  /** Rename a sandbox checkpoint. */
+  sandboxCheckpointRename: SandboxCheckpoint;
   /** Create a sandbox in an environment. */
   sandboxCreate: Sandbox;
   /** Destroy a sandbox. */
@@ -1879,8 +1909,8 @@ export type Mutation = {
   sandboxExec: SandboxExecResult;
   /** Extend a sandbox's lifetime. */
   sandboxHeartbeat?: Maybe<Sandbox>;
-  /** Build a sandbox template. */
-  sandboxTemplateBuild: SandboxTemplate;
+  /** Build a sandbox template into a bootable checkpoint. */
+  sandboxTemplateBuild: SandboxTemplateBuild;
   /** Connect a service to a source */
   serviceConnect: Service;
   /** Creates a new service. */
@@ -1922,6 +1952,8 @@ export type Mutation = {
   serviceUpdate: Service;
   /** Deletes a session. */
   sessionDelete: Scalars['Boolean']['output'];
+  /** Enables or disables Under Attack Mode for a service. While enabled, the edge serves a browser challenge to unverified visitors of the service's edge-routed domains; non-browser clients (APIs, webhooks) without a clearance cookie are rejected with a 429. Optionally time-boxed via durationSeconds, after which the mode disarms automatically. */
+  setServiceUnderAttackMode: EdgeConfig;
   /** Track setup agent lifecycle events from the Railway CLI */
   setupAgentEventTrack: Scalars['Boolean']['output'];
   /** Configure a shared variable. */
@@ -1962,6 +1994,8 @@ export type Mutation = {
   trustedDomainDelete: Scalars['Boolean']['output'];
   /** Retrigger verification for a failed trusted domain */
   trustedDomainRetriggerVerification?: Maybe<TrustedDomain>;
+  /** Update the role of a trusted domain */
+  trustedDomainUpdate: TrustedDomain;
   /** Setup 2FA authorization for authenticated user. */
   twoFactorInfoCreate: RecoveryCodes;
   /** Deletes the TwoFactorInfo for the authenticated user. */
@@ -2203,6 +2237,11 @@ export type MutationEgressGatewayAssociationCreateArgs = {
 
 
 export type MutationEgressGatewayAssociationsClearArgs = {
+  input: EgressGatewayServiceTargetInput;
+};
+
+
+export type MutationEgressGatewayHaMigrationPreviewArgs = {
   input: EgressGatewayServiceTargetInput;
 };
 
@@ -2636,6 +2675,26 @@ export type MutationReferralInfoUpdateArgs = {
 };
 
 
+export type MutationSandboxCheckpointCreateArgs = {
+  environmentId: Scalars['String']['input'];
+  name: Scalars['String']['input'];
+  sandboxId: Scalars['String']['input'];
+};
+
+
+export type MutationSandboxCheckpointDeleteArgs = {
+  environmentId: Scalars['String']['input'];
+  id: Scalars['ID']['input'];
+};
+
+
+export type MutationSandboxCheckpointRenameArgs = {
+  environmentId: Scalars['String']['input'];
+  id: Scalars['ID']['input'];
+  name: Scalars['String']['input'];
+};
+
+
 export type MutationSandboxCreateArgs = {
   input: SandboxCreateInput;
 };
@@ -2774,6 +2833,11 @@ export type MutationSessionDeleteArgs = {
 };
 
 
+export type MutationSetServiceUnderAttackModeArgs = {
+  input: SetServiceUnderAttackModeInput;
+};
+
+
 export type MutationSetupAgentEventTrackArgs = {
   input: SetupAgentEventTrackInput;
 };
@@ -2858,6 +2922,11 @@ export type MutationTrustedDomainDeleteArgs = {
 
 export type MutationTrustedDomainRetriggerVerificationArgs = {
   id: Scalars['String']['input'];
+};
+
+
+export type MutationTrustedDomainUpdateArgs = {
+  input: WorkspaceTrustedDomainUpdateInput;
 };
 
 
@@ -3320,6 +3389,7 @@ export type PlanLimitOverride = Node & {
 };
 
 export type PlatformFeatureFlag =
+  | 'ALERT_SUS_USERS_CRON_KILLSWITCH'
   | 'BAN_APPEAL_FORM'
   | 'CHAT_SANDBOX'
   | 'CTRD_IMAGE_STORE_ROLLOUT'
@@ -3335,7 +3405,6 @@ export type PlatformFeatureFlag =
   | 'SPLIT_USAGE_QUERIES'
   | 'STRIPE_METERS_NEW_ACCOUNTS'
   | 'STRIPE_METERS_SHADOW_ENABLED'
-  | 'TCPIP_DATABASE_CLIENT'
   | 'UPDATED_VM_QUERIES';
 
 export type PlatformFeatureFlagStatus = {
@@ -3843,6 +3912,18 @@ export type ProjectRole =
   | 'MEMBER'
   | 'VIEWER';
 
+export type ProjectServiceUsagePage = {
+  __typename?: 'ProjectServiceUsagePage';
+  pageInfo: ProjectServiceUsagePageInfo;
+  usage: Array<AggregatedUsage>;
+};
+
+export type ProjectServiceUsagePageInfo = {
+  __typename?: 'ProjectServiceUsagePageInfo';
+  endCursor?: Maybe<Scalars['String']['output']>;
+  hasNextPage: Scalars['Boolean']['output'];
+};
+
 export type ProjectServicesConnection = {
   __typename?: 'ProjectServicesConnection';
   edges: Array<ProjectServicesConnectionEdge>;
@@ -4084,6 +4165,8 @@ export type Query = {
   githubIsRepoNameAvailable: Scalars['Boolean']['output'];
   /** Get info for a GitHub pull request */
   githubPRInfo?: Maybe<GitHubPrInfo>;
+  /** Get info for a GitHub pull request, including fetch errors */
+  githubPRInfoResult: GitHubPrInfoResult;
   /** Checks if user has access to GitHub repository */
   githubRepo: GitHubRepoWithoutInstallation;
   /** Get branches for a GitHub repo that the authenticated user has access to */
@@ -4158,6 +4241,8 @@ export type Query = {
   projectMembers: Array<ProjectMember>;
   /** Get resource access rules for project-specific actions */
   projectResourceAccess: ProjectResourceAccess;
+  /** Get paginated usage grouped by project and service for a workspace. */
+  projectServiceUsage: ProjectServiceUsagePage;
   /** Get a single project token by the value in the header */
   projectToken: ProjectToken;
   /** Get all project tokens for a project */
@@ -4178,8 +4263,12 @@ export type Query = {
   resourceAccess: ResourceAccess;
   /** Get a sandbox by id. */
   sandbox?: Maybe<Sandbox>;
-  /** Get the status of a sandbox template. */
-  sandboxTemplate: SandboxTemplate;
+  /** List named sandbox checkpoints in an environment. */
+  sandboxCheckpoints: Array<SandboxCheckpoint>;
+  /** Resumable sessions inside a sandbox — interactive shells and one-off exec commands, live or recently exited. Null when the sandbox can't report them (e.g. its vm-init predates session listing). */
+  sandboxSessions?: Maybe<QuerySandboxSessionsConnection>;
+  /** Get a template's build state by id (the recipe content hash). READY once its checkpoint exists; BUILDING/FAILED reflect the build workflow. */
+  sandboxTemplateBuild: SandboxTemplateBuild;
   /** List sandboxes in an environment. */
   sandboxes: QuerySandboxesConnection;
   /** Get a service by ID */
@@ -4529,6 +4618,12 @@ export type QueryGithubPrInfoArgs = {
 };
 
 
+export type QueryGithubPrInfoResultArgs = {
+  prNumber: Scalars['Int']['input'];
+  serviceId: Scalars['String']['input'];
+};
+
+
 export type QueryGithubRepoArgs = {
   fullRepoName: Scalars['String']['input'];
 };
@@ -4746,6 +4841,17 @@ export type QueryProjectResourceAccessArgs = {
 };
 
 
+export type QueryProjectServiceUsageArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
+  endDate: Scalars['DateTime']['input'];
+  first?: InputMaybe<Scalars['Int']['input']>;
+  includeDeleted?: InputMaybe<Scalars['Boolean']['input']>;
+  measurements: Array<MetricMeasurement>;
+  startDate: Scalars['DateTime']['input'];
+  workspaceId: Scalars['String']['input'];
+};
+
+
 export type QueryProjectTokensArgs = {
   after?: InputMaybe<Scalars['String']['input']>;
   before?: InputMaybe<Scalars['String']['input']>;
@@ -4798,7 +4904,22 @@ export type QuerySandboxArgs = {
 };
 
 
-export type QuerySandboxTemplateArgs = {
+export type QuerySandboxCheckpointsArgs = {
+  environmentId: Scalars['String']['input'];
+};
+
+
+export type QuerySandboxSessionsArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
+  before?: InputMaybe<Scalars['String']['input']>;
+  environmentId: Scalars['String']['input'];
+  first?: InputMaybe<Scalars['Int']['input']>;
+  id: Scalars['String']['input'];
+  last?: InputMaybe<Scalars['Int']['input']>;
+};
+
+
+export type QuerySandboxTemplateBuildArgs = {
   environmentId: Scalars['String']['input'];
   id: Scalars['ID']['input'];
 };
@@ -5233,6 +5354,18 @@ export type QueryProjectsConnectionEdge = {
   node: Project;
 };
 
+export type QuerySandboxSessionsConnection = {
+  __typename?: 'QuerySandboxSessionsConnection';
+  edges: Array<QuerySandboxSessionsConnectionEdge>;
+  pageInfo: PageInfo;
+};
+
+export type QuerySandboxSessionsConnectionEdge = {
+  __typename?: 'QuerySandboxSessionsConnectionEdge';
+  cursor: Scalars['String']['output'];
+  node: SandboxSession;
+};
+
 export type QuerySandboxesConnection = {
   __typename?: 'QuerySandboxesConnection';
   edges: Array<QuerySandboxesConnectionEdge>;
@@ -5480,6 +5613,16 @@ export type Sandbox = {
   status: SandboxStatus;
 };
 
+/** A bootable snapshot of a sandbox's disk, scoped to an environment. Built from a template recipe or captured from a running sandbox. */
+export type SandboxCheckpoint = {
+  __typename?: 'SandboxCheckpoint';
+  createdAt: Scalars['DateTime']['output'];
+  environmentId: Scalars['String']['output'];
+  id: Scalars['ID']['output'];
+  /** The checkpoint's identity within the environment (same as id): a recipe content hash for a built template, or the user-given name for one captured from a sandbox. */
+  key: Scalars['String']['output'];
+};
+
 export type SandboxCreateInput = {
   environmentId: Scalars['String']['input'];
   idleTimeoutMinutes?: InputMaybe<Scalars['Int']['input']>;
@@ -5508,6 +5651,36 @@ export type SandboxNetworkIsolation =
   /** Joins the environment's private network. */
   | 'PRIVATE';
 
+/** A resumable session inside a sandbox: an interactive shell or a one-off exec command. */
+export type SandboxSession = {
+  __typename?: 'SandboxSession';
+  /** Whether a client is currently connected. */
+  attached: Scalars['Boolean']['output'];
+  /** The exec command; empty for an interactive shell. */
+  command: Scalars['String']['output'];
+  createdAt?: Maybe<Scalars['DateTime']['output']>;
+  kind: SandboxSessionKind;
+  /** Stable session name; reconnect/attach by this. */
+  name: Scalars['String']['output'];
+  runState: SandboxSessionRunState;
+};
+
+/** Whether a session is an interactive shell or a one-off exec command. */
+export type SandboxSessionKind =
+  | 'EXEC'
+  | 'SHELL';
+
+/** A session's process lifecycle. */
+export type SandboxSessionRunState = {
+  __typename?: 'SandboxSessionRunState';
+  /** Process exit code; only meaningful once running is false. */
+  exitCode: Scalars['Int']['output'];
+  /** When the process exited; null while running. */
+  exitedAt?: Maybe<Scalars['DateTime']['output']>;
+  /** Whether the process is still alive. */
+  running: Scalars['Boolean']['output'];
+};
+
 export type SandboxStatus =
   | 'CREATING'
   | 'DESTROYED'
@@ -5515,25 +5688,30 @@ export type SandboxStatus =
   | 'FAILED'
   | 'RUNNING';
 
-export type SandboxTemplate = {
-  __typename?: 'SandboxTemplate';
+/** The state of a template build, derived from its workflow and the existence of its checkpoint. READY means the checkpoint exists and can be booted. */
+export type SandboxTemplateBuild = {
+  __typename?: 'SandboxTemplateBuild';
   environmentId: Scalars['String']['output'];
+  /** The template's resolved-content hash. */
   id: Scalars['ID']['output'];
-  status: SandboxTemplateStatus;
+  status: SandboxTemplateBuildStatus;
 };
 
-export type SandboxTemplateInput = {
-  baseImageDigest?: InputMaybe<Scalars['String']['input']>;
-  instructions: Array<Scalars['String']['input']>;
-  /** Environment variables available to the template's build instructions. Values may contain Railway variable references (e.g. ${{shared.FOO}}, ${{ServiceName.BAR}}), resolved at build time. */
-  variables?: InputMaybe<Scalars['EnvironmentVariables']['input']>;
-};
-
-export type SandboxTemplateStatus =
+export type SandboxTemplateBuildStatus =
   | 'BUILDING'
   | 'FAILED'
   | 'PENDING'
   | 'READY';
+
+export type SandboxTemplateInput = {
+  baseImageDigest?: InputMaybe<Scalars['String']['input']>;
+  /** Build a template by running these shell instructions on the base image. Mutually exclusive with name. */
+  instructions?: InputMaybe<Array<Scalars['String']['input']>>;
+  /** Boot from a saved checkpoint with this name (one captured from a sandbox). Mutually exclusive with instructions. */
+  name?: InputMaybe<Scalars['String']['input']>;
+  /** Environment variables available to the template's build instructions. Values may contain Railway variable references (e.g. ${{shared.FOO}}, ${{ServiceName.BAR}}), resolved at build time. */
+  variables?: InputMaybe<Scalars['EnvironmentVariables']['input']>;
+};
 
 export type Service = Node & {
   __typename?: 'Service';
@@ -5826,6 +6004,13 @@ export type SessionType =
   | 'BROWSER'
   | 'CLI'
   | 'FORUMS';
+
+export type SetServiceUnderAttackModeInput = {
+  durationSeconds?: InputMaybe<Scalars['Int']['input']>;
+  enabled: Scalars['Boolean']['input'];
+  environmentId: Scalars['String']['input'];
+  serviceId: Scalars['String']['input'];
+};
 
 export type SetupAgentEventTrackInput = {
   agentSessionId?: InputMaybe<Scalars['String']['input']>;
@@ -7038,6 +7223,11 @@ export type WorkspaceTrustedDomainCreateInput = {
   workspaceId: Scalars['String']['input'];
 };
 
+export type WorkspaceTrustedDomainUpdateInput = {
+  id: Scalars['String']['input'];
+  role: Scalars['String']['input'];
+};
+
 export type WorkspaceUpdateInput = {
   avatar?: InputMaybe<Scalars['String']['input']>;
   name?: InputMaybe<Scalars['String']['input']>;
@@ -7093,7 +7283,7 @@ export type RailwaySandboxDestroyMutationVariables = Exact<{
 
 export type RailwaySandboxDestroyMutation = { __typename?: 'Mutation', sandboxDestroy?: { __typename?: 'Sandbox', id: string, status: SandboxStatus, networkIsolation: SandboxNetworkIsolation, environmentId: string, region: string, idleTimeoutMinutes?: number | null, createdAt: string } | null };
 
-export type RailwaySandboxTemplateFieldsFragment = { __typename?: 'SandboxTemplate', id: string, status: SandboxTemplateStatus, environmentId: string };
+export type RailwaySandboxTemplateBuildFieldsFragment = { __typename?: 'SandboxTemplateBuild', id: string, status: SandboxTemplateBuildStatus, environmentId: string };
 
 export type RailwaySandboxTemplateBuildMutationVariables = Exact<{
   environmentId: Scalars['String']['input'];
@@ -7101,15 +7291,50 @@ export type RailwaySandboxTemplateBuildMutationVariables = Exact<{
 }>;
 
 
-export type RailwaySandboxTemplateBuildMutation = { __typename?: 'Mutation', sandboxTemplateBuild: { __typename?: 'SandboxTemplate', id: string, status: SandboxTemplateStatus, environmentId: string } };
+export type RailwaySandboxTemplateBuildMutation = { __typename?: 'Mutation', sandboxTemplateBuild: { __typename?: 'SandboxTemplateBuild', id: string, status: SandboxTemplateBuildStatus, environmentId: string } };
 
-export type RailwaySandboxTemplateQueryVariables = Exact<{
+export type RailwaySandboxTemplateBuildStatusQueryVariables = Exact<{
   environmentId: Scalars['String']['input'];
   id: Scalars['ID']['input'];
 }>;
 
 
-export type RailwaySandboxTemplateQuery = { __typename?: 'Query', sandboxTemplate: { __typename?: 'SandboxTemplate', id: string, status: SandboxTemplateStatus, environmentId: string } };
+export type RailwaySandboxTemplateBuildStatusQuery = { __typename?: 'Query', sandboxTemplateBuild: { __typename?: 'SandboxTemplateBuild', id: string, status: SandboxTemplateBuildStatus, environmentId: string } };
+
+export type RailwaySandboxCheckpointFieldsFragment = { __typename?: 'SandboxCheckpoint', id: string, key: string, environmentId: string, createdAt: string };
+
+export type RailwaySandboxCheckpointsQueryVariables = Exact<{
+  environmentId: Scalars['String']['input'];
+}>;
+
+
+export type RailwaySandboxCheckpointsQuery = { __typename?: 'Query', sandboxCheckpoints: Array<{ __typename?: 'SandboxCheckpoint', id: string, key: string, environmentId: string, createdAt: string }> };
+
+export type RailwaySandboxCheckpointCreateMutationVariables = Exact<{
+  environmentId: Scalars['String']['input'];
+  name: Scalars['String']['input'];
+  sandboxId: Scalars['String']['input'];
+}>;
+
+
+export type RailwaySandboxCheckpointCreateMutation = { __typename?: 'Mutation', sandboxCheckpointCreate: { __typename?: 'SandboxCheckpoint', id: string, key: string, environmentId: string, createdAt: string } };
+
+export type RailwaySandboxCheckpointRenameMutationVariables = Exact<{
+  environmentId: Scalars['String']['input'];
+  id: Scalars['ID']['input'];
+  name: Scalars['String']['input'];
+}>;
+
+
+export type RailwaySandboxCheckpointRenameMutation = { __typename?: 'Mutation', sandboxCheckpointRename: { __typename?: 'SandboxCheckpoint', id: string, key: string, environmentId: string, createdAt: string } };
+
+export type RailwaySandboxCheckpointDeleteMutationVariables = Exact<{
+  environmentId: Scalars['String']['input'];
+  id: Scalars['ID']['input'];
+}>;
+
+
+export type RailwaySandboxCheckpointDeleteMutation = { __typename?: 'Mutation', sandboxCheckpointDelete: boolean };
 
 export type RailwayGenerateShellTokenMutationVariables = Exact<{
   input: ShellTokenInput;
@@ -7119,11 +7344,16 @@ export type RailwayGenerateShellTokenMutationVariables = Exact<{
 export type RailwayGenerateShellTokenMutation = { __typename?: 'Mutation', generateShellToken: string };
 
 export const RailwaySandboxFieldsFragmentDoc = {"kind":"Document","definitions":[{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"Sandbox"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"networkIsolation"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}},{"kind":"Field","name":{"kind":"Name","value":"region"}},{"kind":"Field","name":{"kind":"Name","value":"idleTimeoutMinutes"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}}]}}]} as unknown as DocumentNode<RailwaySandboxFieldsFragment, unknown>;
-export const RailwaySandboxTemplateFieldsFragmentDoc = {"kind":"Document","definitions":[{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxTemplateFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"SandboxTemplate"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}}]}}]} as unknown as DocumentNode<RailwaySandboxTemplateFieldsFragment, unknown>;
+export const RailwaySandboxTemplateBuildFieldsFragmentDoc = {"kind":"Document","definitions":[{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxTemplateBuildFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"SandboxTemplateBuild"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}}]}}]} as unknown as DocumentNode<RailwaySandboxTemplateBuildFieldsFragment, unknown>;
+export const RailwaySandboxCheckpointFieldsFragmentDoc = {"kind":"Document","definitions":[{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxCheckpointFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"SandboxCheckpoint"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"key"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}}]}}]} as unknown as DocumentNode<RailwaySandboxCheckpointFieldsFragment, unknown>;
 export const RailwaySandboxDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"RailwaySandbox"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"id"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandbox"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}},{"kind":"Argument","name":{"kind":"Name","value":"id"},"value":{"kind":"Variable","name":{"kind":"Name","value":"id"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"RailwaySandboxFields"}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"Sandbox"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"networkIsolation"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}},{"kind":"Field","name":{"kind":"Name","value":"region"}},{"kind":"Field","name":{"kind":"Name","value":"idleTimeoutMinutes"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}}]}}]} as unknown as DocumentNode<RailwaySandboxQuery, RailwaySandboxQueryVariables>;
 export const RailwaySandboxesDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"RailwaySandboxes"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"first"}},"type":{"kind":"NamedType","name":{"kind":"Name","value":"Int"}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"after"}},"type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"before"}},"type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"last"}},"type":{"kind":"NamedType","name":{"kind":"Name","value":"Int"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxes"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}},{"kind":"Argument","name":{"kind":"Name","value":"first"},"value":{"kind":"Variable","name":{"kind":"Name","value":"first"}}},{"kind":"Argument","name":{"kind":"Name","value":"after"},"value":{"kind":"Variable","name":{"kind":"Name","value":"after"}}},{"kind":"Argument","name":{"kind":"Name","value":"before"},"value":{"kind":"Variable","name":{"kind":"Name","value":"before"}}},{"kind":"Argument","name":{"kind":"Name","value":"last"},"value":{"kind":"Variable","name":{"kind":"Name","value":"last"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"edges"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"node"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"RailwaySandboxFields"}}]}}]}},{"kind":"Field","name":{"kind":"Name","value":"pageInfo"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"hasNextPage"}},{"kind":"Field","name":{"kind":"Name","value":"endCursor"}}]}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"Sandbox"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"networkIsolation"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}},{"kind":"Field","name":{"kind":"Name","value":"region"}},{"kind":"Field","name":{"kind":"Name","value":"idleTimeoutMinutes"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}}]}}]} as unknown as DocumentNode<RailwaySandboxesQuery, RailwaySandboxesQueryVariables>;
 export const RailwaySandboxCreateDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"RailwaySandboxCreate"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"SandboxCreateInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxCreate"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"RailwaySandboxFields"}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"Sandbox"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"networkIsolation"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}},{"kind":"Field","name":{"kind":"Name","value":"region"}},{"kind":"Field","name":{"kind":"Name","value":"idleTimeoutMinutes"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}}]}}]} as unknown as DocumentNode<RailwaySandboxCreateMutation, RailwaySandboxCreateMutationVariables>;
 export const RailwaySandboxDestroyDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"RailwaySandboxDestroy"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"id"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxDestroy"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"id"},"value":{"kind":"Variable","name":{"kind":"Name","value":"id"}}},{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"RailwaySandboxFields"}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"Sandbox"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"networkIsolation"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}},{"kind":"Field","name":{"kind":"Name","value":"region"}},{"kind":"Field","name":{"kind":"Name","value":"idleTimeoutMinutes"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}}]}}]} as unknown as DocumentNode<RailwaySandboxDestroyMutation, RailwaySandboxDestroyMutationVariables>;
-export const RailwaySandboxTemplateBuildDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"RailwaySandboxTemplateBuild"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"SandboxTemplateInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxTemplateBuild"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}},{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"RailwaySandboxTemplateFields"}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxTemplateFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"SandboxTemplate"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}}]}}]} as unknown as DocumentNode<RailwaySandboxTemplateBuildMutation, RailwaySandboxTemplateBuildMutationVariables>;
-export const RailwaySandboxTemplateDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"RailwaySandboxTemplate"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"id"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"ID"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxTemplate"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}},{"kind":"Argument","name":{"kind":"Name","value":"id"},"value":{"kind":"Variable","name":{"kind":"Name","value":"id"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"RailwaySandboxTemplateFields"}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxTemplateFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"SandboxTemplate"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}}]}}]} as unknown as DocumentNode<RailwaySandboxTemplateQuery, RailwaySandboxTemplateQueryVariables>;
+export const RailwaySandboxTemplateBuildDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"RailwaySandboxTemplateBuild"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"SandboxTemplateInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxTemplateBuild"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}},{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"RailwaySandboxTemplateBuildFields"}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxTemplateBuildFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"SandboxTemplateBuild"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}}]}}]} as unknown as DocumentNode<RailwaySandboxTemplateBuildMutation, RailwaySandboxTemplateBuildMutationVariables>;
+export const RailwaySandboxTemplateBuildStatusDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"RailwaySandboxTemplateBuildStatus"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"id"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"ID"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxTemplateBuild"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}},{"kind":"Argument","name":{"kind":"Name","value":"id"},"value":{"kind":"Variable","name":{"kind":"Name","value":"id"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"RailwaySandboxTemplateBuildFields"}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxTemplateBuildFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"SandboxTemplateBuild"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}}]}}]} as unknown as DocumentNode<RailwaySandboxTemplateBuildStatusQuery, RailwaySandboxTemplateBuildStatusQueryVariables>;
+export const RailwaySandboxCheckpointsDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"RailwaySandboxCheckpoints"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxCheckpoints"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"RailwaySandboxCheckpointFields"}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxCheckpointFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"SandboxCheckpoint"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"key"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}}]}}]} as unknown as DocumentNode<RailwaySandboxCheckpointsQuery, RailwaySandboxCheckpointsQueryVariables>;
+export const RailwaySandboxCheckpointCreateDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"RailwaySandboxCheckpointCreate"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"name"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"sandboxId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxCheckpointCreate"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}},{"kind":"Argument","name":{"kind":"Name","value":"name"},"value":{"kind":"Variable","name":{"kind":"Name","value":"name"}}},{"kind":"Argument","name":{"kind":"Name","value":"sandboxId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"sandboxId"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"RailwaySandboxCheckpointFields"}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxCheckpointFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"SandboxCheckpoint"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"key"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}}]}}]} as unknown as DocumentNode<RailwaySandboxCheckpointCreateMutation, RailwaySandboxCheckpointCreateMutationVariables>;
+export const RailwaySandboxCheckpointRenameDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"RailwaySandboxCheckpointRename"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"id"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"ID"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"name"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxCheckpointRename"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}},{"kind":"Argument","name":{"kind":"Name","value":"id"},"value":{"kind":"Variable","name":{"kind":"Name","value":"id"}}},{"kind":"Argument","name":{"kind":"Name","value":"name"},"value":{"kind":"Variable","name":{"kind":"Name","value":"name"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"RailwaySandboxCheckpointFields"}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxCheckpointFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"SandboxCheckpoint"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"key"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}}]}}]} as unknown as DocumentNode<RailwaySandboxCheckpointRenameMutation, RailwaySandboxCheckpointRenameMutationVariables>;
+export const RailwaySandboxCheckpointDeleteDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"RailwaySandboxCheckpointDelete"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"id"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"ID"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxCheckpointDelete"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}},{"kind":"Argument","name":{"kind":"Name","value":"id"},"value":{"kind":"Variable","name":{"kind":"Name","value":"id"}}}]}]}}]} as unknown as DocumentNode<RailwaySandboxCheckpointDeleteMutation, RailwaySandboxCheckpointDeleteMutationVariables>;
 export const RailwayGenerateShellTokenDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"RailwayGenerateShellToken"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"ShellTokenInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"generateShellToken"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}]}]}}]} as unknown as DocumentNode<RailwayGenerateShellTokenMutation, RailwayGenerateShellTokenMutationVariables>;

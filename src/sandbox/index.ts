@@ -8,6 +8,7 @@ export {
 export { ExecHandle } from "./exec.js";
 export type { SandboxTemplate } from "./template.js";
 export type {
+  CheckpointOptions,
   ConnectOptions,
   CreateOptions,
   ExecOptions,
@@ -17,6 +18,7 @@ export type {
   ExecTarget,
   ForkOptions,
   ListOptions,
+  SandboxCheckpointInfo,
   SandboxInfo,
   SandboxNetworkIsolation,
   SandboxStatus,

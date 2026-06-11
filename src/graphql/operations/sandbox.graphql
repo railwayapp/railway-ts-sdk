@@ -52,7 +52,7 @@ mutation RailwaySandboxDestroy($id: String!, $environmentId: String!) {
   }
 }
 
-fragment RailwaySandboxTemplateFields on SandboxTemplate {
+fragment RailwaySandboxTemplateBuildFields on SandboxTemplateBuild {
   id
   status
   environmentId
@@ -63,12 +63,53 @@ mutation RailwaySandboxTemplateBuild(
   $input: SandboxTemplateInput!
 ) {
   sandboxTemplateBuild(environmentId: $environmentId, input: $input) {
-    ...RailwaySandboxTemplateFields
+    ...RailwaySandboxTemplateBuildFields
   }
 }
 
-query RailwaySandboxTemplate($environmentId: String!, $id: ID!) {
-  sandboxTemplate(environmentId: $environmentId, id: $id) {
-    ...RailwaySandboxTemplateFields
+query RailwaySandboxTemplateBuildStatus($environmentId: String!, $id: ID!) {
+  sandboxTemplateBuild(environmentId: $environmentId, id: $id) {
+    ...RailwaySandboxTemplateBuildFields
   }
+}
+
+fragment RailwaySandboxCheckpointFields on SandboxCheckpoint {
+  id
+  key
+  environmentId
+  createdAt
+}
+
+query RailwaySandboxCheckpoints($environmentId: String!) {
+  sandboxCheckpoints(environmentId: $environmentId) {
+    ...RailwaySandboxCheckpointFields
+  }
+}
+
+mutation RailwaySandboxCheckpointCreate(
+  $environmentId: String!
+  $name: String!
+  $sandboxId: String!
+) {
+  sandboxCheckpointCreate(
+    environmentId: $environmentId
+    name: $name
+    sandboxId: $sandboxId
+  ) {
+    ...RailwaySandboxCheckpointFields
+  }
+}
+
+mutation RailwaySandboxCheckpointRename(
+  $environmentId: String!
+  $id: ID!
+  $name: String!
+) {
+  sandboxCheckpointRename(environmentId: $environmentId, id: $id, name: $name) {
+    ...RailwaySandboxCheckpointFields
+  }
+}
+
+mutation RailwaySandboxCheckpointDelete($environmentId: String!, $id: ID!) {
+  sandboxCheckpointDelete(environmentId: $environmentId, id: $id)
 }

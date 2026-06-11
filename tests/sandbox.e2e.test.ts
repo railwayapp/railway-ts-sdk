@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
-import { Sandbox, type ExecHandle } from "../src/index.js";
+import { RailwayGraphQLError, Sandbox, type ExecHandle } from "../src/index.js";
 
 /**
  * Live end-to-end sandbox tests: exec, durable reattach, fork, and templates.
@@ -301,4 +301,79 @@ describe.runIf(live)("fork + template e2e (live)", () => {
     );
     expect((await sandbox.exec("cat /data/where.txt")).stdout).toBe("/data\n");
   }, 300_000);
+
+  it("checkpoint() captures, create(name) boots, rename and delete manage it", async () => {
+    const name = `sdk-e2e-snap-${Date.now()}`;
+    const renamed = `${name}-renamed`;
+    let checkpointId: string | undefined;
+    try {
+      const source = track(await Sandbox.create());
+      await source.exec("echo snapped > /etc/snap-marker");
+
+      const checkpoint = await source.checkpoint(name);
+      checkpointId = checkpoint.id;
+      expect(checkpoint.key).toBe(name);
+
+      const listed = await Sandbox.checkpoints();
+      expect(listed.some(c => c.key === name)).toBe(true);
+
+      const clone = track(await Sandbox.create(name));
+      expect((await clone.exec("cat /etc/snap-marker")).stdout).toBe("snapped\n");
+
+      const updated = await Sandbox.renameCheckpoint(checkpoint.id, renamed);
+      checkpointId = updated.id;
+      const keys = (await Sandbox.checkpoints()).map(c => c.key);
+      expect(keys).toContain(renamed);
+      expect(keys).not.toContain(name);
+
+      await Sandbox.deleteCheckpoint(updated.id);
+      checkpointId = undefined;
+      const afterDelete = await Sandbox.checkpoints();
+      expect(afterDelete.some(c => c.key === renamed)).toBe(false);
+    } finally {
+      if (checkpointId) await Sandbox.deleteCheckpoint(checkpointId).catch(() => {});
+    }
+  }, 300_000);
+
+  it("a checkpoint is immutable: clones are independent of the source and each other", async () => {
+    const name = `sdk-e2e-immutable-${Date.now()}`;
+    let checkpointId: string | undefined;
+    try {
+      const source = track(await Sandbox.create());
+      await source.exec("echo original > /tmp/state.txt");
+      const checkpoint = await source.checkpoint(name);
+      checkpointId = checkpoint.id;
+
+      // Mutating the source after capture must not affect the checkpoint.
+      await source.exec("echo mutated > /tmp/state.txt");
+
+      const first = track(await Sandbox.create(name));
+      expect((await first.exec("cat /tmp/state.txt")).stdout).toBe("original\n");
+
+      // Each clone boots from the captured disk, not from other clones.
+      await first.exec("echo clobbered > /tmp/state.txt");
+      const second = track(await Sandbox.create(name));
+      expect((await second.exec("cat /tmp/state.txt")).stdout).toBe("original\n");
+    } finally {
+      if (checkpointId) await Sandbox.deleteCheckpoint(checkpointId).catch(() => {});
+    }
+  }, 300_000);
+
+  it("create(name) fails fast for an unknown checkpoint name", async () => {
+    const error = await Sandbox.create(`sdk-e2e-missing-${Date.now()}`).catch(
+      error => error,
+    );
+    expect(error).toBeInstanceOf(RailwayGraphQLError);
+    expect(String(error)).toContain("not found");
+  }, 60_000);
+
+  it("checkpoint() rejects when the sandbox is not running", async () => {
+    const sandbox = track(await Sandbox.create());
+    await sandbox.destroy();
+
+    const error = await sandbox
+      .checkpoint(`sdk-e2e-dead-${Date.now()}`)
+      .catch(error => error);
+    expect(error).toBeInstanceOf(RailwayGraphQLError);
+  }, 180_000);
 });

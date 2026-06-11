@@ -67,6 +67,10 @@ run = "pnpm exec tsx examples/sandboxes/quickstart.ts"
 description = "Create a sandbox from a template, then destroy it using .env credentials"
 run = "pnpm exec tsx examples/sandboxes/template.ts"
 
+[tasks."example:checkpoint"]
+description = "Checkpoint a sandbox, boot a clone from it by name, then delete the checkpoint using .env credentials"
+run = "pnpm exec tsx examples/sandboxes/checkpoint.ts"
+
 [tasks."example:exec"]
 description = "Start a durable command, detach, and reattach by sessionName from a fresh connection"
 run = "pnpm exec tsx examples/sandboxes/exec.ts"

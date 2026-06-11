@@ -1,7 +1,8 @@
 import type { RailwayClientConfig } from "../core/config.js";
 import type {
+  RailwaySandboxCheckpointFieldsFragment,
   RailwaySandboxFieldsFragment,
-  RailwaySandboxTemplateFieldsFragment,
+  RailwaySandboxTemplateBuildFieldsFragment,
 } from "../generated/graphql.js";
 
 export type SandboxStatus = RailwaySandboxFieldsFragment["status"];
@@ -21,7 +22,14 @@ export interface ExecResult {
   timedOut: boolean;
 }
 
-export type SandboxTemplateInfo = RailwaySandboxTemplateFieldsFragment;
+/**
+ * A bootable snapshot of a sandbox's disk. `key` is the user-given name for
+ * checkpoints captured with `checkpoint`, or the recipe hash for built ones.
+ */
+export type SandboxCheckpointInfo = RailwaySandboxCheckpointFieldsFragment;
+
+/** State of a recipe build; READY once its checkpoint exists. */
+export type SandboxTemplateBuildInfo = RailwaySandboxTemplateBuildFieldsFragment;
 
 /** A template recipe compiled into the inputs the backend understands. */
 export interface CompiledTemplate {
@@ -29,6 +37,13 @@ export interface CompiledTemplate {
   /** Build-time env for the build instructions; omitted when empty. */
   readonly variables?: Record<string, string>;
 }
+
+/** Reference to a saved named checkpoint (from `checkpoint` or a prior build). */
+export interface NamedTemplateRef {
+  readonly name: string;
+}
+
+export type TemplateSource = CompiledTemplate | NamedTemplateRef;
 
 /** Knobs shared by every sandbox-creating call: `create`, `create(template)`, and `fork`. */
 export interface SandboxCreationOptions {
@@ -87,5 +102,10 @@ export interface ExecOptions {
 }
 
 export interface TemplateBuildOptions extends RailwayClientConfig {
+  environmentId?: string;
+}
+
+/** Connection/environment options for the checkpoint statics (`Sandbox.checkpoints` etc.). */
+export interface CheckpointOptions extends RailwayClientConfig {
   environmentId?: string;
 }
