@@ -6,7 +6,7 @@ import { createRailwayContext, project as projectFactory, type RailwayContextInp
 
 export async function evaluateRailwayFile(filePath: string, options: GraphCompileOptions & { context?: RailwayContextInput } = {}): Promise<CompileResult> {
   const absolutePath = path.resolve(filePath);
-  const mod = await import(`${pathToFileURL(absolutePath).toString()}?t=${Date.now()}`) as {
+  const mod = await importRailwayFile(absolutePath) as {
     default?: RailwayProgram | ProjectDefinition;
   };
   const exported = (mod.default ?? mod) as RailwayProgram | ProjectDefinition;
@@ -14,6 +14,15 @@ export async function evaluateRailwayFile(filePath: string, options: GraphCompil
   const graph = projectDefinitionToGraph(definition);
   const desiredConfig = graphToEnvironmentConfig(graph, options);
   return { graph, desiredConfig };
+}
+
+async function importRailwayFile(absolutePath: string): Promise<unknown> {
+  const url = `${pathToFileURL(absolutePath).toString()}?t=${Date.now()}`;
+  if (/\.[cm]?tsx?$/.test(absolutePath)) {
+    const { tsImport } = await import("tsx/esm/api");
+    return tsImport(url, import.meta.url);
+  }
+  return import(url);
 }
 
 async function resolveDefinition(exported: RailwayProgram | ProjectDefinition, context: RailwayContextInput = {}): Promise<ProjectDefinition> {
