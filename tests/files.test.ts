@@ -373,6 +373,30 @@ describe("files.read", () => {
     expect(bytes[drops * kb]).toBe(9);
   }, 15_000);
 
+  it("resumes a read when the server reports connection lost mid-segment", async () => {
+    const mb = 1024 * 1024;
+    const { sandbox, ws } = await filesSandbox(2);
+    const promise = sandbox.files.read("/big.bin", { format: "bytes" });
+
+    const first = await ws.nextSocket();
+    await acceptStat(first, 3 * mb);
+    const read = await first.nextRequest();
+    first.serverBinary(2, FRAME_READ_CHUNK, 0, new Uint8Array(1024).fill(9));
+    await tick();
+    first.serverError(read.id!, "connection lost");
+
+    const second = await ws.nextSocket();
+    const resume = await second.nextRequest();
+    expect(resume.data).toMatchObject({ offset: 1024 });
+    second.serverBinary(1, FRAME_READ_END, 0, new Uint8Array(2 * mb).fill(8));
+    const rest = await second.nextRequest();
+    const restLength = (rest.data as { length: number }).length;
+    second.serverBinary(2, FRAME_READ_END, 0, new Uint8Array(restLength).fill(7));
+
+    const bytes = (await promise) as Uint8Array;
+    expect(bytes.length).toBe(3 * mb);
+  }, 15_000);
+
   it("resumes a segmented read from the dropped byte position", async () => {
     const mb = 1024 * 1024;
     const { sandbox, ws } = await filesSandbox(2);
@@ -622,6 +646,22 @@ describe("files.write", () => {
       socket.serverClose(1006, "gone");
     }
     await expect(promise).rejects.toBeInstanceOf(RailwayConnectionError);
+  }, 15_000);
+
+  it("retries a replayable write when the server reports connection lost", async () => {
+    const { sandbox, ws } = await filesSandbox(2);
+    const promise = sandbox.files.write("/f.txt", "hello");
+
+    const first = await ws.nextSocket();
+    const start = await first.nextRequest();
+    first.serverReply("write_ready", start.id!);
+    // The server's stream to the sandbox died; the WS session stays open.
+    first.serverError(start.id!, "connection lost");
+
+    const second = await ws.nextSocket();
+    await acceptWrite(second, 1);
+    expect(second.sentBinary[0]?.payload).toEqual(enc("hello"));
+    await expect(promise).resolves.toBeUndefined();
   }, 15_000);
 
   it("retries a replayable write on a fresh connection after a drop", async () => {

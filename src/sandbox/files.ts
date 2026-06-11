@@ -157,11 +157,12 @@ export class SandboxFiles {
         await this.#writeOnce(target, start, source);
         break;
       } catch (error) {
-        // A dropped session is retriable when the source can be replayed
-        // (the file is truncated again by the next write_start). One-shot
-        // streams can't be, so the error surfaces.
+        // A dropped session — or the server losing its own stream to the
+        // sandbox — is retriable when the source can be replayed (the file
+        // is truncated again by the next write_start). One-shot streams
+        // can't be, so the error surfaces.
         const retriable =
-          error instanceof RailwayConnectionError &&
+          (error instanceof RailwayConnectionError || isTransientRemote(error)) &&
           source.replayable &&
           ++retries <= TRANSFER_MAX_RETRIES;
         if (!retriable) throw this.#wrapError("write", target, error);
@@ -478,9 +479,10 @@ function requireIntegerAtLeast(
 }
 
 /**
- * Whether a failed pull attempt may resume: only connection-level failures,
- * never a direct (unsegmented) read that already delivered bytes — re-reading
- * those would duplicate them.
+ * Whether a failed pull attempt may resume: only transport-level failures
+ * (dropped session or the server losing its stream to the sandbox), never a
+ * direct (unsegmented) read that already delivered bytes — re-reading those
+ * would duplicate them.
  */
 function canResumePull(
   error: unknown,
@@ -488,7 +490,7 @@ function canResumePull(
   retries: number,
 ): boolean {
   return (
-    error instanceof RailwayConnectionError &&
+    (error instanceof RailwayConnectionError || isTransientRemote(error)) &&
     !(state.direct && state.directDelivered > 0) &&
     retries <= TRANSFER_MAX_RETRIES
   );
@@ -641,6 +643,15 @@ function directReadPayload(
 /** The server reports a missing path with an `os.ErrNotExist`-style message. */
 function isNotFound(message: string): boolean {
   return /file does not exist|no such file|not found/i.test(message);
+}
+
+/**
+ * A remote error frame reporting that the server's own stream to the sandbox
+ * died mid-transfer. The WS session is still healthy, but the operation is as
+ * retriable as a dropped connection.
+ */
+function isTransientRemote(error: unknown): boolean {
+  return error instanceof FilesRemoteError && /connection lost/i.test(error.message);
 }
 
 /** A `write_start` rejection caused by a missing parent directory. */

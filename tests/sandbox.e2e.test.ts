@@ -7,6 +7,7 @@ import {
   RailwayGraphQLError,
   Sandbox,
   SandboxFileNotFoundError,
+  SandboxFilesError,
   SandboxNotFoundError,
   type ExecHandle,
 } from "../src/index.js";
@@ -324,7 +325,11 @@ describe.runIf(live)("files e2e (live)", () => {
         await sandbox.files.write("/tmp/large.bin", source());
         break;
       } catch (error) {
-        if (!(error instanceof RailwayConnectionError) || attempt >= 4) throw error;
+        const transient =
+          error instanceof RailwayConnectionError ||
+          (error instanceof SandboxFilesError &&
+            /connection lost/i.test(error.message));
+        if (!transient || attempt >= 4) throw error;
       }
     }
 
