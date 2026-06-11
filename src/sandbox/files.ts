@@ -65,8 +65,8 @@ let constructFiles: (context: FilesContext) => SandboxFiles;
  *
  * Paths are absolute within the sandbox filesystem. Content streams in
  * 64KB frames both ways: pushes accept streams without buffering, and
- * `read(path, { format: "stream" })` pulls without buffering, so massive
- * files transfer with bounded memory.
+ * `read(path, { format: "stream" })` holds at most one transfer segment in
+ * memory, so massive files transfer with bounded memory.
  */
 export class SandboxFiles {
   readonly #context: FilesContext;
@@ -89,9 +89,11 @@ export class SandboxFiles {
     options: FileReadOptions & { format: "bytes" },
   ): Promise<Uint8Array>;
   /**
-   * Read a file as a stream of byte chunks — constant memory regardless of
-   * file size. Cancelling the stream aborts the transfer. Errors after the
-   * stream is returned (including a missing file) surface through the stream.
+   * Read a file as a stream of byte chunks — memory stays bounded regardless
+   * of file size: a consumer slower than the network holds back the transfer
+   * rather than buffering it. Cancelling the stream aborts the transfer.
+   * Errors after the stream is returned (including a missing file) surface
+   * through the stream.
    */
   read(
     path: string,
@@ -295,14 +297,37 @@ export class SandboxFiles {
   ): Promise<ReadableStream<Uint8Array>> {
     let controller!: ReadableStreamDefaultController<Uint8Array>;
     let pull!: PullHandle;
+    let notifyPull: (() => void) | undefined;
     const stream = new ReadableStream<Uint8Array>({
       start: c => {
         controller = c;
       },
-      cancel: () => pull.abort(),
+      pull: () => notifyPull?.(),
+      cancel: () => {
+        pull.abort();
+        notifyPull?.(); // unblock a capacity wait so the pull loop can exit
+      },
     });
 
-    pull = this.#startPull(path, options, bytes => controller.enqueue(bytes));
+    // Consumer backpressure: the next segment isn't requested until the
+    // stream's queue has room, so a slow consumer holds at most one segment
+    // in memory rather than the whole file.
+    const waitForCapacity = (): Promise<void> => {
+      if ((controller.desiredSize ?? 0) > 0) return Promise.resolve();
+      return new Promise(resolve => {
+        notifyPull = () => {
+          notifyPull = undefined;
+          resolve();
+        };
+      });
+    };
+
+    pull = this.#startPull(
+      path,
+      options,
+      bytes => controller.enqueue(bytes),
+      waitForCapacity,
+    );
     pull.done
       .then(() => {
         try {
@@ -333,6 +358,7 @@ export class SandboxFiles {
     path: string,
     options: FileReadOptions,
     onChunk: (bytes: Uint8Array) => void,
+    waitForCapacity?: () => Promise<void>,
   ): PullHandle {
     let connection: FilesWsConnection | undefined;
     let aborted = false;
@@ -341,6 +367,7 @@ export class SandboxFiles {
     const done = (async () => {
       let retries = 0;
       for (;;) {
+        if (aborted) return; // cancelled during a retry backoff
         try {
           connection = await this.#connect("files:read");
           if (aborted) return;
@@ -354,17 +381,12 @@ export class SandboxFiles {
               retries = 0; // progress restores the retry budget
               onChunk(bytes);
             },
+            ...(waitForCapacity && { waitForCapacity }),
           });
           return;
         } catch (error) {
           if (aborted) return;
-          // Resume after a dropped session; a direct read that already
-          // delivered bytes cannot (re-reading would duplicate them).
-          const retriable =
-            error instanceof RailwayConnectionError &&
-            !(state.direct && state.directDelivered > 0) &&
-            ++retries <= TRANSFER_MAX_RETRIES;
-          if (!retriable) throw error;
+          if (!canResumePull(error, state, ++retries)) throw error;
           this.#log(`files read ${path} resuming after connection loss`);
           await sleep(TRANSFER_RETRY_DELAY_MS);
         } finally {
@@ -437,6 +459,39 @@ function validateReadOptions(options: FileReadOptions): void {
   if (options.fromEnd && options.offset !== undefined) {
     throw new TypeError("`offset` and `fromEnd` are mutually exclusive.");
   }
+  if (options.fromEnd && options.length === undefined) {
+    throw new TypeError("`fromEnd` requires `length` (the tail size to read).");
+  }
+  requireIntegerAtLeast("offset", options.offset, 0);
+  requireIntegerAtLeast("length", options.length, 1);
+}
+
+function requireIntegerAtLeast(
+  name: string,
+  value: number | undefined,
+  min: number,
+): void {
+  if (value === undefined) return;
+  if (!Number.isInteger(value) || value < min) {
+    throw new TypeError(`\`${name}\` must be an integer >= ${min}.`);
+  }
+}
+
+/**
+ * Whether a failed pull attempt may resume: only connection-level failures,
+ * never a direct (unsegmented) read that already delivered bytes — re-reading
+ * those would duplicate them.
+ */
+function canResumePull(
+  error: unknown,
+  state: PullState,
+  retries: number,
+): boolean {
+  return (
+    error instanceof RailwayConnectionError &&
+    !(state.direct && state.directDelivered > 0) &&
+    retries <= TRANSFER_MAX_RETRIES
+  );
 }
 
 function validateMode(mode: number | undefined): number | undefined {
@@ -475,6 +530,7 @@ async function runPullAttempt(args: {
   state: PullState;
   isAborted: () => boolean;
   onChunk: (bytes: Uint8Array) => void;
+  waitForCapacity?: () => Promise<void>;
 }): Promise<void> {
   const { connection, path, options, state, isAborted, onChunk } = args;
 
@@ -496,7 +552,14 @@ async function runPullAttempt(args: {
     return;
   }
 
-  await pullSegments({ connection, path, range: state.range!, isAborted, onChunk });
+  await pullSegments({
+    connection,
+    path,
+    range: state.range!,
+    isAborted,
+    onChunk,
+    ...(args.waitForCapacity && { waitForCapacity: args.waitForCapacity }),
+  });
 }
 
 const sleep = (ms: number): Promise<void> =>
@@ -513,10 +576,13 @@ async function pullSegments(args: {
   range: { position: number; end: number };
   isAborted: () => boolean;
   onChunk: (bytes: Uint8Array) => void;
+  /** Resolves when the consumer has room for the next segment. */
+  waitForCapacity?: () => Promise<void>;
 }): Promise<void> {
   const { connection, path, range, isAborted, onChunk } = args;
   let segmentBytes = READ_SEGMENT_INITIAL_BYTES;
   while (range.position < range.end) {
+    await args.waitForCapacity?.();
     if (isAborted()) return;
     const length = Math.min(segmentBytes, range.end - range.position);
     const started = Date.now();
@@ -531,13 +597,18 @@ async function pullSegments(args: {
   }
 }
 
-/** Scales the segment size toward the per-segment duration target. */
+/**
+ * Scales the segment size toward the per-segment duration target. Growth is
+ * capped at 4x per step so one unusually fast segment can't jump straight to
+ * a size that takes far longer than the target if bandwidth drops.
+ */
 function nextSegmentSize(current: number, elapsedMs: number): number {
   const scaled = Math.round(
     (current * READ_SEGMENT_TARGET_MS) / Math.max(elapsedMs, 1),
   );
   return Math.min(
     READ_SEGMENT_MAX_BYTES,
+    current * 4,
     Math.max(READ_SEGMENT_MIN_BYTES, scaled),
   );
 }

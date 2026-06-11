@@ -99,9 +99,8 @@ pass an implementation via the `webSocketImpl` config option.
 
 ## Files
 
-`sandbox.files` reads and writes the sandbox filesystem directly — no shell quoting, no
-base64, binary-safe. Content streams in both directions, so files far larger than memory
-transfer with bounded memory.
+`sandbox.files` reads and writes files in the sandbox filesystem. Content streams in
+both directions, so files larger than memory can be transferred.
 
 ```ts
 await sandbox.files.write("/app/config.json", JSON.stringify(config));
@@ -113,7 +112,9 @@ await sandbox.files.write("/app/run.sh", "#!/bin/sh\n...", { mode: 0o755 });
 
 `write` accepts a `string`, `Uint8Array`, `ArrayBuffer`, `Blob`, `ReadableStream`, or any
 `AsyncIterable<Uint8Array>`, and creates missing parent directories automatically.
-Streams upload unbuffered, so pushing a multi-GB file from disk is:
+Strings, bytes, and blobs are retried automatically if the connection drops mid-transfer.
+Stream sources are one-shot: a drop surfaces `RailwayConnectionError` and may leave a
+partial file. Streams upload without buffering, so a large file can be pushed from disk:
 
 ```ts
 import { createReadStream } from "node:fs";
@@ -121,8 +122,8 @@ import { createReadStream } from "node:fs";
 await sandbox.files.write("/data/dataset.bin", createReadStream("./dataset.bin"));
 ```
 
-Pull large files as a stream (cancelling the stream aborts the transfer), or read just a
-range — `offset`/`length` from the start, or `fromEnd` for tails:
+Pull large files as a stream (cancelling the stream aborts the transfer), or read a
+range: `offset`/`length` from the start, or `fromEnd` with `length` for tails:
 
 ```ts
 const stream = await sandbox.files.read("/data/out.bin", { format: "stream" });
@@ -132,8 +133,8 @@ const tail = await sandbox.files.read("/var/log/app.log", { length: 4096, fromEn
 ```
 
 Inspect and manage entries with `list`, `stat`, `exists`, `mkdir` (recursive, like
-`mkdir -p`), `rename`, and `remove` (files and empty directories — use
-`sandbox.exec("rm -rf ...")` for recursive deletes):
+`mkdir -p`), `rename`, and `remove`. `remove` deletes files and empty directories; use
+`sandbox.exec("rm -rf ...")` for recursive deletes:
 
 ```ts
 for (const entry of await sandbox.files.list("/app")) {
@@ -146,7 +147,7 @@ to set permissions. Reads of missing paths throw
 `SandboxFileNotFoundError`; other remote failures throw `SandboxFilesError` with the VM's
 error text. Each operation authorizes itself with a short-lived files-scoped token, so
 `files` works on any `RUNNING` sandbox you can `connect` to. See
-`examples/sandboxes/files.ts` for a full tour.
+`examples/sandboxes/files.ts` for a complete example.
 
 ## Forking
 

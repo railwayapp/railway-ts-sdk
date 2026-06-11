@@ -39,6 +39,13 @@ const SEND_POLL_MS = 10;
  */
 const INACTIVITY_TIMEOUT_MS = 30_000;
 
+/**
+ * While an upload waits on a slow source, send an empty content frame at
+ * this cadence so the server's per-chunk idle timeout (30s) never fires —
+ * sources may pause arbitrarily long between chunks.
+ */
+const WRITE_HEARTBEAT_MS = 10_000;
+
 /** A `{type: "error"}` reply from the server; message is the remote error text. */
 export class FilesRemoteError extends Error {
   /**
@@ -167,9 +174,21 @@ export function connectFilesWs(args: {
       socket.send(JSON.stringify({ type, id, data }));
     };
 
-    /** Waits until the socket's send buffer drains below the high-water mark. */
+    /**
+     * Waits until the socket's send buffer drains below the high-water mark.
+     * A buffer that stays full past the inactivity window means the peer
+     * stopped draining (e.g. a half-open connection that never fires close);
+     * fail it like any dead transport instead of stalling forever.
+     */
     const awaitDrain = async () => {
+      const start = Date.now();
       while (!closed && (socket.bufferedAmount ?? 0) > SEND_HIGH_WATER_BYTES) {
+        if (Date.now() - start > INACTIVITY_TIMEOUT_MS) {
+          closeSocket();
+          throw new RailwayConnectionError({
+            message: `tcp-proxy files send buffer stalled for ${INACTIVITY_TIMEOUT_MS}ms.`,
+          });
+        }
         await sleep(SEND_POLL_MS);
       }
     };
@@ -237,15 +256,21 @@ export function connectFilesWs(args: {
 
       async write(start, chunks) {
         let settled = false;
+        let notifySettled!: () => void;
+        const settledSignal = new Promise<"settled">(resolve => {
+          notifySettled = () => resolve("settled");
+        });
         let settle!: { resolve(): void; reject(error: Error): void };
         const done = new Promise<void>((resolveWrite, rejectWrite) => {
           settle = {
             resolve: () => {
               settled = true;
+              notifySettled();
               resolveWrite();
             },
             reject: error => {
               settled = true;
+              notifySettled();
               rejectWrite(error);
             },
           };
@@ -310,31 +335,38 @@ export function connectFilesWs(args: {
           );
         };
 
-        // Lookahead by one chunk so the final one can carry the end marker.
-        let held: Uint8Array | undefined;
-        try {
-          for await (const chunk of rechunk(chunks)) {
-            if (settled) return done; // server failed the write mid-stream
-            if (held) {
-              await awaitDrain();
-              if (settled) return done;
-              sendContent(held, false);
-            }
-            held = chunk;
+        // Keep the server's per-chunk idle timer fresh while the source is
+        // slow; zero-payload content frames are valid no-ops server-side.
+        const heartbeat = setInterval(() => {
+          if (settled || closed) return;
+          try {
+            sendContent(new Uint8Array(0), false);
+          } catch {
+            // socket is closing; the close handler settles the write
           }
+        }, WRITE_HEARTBEAT_MS);
+
+        let completed: boolean;
+        try {
+          completed = await streamUpload({
+            iterator: rechunk(chunks)[Symbol.asyncIterator](),
+            settledSignal,
+            isSettled: () => settled,
+            awaitDrain,
+            send: sendContent,
+          });
         } catch (error) {
-          // The caller's source failed; free the server's file handle. The
-          // partial file remains on disk.
+          // The caller's source (or a stalled transport) failed; free the
+          // server's file handle. The partial file remains on disk.
           pending.delete(id);
           disarm();
           closeSocket();
           throw error;
+        } finally {
+          clearInterval(heartbeat);
         }
-        if (settled) return done;
-        await awaitDrain();
-        if (settled) return done;
-        sendContent(held ?? new Uint8Array(0), true);
-        arm();
+        // The end marker is out; guard the wait for the server's ack.
+        if (completed) arm();
         return done;
       },
 
@@ -343,6 +375,11 @@ export function connectFilesWs(args: {
 
     socket.onopen = () => {
       opened = true;
+      if (socket.bufferedAmount === undefined) {
+        config.log(
+          "files: webSocketImpl exposes no bufferedAmount; upload pacing is disabled",
+        );
+      }
       resolve(connection);
     };
 
@@ -449,4 +486,58 @@ async function* rechunk(
       );
     }
   }
+}
+
+/**
+ * Streams upload content with one-chunk lookahead so the final frame can
+ * carry the end marker. Each pull races the settled signal: when the server
+ * fails the write (or the connection drops) mid-pull, the transfer must not
+ * stay suspended on a source that never yields again. Returns true once the
+ * end marker has been sent, false when the write settled early.
+ */
+async function streamUpload(args: {
+  iterator: AsyncIterator<Uint8Array>;
+  settledSignal: Promise<"settled">;
+  isSettled: () => boolean;
+  awaitDrain: () => Promise<void>;
+  send: (payload: Uint8Array, last: boolean) => void;
+}): Promise<boolean> {
+  const { iterator, isSettled, awaitDrain, send } = args;
+  let held: Uint8Array | undefined;
+  for (;;) {
+    const next = await nextChunkOrSettled(args);
+    if (next === null) return false;
+    if (next.done) break;
+    if (held) {
+      await awaitDrain();
+      if (isSettled()) return false;
+      send(held, false);
+    }
+    held = next.value;
+  }
+  if (isSettled()) return false;
+  await awaitDrain();
+  if (isSettled()) return false;
+  send(held ?? new Uint8Array(0), true);
+  return true;
+}
+
+/**
+ * Pulls the next source chunk, racing the settled signal. Returns null —
+ * after releasing the source — when the write settled while waiting, so a
+ * source that never yields again cannot suspend the transfer.
+ */
+async function nextChunkOrSettled(args: {
+  iterator: AsyncIterator<Uint8Array>;
+  settledSignal: Promise<"settled">;
+  isSettled: () => boolean;
+}): Promise<IteratorResult<Uint8Array> | null> {
+  const { iterator, settledSignal, isSettled } = args;
+  const nextChunk = iterator.next();
+  void Promise.resolve(nextChunk).catch(() => {}); // may settle after losing the race
+  const next = await Promise.race([nextChunk, settledSignal]);
+  if (next !== "settled" && !isSettled()) return next;
+  // Release the source (runs generator/stream cleanup).
+  void Promise.resolve(iterator.return?.(undefined)).catch(() => {});
+  return null;
 }

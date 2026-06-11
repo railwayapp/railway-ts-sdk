@@ -107,7 +107,11 @@ export interface SandboxFileEntry {
   name: string;
   /** Size in bytes. */
   size: number;
-  /** POSIX mode as reported by the VM, including file-type bits. */
+  /**
+   * File mode. The low 9 bits (`mode & 0o777`) are the POSIX permission
+   * bits; higher bits encode the file type in a non-POSIX layout — use
+   * `isDir` rather than masking type bits.
+   */
   mode: number;
   isDir: boolean;
   /** Modification time, RFC 3339 UTC. */
@@ -117,11 +121,11 @@ export interface SandboxFileEntry {
 export type FileReadFormat = "text" | "bytes" | "stream";
 
 export interface FileReadOptions {
-  /** Start reading at this byte offset. Mutually exclusive with `fromEnd`. */
+  /** Start reading at this non-negative byte offset. Mutually exclusive with `fromEnd`. */
   offset?: number;
-  /** Read at most this many bytes (to EOF when omitted). */
+  /** Read at most this many bytes (to EOF when omitted). Must be positive. */
   length?: number;
-  /** Read the last `length` bytes — a tail read. */
+  /** Read the last `length` bytes — a tail read. Requires `length`. */
   fromEnd?: boolean;
 }
 

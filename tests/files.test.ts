@@ -23,6 +23,7 @@ const auth = { token: "token_123", environmentId: "environment_123" };
 beforeEach(clearRailwayEnv);
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.useRealTimers();
 });
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
@@ -272,6 +273,106 @@ describe("files.read", () => {
     expect((error as Error).message).toContain("permission denied");
   });
 
+  it("applies consumer backpressure: no next segment until the stream drains", async () => {
+    const mb = 1024 * 1024;
+    const { sandbox, ws } = await filesSandbox();
+    const stream = await sandbox.files.read("/big.bin", { format: "stream" });
+    const socket = await ws.nextSocket();
+    await acceptStat(socket, 5 * mb);
+
+    expect(await socket.nextRequest()).toMatchObject({
+      data: { offset: 0, length: 2 * mb },
+    });
+    socket.serverBinary(2, FRAME_READ_END, 0, new Uint8Array(2 * mb).fill(1));
+
+    // Nothing consumes the stream, so the next segment must not be requested.
+    for (let i = 0; i < 20; i++) await tick();
+    expect(socket.sentText.length).toBe(2); // stat + first read only
+
+    // Consuming the queued chunk frees capacity and triggers the next segment.
+    const reader = stream.getReader();
+    expect((await reader.read()).value?.length).toBe(2 * mb);
+    const next = await socket.nextRequest();
+    expect(next.data).toMatchObject({ offset: 2 * mb });
+
+    socket.serverBinary(
+      3,
+      FRAME_READ_END,
+      0,
+      new Uint8Array(3 * mb).fill(2),
+    );
+    expect((await reader.read()).value?.length).toBe(3 * mb);
+    expect((await reader.read()).done).toBe(true);
+  });
+
+  it("clamps a binary frame to its declared payload length", async () => {
+    const { sandbox, ws } = await filesSandbox();
+    const promise = sandbox.files.read("/weird", { format: "bytes" });
+    const socket = await ws.nextSocket();
+    // Zero-size stat takes the single direct-read path.
+    await acceptStat(socket, 0);
+    await socket.nextRequest();
+
+    // Header declares 3 payload bytes but the frame carries 6: only 3 count.
+    const frame = new Uint8Array(12 + 6);
+    const view = new DataView(frame.buffer);
+    view.setUint16(0, 2); // request id
+    view.setUint16(2, FRAME_READ_END);
+    view.setUint32(8, 3); // declared payload length
+    frame.set([10, 11, 12, 99, 99, 99], 12);
+    socket.serverRaw(frame.buffer);
+
+    await expect(promise).resolves.toEqual(new Uint8Array([10, 11, 12]));
+  });
+
+  it("rejects with a connection error when the server never replies", async () => {
+    vi.useFakeTimers();
+    const { sandbox, ws } = await filesSandbox();
+    const promise = sandbox.files.stat("/silent");
+    promise.catch(() => {}); // assertion attaches after the timer fires
+    const socket = await ws.nextSocket();
+    await socket.nextRequest();
+
+    await vi.advanceTimersByTimeAsync(31_000);
+    await expect(promise).rejects.toBeInstanceOf(RailwayConnectionError);
+    expect(socket.readyState).toBe(3);
+  });
+
+  it("survives more drops than the retry budget when each attempt progresses", async () => {
+    const kb = 1024;
+    const drops = 5; // more than TRANSFER_MAX_RETRIES — progress resets the budget
+    const { sandbox, ws } = await filesSandbox(drops + 1);
+    const promise = sandbox.files.read("/flaky.bin", { format: "bytes" });
+
+    const first = await ws.nextSocket();
+    await acceptStat(first, 100 * kb);
+
+    let socket = first;
+    for (let i = 1; i <= drops; i++) {
+      await socket.nextRequest();
+      const reqId = socket === first ? 2 : 1;
+      socket.serverBinary(reqId, FRAME_READ_CHUNK, 0, new Uint8Array(kb).fill(i));
+      await tick(); // deliver progress before the drop
+      socket.serverClose(1006, "flaky");
+      socket = await ws.nextSocket();
+    }
+
+    const final = await socket.nextRequest();
+    expect((final.data as { offset: number }).offset).toBe(drops * kb);
+    socket.serverBinary(
+      1,
+      FRAME_READ_END,
+      0,
+      new Uint8Array(100 * kb - drops * kb).fill(9),
+    );
+
+    const bytes = (await promise) as Uint8Array;
+    expect(bytes.length).toBe(100 * kb);
+    expect(bytes[0]).toBe(1);
+    expect(bytes[drops * kb - 1]).toBe(drops);
+    expect(bytes[drops * kb]).toBe(9);
+  }, 15_000);
+
   it("resumes a segmented read from the dropped byte position", async () => {
     const mb = 1024 * 1024;
     const { sandbox, ws } = await filesSandbox(2);
@@ -474,6 +575,55 @@ describe("files.write", () => {
     ).rejects.toThrow(TypeError);
   });
 
+  it("pauses sending while the socket buffer is above the high-water mark", async () => {
+    const { sandbox, ws } = await filesSandbox();
+    const promise = sandbox.files.write("/big.bin", new Uint8Array(130 * 1024));
+    const socket = await ws.nextSocket();
+    const start = await socket.nextRequest();
+
+    // Simulate a congested socket before the client starts streaming.
+    socket.bufferedAmount = 256 * 1024;
+    socket.serverReply("write_ready", start.id!);
+    for (let i = 0; i < 20; i++) await tick();
+    expect(socket.sentBinary.length).toBe(0);
+
+    // Draining the buffer lets the transfer proceed.
+    socket.bufferedAmount = 0;
+    await until(() => socket.sentBinary.length === 3, "frames after drain");
+    socket.serverReply("ok", start.id!);
+    await expect(promise).resolves.toBeUndefined();
+  });
+
+  it("replays a Blob from a fresh stream when retrying after a drop", async () => {
+    const { sandbox, ws } = await filesSandbox(2);
+    const promise = sandbox.files.write("/blob.bin", new Blob(["blob data"]));
+
+    const first = await ws.nextSocket();
+    const start = await first.nextRequest();
+    expect((start.data as { size: number }).size).toBe(9);
+    first.serverReply("write_ready", start.id!);
+    first.serverClose(1006, "gone");
+
+    // The retry must re-read the Blob, not a consumed stream.
+    const second = await ws.nextSocket();
+    await acceptWrite(second, 1);
+    expect(second.sentBinary[0]?.payload).toEqual(enc("blob data"));
+    await expect(promise).resolves.toBeUndefined();
+  }, 15_000);
+
+  it("gives up retrying a replayable write once the budget is spent", async () => {
+    const { sandbox, ws } = await filesSandbox(4);
+    const promise = sandbox.files.write("/f.txt", "payload");
+    promise.catch(() => {}); // assertion attaches after the final drop
+    // Original attempt + 3 retries, all dropped.
+    for (let i = 0; i < 4; i++) {
+      const socket = await ws.nextSocket();
+      await socket.nextRequest();
+      socket.serverClose(1006, "gone");
+    }
+    await expect(promise).rejects.toBeInstanceOf(RailwayConnectionError);
+  }, 15_000);
+
   it("retries a replayable write on a fresh connection after a drop", async () => {
     const { sandbox, ws } = await filesSandbox(2);
     const promise = sandbox.files.write("/f.txt", "hello");
@@ -639,6 +789,19 @@ describe("files metadata ops", () => {
     const { sandbox } = await filesSandbox(0);
     await expect(sandbox.files.read("")).rejects.toThrow(TypeError);
     await expect(sandbox.files.mkdir("  ")).rejects.toThrow(TypeError);
+  });
+
+  it("rejects invalid read ranges without connecting", async () => {
+    const { sandbox } = await filesSandbox(0);
+    await expect(
+      sandbox.files.read("/f", { fromEnd: true }),
+    ).rejects.toThrow(TypeError);
+    await expect(
+      sandbox.files.read("/f", { offset: -1 }),
+    ).rejects.toThrow(TypeError);
+    await expect(
+      sandbox.files.read("/f", { length: 0 }),
+    ).rejects.toThrow(TypeError);
   });
 });
 

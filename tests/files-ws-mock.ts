@@ -38,6 +38,8 @@ export interface MockFilesSocket {
   protocols: string[];
   /** 1 = OPEN, 3 = CLOSED (subset of the WebSocket readyState constants). */
   readyState: number;
+  /** Settable by tests to simulate send-buffer congestion. */
+  bufferedAmount: number;
   /** JSON request frames the client sent. */
   sentText: FilesRequestFrame[];
   /** Parsed binary frames (write chunks) the client sent. */
@@ -52,6 +54,8 @@ export interface MockFilesSocket {
     seq: number,
     payload: Uint8Array,
   ): void;
+  /** Deliver a raw binary frame verbatim (for malformed-header cases). */
+  serverRaw(buffer: ArrayBuffer): void;
   serverClose(code: number, reason?: string): void;
 }
 
@@ -149,6 +153,10 @@ export function createFilesWsMock(): FilesWsMock {
       view.setUint32(8, payload.length);
       frame.set(payload, 12);
       this.deliver(frame.buffer);
+    }
+
+    serverRaw(buffer: ArrayBuffer): void {
+      this.deliver(buffer);
     }
 
     serverClose(code: number, reason = ""): void {
