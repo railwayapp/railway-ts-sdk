@@ -66,13 +66,12 @@ async function acceptWrite(socket: MockFilesSocket, expectedFrames: number) {
   return request;
 }
 
-const fileEntry = (size: number, overrides: Record<string, unknown> = {}) => ({
+const fileEntry = (size: number) => ({
   name: "file",
   size,
   mode: 420,
   isDir: false,
   modTime: "2026-06-11T00:00:00Z",
-  ...overrides,
 });
 
 /** Answers the stat request that precedes every read. */

@@ -136,7 +136,7 @@ export function connectFilesWs(args: {
      * upload the server is intentionally silent, so the guard stays off until
      * the final chunk is sent.
      */
-    const register = (op: Omit<PendingOp, "fail"> & { fail(e: Error): void }) => {
+    const register = (op: PendingOp) => {
       // Binary frames echo the id as a u16, so wrap before 65536. Requests
       // on a connection are sequential, so a wrapped id is never in flight
       // alongside its predecessor.
@@ -159,11 +159,7 @@ export function connectFilesWs(args: {
           closeSocket();
         }, INACTIVITY_TIMEOUT_MS);
       };
-      pending.set(id, {
-        onReply: op.onReply,
-        ...(op.onBinary ? { onBinary: op.onBinary } : {}),
-        fail: op.fail,
-      });
+      pending.set(id, op);
       return { id, arm, disarm };
     };
 
@@ -241,7 +237,7 @@ export function connectFilesWs(args: {
 
       async write(start, chunks) {
         let settled = false;
-        let settle: { resolve(): void; reject(error: Error): void };
+        let settle!: { resolve(): void; reject(error: Error): void };
         const done = new Promise<void>((resolveWrite, rejectWrite) => {
           settle = {
             resolve: () => {
@@ -259,7 +255,7 @@ export function connectFilesWs(args: {
         // surface as unhandled.
         done.catch(() => {});
 
-        let ready: { resolve(): void; reject(error: Error): void };
+        let ready!: { resolve(): void; reject(error: Error): void };
         const writeReady = new Promise<void>((resolveReady, rejectReady) => {
           ready = { resolve: resolveReady, reject: rejectReady };
         });
