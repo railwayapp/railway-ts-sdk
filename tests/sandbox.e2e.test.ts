@@ -3,9 +3,11 @@ import { createHash, randomBytes } from "node:crypto";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  RailwayConnectionError,
   RailwayGraphQLError,
   Sandbox,
   SandboxFileNotFoundError,
+  SandboxNotFoundError,
   type ExecHandle,
 } from "../src/index.js";
 
@@ -303,15 +305,28 @@ describe.runIf(live)("files e2e (live)", () => {
     // stream — both directions exercise chunking and backpressure.
     const chunkBytes = 1024 * 1024;
     const chunkCount = 24;
-    const pushHash = createHash("sha256");
-    async function* source(): AsyncGenerator<Uint8Array> {
-      for (let i = 0; i < chunkCount; i++) {
-        const chunk = randomBytes(chunkBytes);
-        pushHash.update(chunk);
-        yield new Uint8Array(chunk);
+
+    // One-shot stream sources surface server session drops as connection
+    // errors by contract (no auto-retry). The server is known to drop a
+    // fraction of long upload sessions, so retry at the test level with a
+    // fresh generator; content integrity is what's under test here.
+    let pushHash!: ReturnType<typeof createHash>;
+    for (let attempt = 1; ; attempt++) {
+      pushHash = createHash("sha256");
+      async function* source(): AsyncGenerator<Uint8Array> {
+        for (let i = 0; i < chunkCount; i++) {
+          const chunk = randomBytes(chunkBytes);
+          pushHash.update(chunk);
+          yield new Uint8Array(chunk);
+        }
+      }
+      try {
+        await sandbox.files.write("/tmp/large.bin", source());
+        break;
+      } catch (error) {
+        if (!(error instanceof RailwayConnectionError) || attempt >= 4) throw error;
       }
     }
-    await sandbox.files.write("/tmp/large.bin", source());
 
     const entry = await sandbox.files.stat("/tmp/large.bin");
     expect(entry.size).toBe(chunkBytes * chunkCount);
@@ -494,6 +509,23 @@ describe.runIf(live)("fork + template e2e (live)", () => {
   it("checkpoint() rejects when the sandbox is not running", async () => {
     const sandbox = track(await Sandbox.create());
     await sandbox.destroy();
+
+    // destroy() returns before the sandbox has fully stopped; wait until it
+    // leaves RUNNING (or disappears) so the checkpoint attempt can't race a
+    // still-running VM and succeed. Only a not-found means gone — transient
+    // refresh failures must keep polling, not masquerade as destroyed.
+    const start = Date.now();
+    for (;;) {
+      let status: string | undefined;
+      try {
+        status = (await sandbox.refresh()).status;
+      } catch (error) {
+        if (error instanceof SandboxNotFoundError) break;
+      }
+      if (status !== undefined && status !== "RUNNING") break;
+      if (Date.now() - start > 60_000) throw new Error("sandbox stayed RUNNING after destroy()");
+      await sleep(1_000);
+    }
 
     const error = await sandbox
       .checkpoint(`sdk-e2e-dead-${Date.now()}`)
