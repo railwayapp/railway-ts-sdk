@@ -1,11 +1,14 @@
 export { Sandbox } from "./sandbox.js";
 export {
   SandboxFailedError,
+  SandboxFileNotFoundError,
+  SandboxFilesError,
   SandboxNotFoundError,
   SandboxTemplateBuildError,
   SandboxTimeoutError,
 } from "./errors.js";
 export { ExecHandle } from "./exec.js";
+export { SandboxFiles } from "./files.js";
 export type { SandboxTemplate } from "./template.js";
 export type {
   CheckpointOptions,
@@ -16,9 +19,13 @@ export type {
   ExecResult,
   ExecSignal,
   ExecTarget,
+  FileReadFormat,
+  FileReadOptions,
+  FileWriteData,
   ForkOptions,
   ListOptions,
   SandboxCheckpointInfo,
+  SandboxFileEntry,
   SandboxInfo,
   SandboxNetworkIsolation,
   SandboxStatus,

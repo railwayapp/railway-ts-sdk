@@ -10,6 +10,7 @@ import {
   type SandboxTemplate,
 } from "./template.js";
 import type { ExecHandle } from "./exec.js";
+import type { SandboxFiles } from "./files.js";
 import type {
   CheckpointOptions,
   ConnectOptions,
@@ -35,6 +36,7 @@ import type {
 export class Sandbox implements AsyncDisposable {
   readonly #engine: SandboxEngine;
   #info: SandboxInfo;
+  #files: SandboxFiles | undefined;
 
   private constructor(engine: SandboxEngine, info: SandboxInfo) {
     this.#engine = engine;
@@ -177,6 +179,16 @@ export class Sandbox implements AsyncDisposable {
   exec(target: ExecReattachTarget, options?: ExecOptions): ExecHandle;
   exec(target: ExecTarget, options: ExecOptions = {}): ExecHandle {
     return this.#engine.exec(this.id, target, options);
+  }
+
+  /**
+   * File operations on this sandbox's filesystem: `read`, `write`, `list`,
+   * `stat`, `exists`, `mkdir`, `remove`, `rename`. Reads and writes stream,
+   * so arbitrarily large files transfer with bounded memory.
+   */
+  get files(): SandboxFiles {
+    this.#files ??= this.#engine.files(this.id);
+    return this.#files;
   }
 
   /**

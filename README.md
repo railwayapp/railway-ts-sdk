@@ -97,6 +97,56 @@ If the WebSocket cannot be established, `exec` rejects with
 `RailwayConnectionError`. In non-Node runtimes without a global `WebSocket`,
 pass an implementation via the `webSocketImpl` config option.
 
+## Files
+
+`sandbox.files` reads and writes the sandbox filesystem directly — no shell quoting, no
+base64, binary-safe. Content streams in both directions, so files far larger than memory
+transfer with bounded memory.
+
+```ts
+await sandbox.files.write("/app/config.json", JSON.stringify(config));
+const text = await sandbox.files.read("/app/config.json"); // string
+
+const bytes = await sandbox.files.read("/data/model.bin", { format: "bytes" }); // Uint8Array
+```
+
+`write` accepts a `string`, `Uint8Array`, `ArrayBuffer`, `Blob`, `ReadableStream`, or any
+`AsyncIterable<Uint8Array>`, and creates missing parent directories automatically.
+Streams upload unbuffered, so pushing a multi-GB file from disk is:
+
+```ts
+import { createReadStream } from "node:fs";
+
+await sandbox.files.write("/data/dataset.bin", createReadStream("./dataset.bin"));
+```
+
+Pull large files as a stream (cancelling the stream aborts the transfer), or read just a
+range — `offset`/`length` from the start, or `fromEnd` for tails:
+
+```ts
+const stream = await sandbox.files.read("/data/out.bin", { format: "stream" });
+for await (const chunk of stream) process.stdout.write(chunk);
+
+const tail = await sandbox.files.read("/var/log/app.log", { length: 4096, fromEnd: true });
+```
+
+Inspect and manage entries with `list`, `stat`, `exists`, `mkdir` (recursive, like
+`mkdir -p`), `rename`, and `remove` (files and empty directories — use
+`sandbox.exec("rm -rf ...")` for recursive deletes):
+
+```ts
+for (const entry of await sandbox.files.list("/app")) {
+  console.log(entry.name, entry.size, entry.isDir, entry.modTime);
+}
+```
+
+Paths are absolute within the sandbox. Files are created `0644` — use
+`sandbox.exec("chmod +x ...")` to make one executable. Reads of missing paths throw
+`SandboxFileNotFoundError`; other remote failures throw `SandboxFilesError` with the VM's
+error text. Each operation authorizes itself with a short-lived files-scoped token, so
+`files` works on any `RUNNING` sandbox you can `connect` to. See
+`examples/sandboxes/files.ts` for a full tour.
+
 ## Forking
 
 Fork a running sandbox to get an independent copy of its filesystem — handy for branching
@@ -238,6 +288,9 @@ All errors extend `RailwayError`:
 - `SandboxTimeoutError`: a readiness wait (template → `READY` or sandbox → `RUNNING`)
   exceeded the 5-minute timeout. Carries `.resource`, `.id`, `.lastStatus`, and
   `.timeoutMs`.
+- `SandboxFilesError`: a file operation was rejected by the sandbox (permission denied,
+  not a directory, disk full, ...). Carries `.operation` and `.path`.
+- `SandboxFileNotFoundError`: the path does not exist; subclass of `SandboxFilesError`.
 
 ## Requirements
 

@@ -79,3 +79,7 @@ run = "pnpm exec tsx examples/sandboxes/exec.ts"
 description = "Create a sandbox, fork it, and read forked filesystem state using .env credentials"
 run = "pnpm exec tsx examples/sandboxes/fork.ts"
 
+[tasks."example:files"]
+description = "Push, pull, stream, and manage sandbox files using .env credentials"
+run = "pnpm exec tsx examples/sandboxes/files.ts"
+

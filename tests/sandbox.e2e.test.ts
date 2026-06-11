@@ -1,6 +1,13 @@
+import { createHash, randomBytes } from "node:crypto";
+
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
-import { RailwayGraphQLError, Sandbox, type ExecHandle } from "../src/index.js";
+import {
+  RailwayGraphQLError,
+  Sandbox,
+  SandboxFileNotFoundError,
+  type ExecHandle,
+} from "../src/index.js";
 
 /**
  * Live end-to-end sandbox tests: exec, durable reattach, fork, and templates.
@@ -240,6 +247,114 @@ describe.runIf(live)("exec e2e (live)", () => {
     // short of `total`.
     expect(result.exitCode).toBe(-1);
     expect(lineNumbers(result.stdout).length).toBeLessThan(total);
+  }, 120_000);
+});
+
+describe.runIf(live)("files e2e (live)", () => {
+  let sandbox: Sandbox;
+
+  beforeAll(async () => {
+    sandbox = await Sandbox.create({ idleTimeoutMinutes: 10 });
+  }, 240_000);
+
+  afterAll(async () => {
+    await sandbox?.destroy().catch(() => {});
+  });
+
+  it("round-trips text and shows up for exec", async () => {
+    await sandbox.files.write("/tmp/notes.txt", "hello files\n");
+    expect(await sandbox.files.read("/tmp/notes.txt")).toBe("hello files\n");
+
+    // The same file is visible to the exec primitive.
+    expect((await sandbox.exec("cat /tmp/notes.txt")).stdout).toBe(
+      "hello files\n",
+    );
+
+    const entry = await sandbox.files.stat("/tmp/notes.txt");
+    expect(entry).toMatchObject({ name: "notes.txt", isDir: false, size: 12 });
+  }, 120_000);
+
+  it("round-trips binary content exactly, with range and tail reads", async () => {
+    const payload = randomBytes(200 * 1024);
+    await sandbox.files.write("/tmp/blob.bin", new Uint8Array(payload));
+
+    const back = await sandbox.files.read("/tmp/blob.bin", { format: "bytes" });
+    expect(Buffer.from(back).equals(payload)).toBe(true);
+
+    const slice = await sandbox.files.read("/tmp/blob.bin", {
+      format: "bytes",
+      offset: 1000,
+      length: 64,
+    });
+    expect(Buffer.from(slice).equals(payload.subarray(1000, 1064))).toBe(true);
+
+    const tail = await sandbox.files.read("/tmp/blob.bin", {
+      format: "bytes",
+      length: 64,
+      fromEnd: true,
+    });
+    expect(Buffer.from(tail).equals(payload.subarray(payload.length - 64))).toBe(
+      true,
+    );
+  }, 120_000);
+
+  it("streams a large unknown-size push and pull with intact content", async () => {
+    // ~24MB pushed as an async iterable (no declared size) and pulled as a
+    // stream — both directions exercise chunking and backpressure.
+    const chunkBytes = 1024 * 1024;
+    const chunkCount = 24;
+    const pushHash = createHash("sha256");
+    async function* source(): AsyncGenerator<Uint8Array> {
+      for (let i = 0; i < chunkCount; i++) {
+        const chunk = randomBytes(chunkBytes);
+        pushHash.update(chunk);
+        yield new Uint8Array(chunk);
+      }
+    }
+    await sandbox.files.write("/tmp/large.bin", source());
+
+    const entry = await sandbox.files.stat("/tmp/large.bin");
+    expect(entry.size).toBe(chunkBytes * chunkCount);
+
+    const stream = await sandbox.files.read("/tmp/large.bin", {
+      format: "stream",
+    });
+    const pullHash = createHash("sha256");
+    let pulled = 0;
+    const reader = stream.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      pullHash.update(value);
+      pulled += value.length;
+    }
+    expect(pulled).toBe(chunkBytes * chunkCount);
+    expect(pullHash.digest("hex")).toBe(pushHash.digest("hex"));
+  }, 300_000);
+
+  it("manages directories and entries: mkdir, list, rename, remove", async () => {
+    await sandbox.files.mkdir("/tmp/files-e2e/nested");
+    await sandbox.files.write("/tmp/files-e2e/nested/a.txt", "a");
+
+    const entries = await sandbox.files.list("/tmp/files-e2e/nested");
+    expect(entries.map(e => e.name)).toContain("a.txt");
+
+    await sandbox.files.rename(
+      "/tmp/files-e2e/nested/a.txt",
+      "/tmp/files-e2e/nested/b.txt",
+    );
+    expect(await sandbox.files.exists("/tmp/files-e2e/nested/a.txt")).toBe(false);
+    expect(await sandbox.files.exists("/tmp/files-e2e/nested/b.txt")).toBe(true);
+
+    await sandbox.files.remove("/tmp/files-e2e/nested/b.txt");
+    expect(await sandbox.files.exists("/tmp/files-e2e/nested/b.txt")).toBe(false);
+  }, 120_000);
+
+  it("raises typed errors for missing paths", async () => {
+    const error = await sandbox.files
+      .read(`/tmp/missing-${Date.now()}`)
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(SandboxFileNotFoundError);
   }, 120_000);
 });
 
