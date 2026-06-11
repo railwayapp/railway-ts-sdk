@@ -95,6 +95,7 @@ export {
   type FileReadFormat,
   type FileReadOptions,
   type FileWriteData,
+  type FileWriteOptions,
   type ForkOptions,
   type ListOptions,
   type SandboxCheckpointInfo,

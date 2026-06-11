@@ -15,10 +15,12 @@ import {
   type RailwayGenerateShellTokenMutationVariables,
 } from "../generated/graphql.js";
 import { SandboxFileNotFoundError, SandboxFilesError } from "./errors.js";
+import { startExec } from "./exec.js";
 import type {
   FileReadFormat,
   FileReadOptions,
   FileWriteData,
+  FileWriteOptions,
   SandboxFileEntry,
 } from "./types.js";
 
@@ -126,17 +128,23 @@ export class SandboxFiles {
    * unbuffered but are one-shot, so a dropped session surfaces as
    * `RailwayConnectionError` (and a partial file may remain at `path`).
    *
-   * Files are created `0644`; mode changes are not applied by the server
-   * yet, so use `sandbox.exec("chmod ...")` to make a file executable.
+   * Files are created `0644`; pass `mode` to set permissions (applied right
+   * after the upload completes).
    */
   // Public SDK API; consumed by library users, not in-repo code.
   // fallow-ignore-next-line unused-class-member
-  async write(path: string, data: FileWriteData): Promise<void> {
+  async write(
+    path: string,
+    data: FileWriteData,
+    options: FileWriteOptions = {},
+  ): Promise<void> {
     const target = validatePath(path);
+    const mode = validateMode(options.mode);
     const source = uploadSource(data);
-    // mode 0 = server default. A nonzero mode is accepted by the protocol
-    // but currently ignored server-side — expose an option once it applies.
-    const start = { path: target, mode: 0, size: source.size };
+    // The server does not apply the protocol's mode yet; it is still sent so
+    // existing uploads pick it up natively once it does. Until then `mode`
+    // is applied with a chmod over the exec primitive after the upload.
+    const start = { path: target, mode: mode ?? 0, size: source.size };
     this.#log(
       `files write ${target} size=${source.size > 0 ? source.size : "stream"}`,
     );
@@ -145,8 +153,7 @@ export class SandboxFiles {
     for (;;) {
       try {
         await this.#writeOnce(target, start, source);
-        this.#log(`files write ${target} done`);
-        return;
+        break;
       } catch (error) {
         // A dropped session is retriable when the source can be replayed
         // (the file is truncated again by the next write_start). One-shot
@@ -159,6 +166,28 @@ export class SandboxFiles {
         this.#log(`files write ${target} retrying after connection loss`);
         await sleep(TRANSFER_RETRY_DELAY_MS);
       }
+    }
+
+    if (mode !== undefined) await this.#applyMode(target, mode);
+    this.#log(`files write ${target} done`);
+  }
+
+  /** Sets `path`'s permissions with a chmod run through the exec primitive. */
+  async #applyMode(path: string, mode: number): Promise<void> {
+    const octal = mode.toString(8).padStart(3, "0");
+    const result = await startExec(
+      this.#context,
+      `chmod ${octal} -- ${shellQuote(path)}`,
+      { timeoutSec: 30 },
+    );
+    if (result.exitCode !== 0) {
+      throw new SandboxFilesError({
+        operation: "write",
+        path,
+        message:
+          result.stderr.trim() ||
+          `chmod ${octal} exited with code ${result.exitCode}`,
+      });
     }
   }
 
@@ -408,6 +437,19 @@ function validateReadOptions(options: FileReadOptions): void {
   if (options.fromEnd && options.offset !== undefined) {
     throw new TypeError("`offset` and `fromEnd` are mutually exclusive.");
   }
+}
+
+function validateMode(mode: number | undefined): number | undefined {
+  if (mode === undefined) return undefined;
+  if (!Number.isInteger(mode) || mode < 0 || mode > 0o7777) {
+    throw new TypeError("`mode` must be POSIX permission bits (e.g. 0o755).");
+  }
+  return mode;
+}
+
+/** Single-quotes a path for the in-sandbox shell. */
+function shellQuote(path: string): string {
+  return `'${path.replaceAll("'", `'\\''`)}'`;
 }
 
 /** An in-flight download; `abort()` stops it and resolves `done`. */

@@ -108,6 +108,7 @@ await sandbox.files.write("/app/config.json", JSON.stringify(config));
 const text = await sandbox.files.read("/app/config.json"); // string
 
 const bytes = await sandbox.files.read("/data/model.bin", { format: "bytes" }); // Uint8Array
+await sandbox.files.write("/app/run.sh", "#!/bin/sh\n...", { mode: 0o755 });
 ```
 
 `write` accepts a `string`, `Uint8Array`, `ArrayBuffer`, `Blob`, `ReadableStream`, or any
@@ -140,8 +141,8 @@ for (const entry of await sandbox.files.list("/app")) {
 }
 ```
 
-Paths are absolute within the sandbox. Files are created `0644` — use
-`sandbox.exec("chmod +x ...")` to make one executable. Reads of missing paths throw
+Paths are absolute within the sandbox. Files are created `0644`; pass `mode` on `write`
+to set permissions. Reads of missing paths throw
 `SandboxFileNotFoundError`; other remote failures throw `SandboxFilesError` with the VM's
 error text. Each operation authorizes itself with a short-lived files-scoped token, so
 `files` works on any `RUNNING` sandbox you can `connect` to. See

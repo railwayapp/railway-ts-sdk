@@ -11,9 +11,10 @@ await runExample(async () => {
   console.log("read:", await sandbox.files.read("/app/config.json"));
   console.log("stat:", await sandbox.files.stat("/app/config.json"));
 
-  // Files are created 0644; chmod via exec to make one executable.
-  await sandbox.files.write("/app/run.sh", "#!/bin/sh\necho from-script\n");
-  await sandbox.exec("chmod +x /app/run.sh");
+  // Executable scripts via the mode option.
+  await sandbox.files.write("/app/run.sh", "#!/bin/sh\necho from-script\n", {
+    mode: 0o755,
+  });
   console.log("exec:", (await sandbox.exec("/app/run.sh")).stdout.trim());
 
   // Push a large payload from an async iterable — nothing is buffered, so

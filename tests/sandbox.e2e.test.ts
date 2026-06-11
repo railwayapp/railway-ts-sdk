@@ -350,6 +350,15 @@ describe.runIf(live)("files e2e (live)", () => {
     expect(await sandbox.files.exists("/tmp/files-e2e/nested/b.txt")).toBe(false);
   }, 120_000);
 
+  it("applies the mode option", async () => {
+    await sandbox.files.write("/tmp/run.sh", "#!/bin/sh\necho ok\n", {
+      mode: 0o755,
+    });
+    const entry = await sandbox.files.stat("/tmp/run.sh");
+    expect(entry.mode & 0o777).toBe(0o755);
+    expect((await sandbox.exec("/tmp/run.sh")).stdout).toBe("ok\n");
+  }, 120_000);
+
   it("raises typed errors for missing paths", async () => {
     const error = await sandbox.files
       .read(`/tmp/missing-${Date.now()}`)

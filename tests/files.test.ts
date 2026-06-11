@@ -440,6 +440,41 @@ describe("files.write", () => {
     await expect(promise).resolves.toBeUndefined();
   });
 
+  it("applies the mode option with a chmod over exec after the upload", async () => {
+    const { sandbox, ws, mock } = await filesSandbox(2);
+    const promise = sandbox.files.write("/app/run.sh", "#!/bin/sh\n", {
+      mode: 0o755,
+    });
+
+    const upload = await ws.nextSocket();
+    const start = await acceptWrite(upload, 1);
+    // The protocol mode is still declared so native support picks it up.
+    expect((start.data as { mode: number }).mode).toBe(0o755);
+
+    // After the upload, a shell-scoped exec applies the permissions.
+    const exec = await ws.nextSocket();
+    expect(exec.url).toContain("/ws/exec");
+    expect(
+      (mock.calls[2]?.body.variables as { input: { scope: string } }).input
+        .scope,
+    ).toBe("shell");
+    const init = await exec.nextRequest();
+    expect(init).toMatchObject({
+      type: "init_exec",
+      data: { command: "chmod 755 -- '/app/run.sh'" },
+    });
+    exec.serverReply("exit", "0", { exit_code: 0 });
+
+    await expect(promise).resolves.toBeUndefined();
+  });
+
+  it("rejects an invalid mode without uploading", async () => {
+    const { sandbox } = await filesSandbox(0);
+    await expect(
+      sandbox.files.write("/f", "x", { mode: 0o100000 }),
+    ).rejects.toThrow(TypeError);
+  });
+
   it("retries a replayable write on a fresh connection after a drop", async () => {
     const { sandbox, ws } = await filesSandbox(2);
     const promise = sandbox.files.write("/f.txt", "hello");

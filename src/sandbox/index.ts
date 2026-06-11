@@ -22,6 +22,7 @@ export type {
   FileReadFormat,
   FileReadOptions,
   FileWriteData,
+  FileWriteOptions,
   ForkOptions,
   ListOptions,
   SandboxCheckpointInfo,

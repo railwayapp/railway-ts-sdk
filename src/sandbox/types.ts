@@ -137,6 +137,14 @@ export type FileWriteData =
   | ReadableStream<Uint8Array>
   | AsyncIterable<Uint8Array>;
 
+export interface FileWriteOptions {
+  /**
+   * POSIX permission bits for the file (e.g. `0o755`), applied right after
+   * the upload completes. Files default to `0644` when omitted.
+   */
+  mode?: number;
+}
+
 export interface TemplateBuildOptions extends RailwayClientConfig {
   environmentId?: string;
 }
