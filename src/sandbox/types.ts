@@ -101,6 +101,58 @@ export interface ExecOptions {
   resumeFromLastRead?: boolean;
 }
 
+/** A directory entry or stat result from the sandbox filesystem. */
+export interface SandboxFileEntry {
+  /** Base name (no directory prefix). */
+  name: string;
+  /** Size in bytes. */
+  size: number;
+  /**
+   * File mode. The low 9 bits (`mode & 0o777`) are the POSIX permission
+   * bits; higher bits encode the file type in a non-POSIX layout, so use
+   * `isDir` rather than masking type bits.
+   */
+  mode: number;
+  isDir: boolean;
+  /** Modification time, RFC 3339 UTC. */
+  modTime: string;
+}
+
+export type FileReadFormat = "text" | "bytes" | "stream";
+
+export interface FileReadOptions {
+  /** Start reading at this non-negative byte offset. Mutually exclusive with `fromEnd`. */
+  offset?: number;
+  /** Read at most this many bytes (to EOF when omitted). Must be positive. */
+  length?: number;
+  /** Read the last `length` bytes (a tail read). Requires `length`. */
+  fromEnd?: boolean;
+}
+
+/**
+ * Content accepted by `files.write`. Streams and async iterables upload
+ * without buffering, so pushes larger than memory are safe, but they are
+ * one-shot: a dropped session can't be retried. Pass a factory
+ * (`() => stream`) when the content can be produced again; the write is then
+ * retried automatically like the in-memory forms.
+ */
+export type FileWriteData =
+  | string
+  | Uint8Array
+  | ArrayBuffer
+  | Blob
+  | ReadableStream<Uint8Array>
+  | AsyncIterable<Uint8Array>
+  | (() => ReadableStream<Uint8Array> | AsyncIterable<Uint8Array>);
+
+export interface FileWriteOptions {
+  /**
+   * POSIX permission bits for the file (e.g. `0o755`), applied right after
+   * the upload completes. Files default to `0644` when omitted.
+   */
+  mode?: number;
+}
+
 export interface TemplateBuildOptions extends RailwayClientConfig {
   environmentId?: string;
 }

@@ -2,6 +2,7 @@ node_modules/
 dist/
 coverage/
 .fallow/
+test/
 
 .env*
 !.env.example
@@ -9,3 +10,4 @@ coverage/
 *.log
 .DS_Store
 .mise.local.toml
+*.tmp.ts

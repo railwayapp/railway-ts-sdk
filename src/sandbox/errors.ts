@@ -42,6 +42,21 @@ export class SandboxTemplateBuildError extends RailwayError {
   }
 }
 
+/** A file operation was rejected by the sandbox (the message is the VM's error text). */
+export class SandboxFilesError extends RailwayError {
+  readonly operation: string;
+  readonly path: string;
+
+  constructor(args: { operation: string; path: string; message: string }) {
+    super(`File ${args.operation} failed for "${args.path}": ${args.message}`);
+    this.operation = args.operation;
+    this.path = args.path;
+  }
+}
+
+/** The path does not exist in the sandbox. */
+export class SandboxFileNotFoundError extends SandboxFilesError {}
+
 /** A readiness wait timed out. */
 export class SandboxTimeoutError extends RailwayError {
   readonly resource: "sandbox" | "template";

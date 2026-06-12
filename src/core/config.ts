@@ -12,6 +12,7 @@ const RAILWAY_VERBOSE_ENV = "RAILWAY_VERBOSE";
 
 const TCP_PROXY_WS_PORT = "2226";
 const TCP_PROXY_WS_PATH = "/ws/exec";
+const TCP_PROXY_FILES_WS_PATH = "/ws/files";
 
 export type RailwayAuthType = "bearer" | "project-token";
 
@@ -112,6 +113,20 @@ export function deriveTcpProxyWsEndpoint(endpoint: string): string {
     ? `ssh.${url.hostname.slice("backboard.".length)}`
     : `ssh.${url.hostname}`;
   return `wss://${host}:${TCP_PROXY_WS_PORT}${TCP_PROXY_WS_PATH}`;
+}
+
+/**
+ * Derives the tcp-proxy files WebSocket endpoint from the exec endpoint by
+ * swapping the bridge path: `wss://ssh.<host>:2226/ws/exec` →
+ * `wss://ssh.<host>:2226/ws/files`. Custom `tcpProxyWsEndpoint` overrides are
+ * assumed to follow the same path convention.
+ */
+export function deriveFilesWsEndpoint(tcpProxyWsEndpoint: string): string {
+  const url = new URL(tcpProxyWsEndpoint);
+  url.pathname = url.pathname.endsWith(TCP_PROXY_WS_PATH)
+    ? `${url.pathname.slice(0, -TCP_PROXY_WS_PATH.length)}${TCP_PROXY_FILES_WS_PATH}`
+    : TCP_PROXY_FILES_WS_PATH;
+  return url.toString();
 }
 
 export function resolveWebSocketImpl(

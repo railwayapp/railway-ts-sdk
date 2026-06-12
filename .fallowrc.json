@@ -15,7 +15,8 @@
   "duplicates": {
     "ignore": [
       "src/generated/graphql.ts",
-      "src/iac/**"
+      "src/iac/**",
+      "tests/**"
     ]
   },
   "health": {

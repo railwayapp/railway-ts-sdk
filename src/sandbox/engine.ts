@@ -45,6 +45,7 @@ import {
   SandboxTimeoutError,
 } from "./errors.js";
 import { startExec, type ExecContext, type ExecHandle } from "./exec.js";
+import { createSandboxFiles, type SandboxFiles } from "./files.js";
 import type {
   CompiledTemplate,
   CreateOptions,
@@ -363,6 +364,14 @@ export class SandboxEngine {
       sandboxId: id,
     };
     return startExec(context, target, options);
+  }
+
+  files(id: string): SandboxFiles {
+    return createSandboxFiles({
+      config: this.#config,
+      environmentId: this.#config.environmentId,
+      sandboxId: id,
+    });
   }
 
   async destroy(id: string): Promise<void> {

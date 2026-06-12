@@ -4,6 +4,7 @@ import {
   type WebSocketConstructor,
 } from "./config.js";
 import { RailwayConnectionError } from "./errors.js";
+import type { RailwayWsSocket } from "./ws-socket.js";
 
 /**
  * tcp-proxy `/ws/exec` wire protocol: stdout/stderr ride binary frames tagged
@@ -14,17 +15,6 @@ const STDERR_FRAME = 0x03;
 
 /** Subprotocol the tcp-proxy bridges expect alongside the JWT. */
 const SHELL_SUBPROTOCOL = "railway-shell";
-
-/** Minimal surface shared by native `WebSocket` and the `ws` package. */
-interface ExecSocket {
-  binaryType: string;
-  onopen: (() => void) | null;
-  onmessage: ((event: { data: unknown }) => void) | null;
-  onclose: ((event: { code: number; reason: string }) => void) | null;
-  onerror: ((event: unknown) => void) | null;
-  send(data: string | ArrayBufferView): void;
-  close(code?: number, reason?: string): void;
-}
 
 export interface ExecWsHandlers {
   onStdout(bytes: Uint8Array): void;
@@ -73,7 +63,7 @@ export function connectExecWs(args: {
     const socket = new WS(config.tcpProxyWsEndpoint, [
       SHELL_SUBPROTOCOL,
       jwt,
-    ]) as unknown as ExecSocket;
+    ]) as unknown as RailwayWsSocket;
     socket.binaryType = "arraybuffer";
 
     socket.onopen = () => {
