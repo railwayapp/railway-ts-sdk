@@ -64,6 +64,21 @@ result.truncated; // true if the server cut the output
 result.timedOut; // true if the command hit timeoutSec (enforced client-side)
 ```
 
+`cwd` and `env` apply per command (the SDK composes them into the command, so
+they work on every sandbox):
+
+```ts
+const result = await sandbox.exec("pnpm test", {
+  cwd: "/app",
+  env: { CI: "true" },
+});
+```
+
+Per-exec env values are embedded in the command string and visible to `ps`
+inside the sandbox; bake secrets in at create time via `Sandbox.create({ env })`
+instead. Both options apply to fresh execs only — reattaching by `sessionName`
+rejects them.
+
 Every exec runs over a WebSocket bridge to the sandbox, with separated
 stdout/stderr and a real exit code. Short commands resolve when they exit;
 passing `onStdout`/`onStderr` streams output live from the first byte. The

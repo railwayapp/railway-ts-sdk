@@ -227,6 +227,32 @@ describe("exec", () => {
     });
   });
 
+  it("wraps the command when cwd/env are given", async () => {
+    const { handle, socket } = await execSocket("npm test", {
+      cwd: "/app",
+      env: { NODE_ENV: "test" },
+    });
+
+    expect(socket.sentText[0]).toEqual({
+      type: "init_exec",
+      data: { command: "cd /app && NODE_ENV=test sh -c 'npm test'" },
+    });
+
+    socket.serverExit(0);
+    await expect(handle).resolves.toMatchObject({ exitCode: 0 });
+  });
+
+  it("rejects cwd/env on reattach — the command is already running", async () => {
+    const { sandbox } = await wsSandbox();
+
+    expect(() =>
+      sandbox.exec({ sessionName: "sess_xyz" }, { cwd: "/app" }),
+    ).toThrow(/fresh execs/);
+    expect(() =>
+      sandbox.exec({ sessionName: "sess_xyz" }, { env: { A: "1" } }),
+    ).toThrow(/fresh execs/);
+  });
+
   it("sends resume_from_last_read when the caller opts in", async () => {
     const { handle, socket } = await execSocket(
       { sessionName: "sess_xyz" },

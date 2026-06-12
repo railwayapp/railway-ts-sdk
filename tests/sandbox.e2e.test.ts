@@ -126,6 +126,20 @@ describe.runIf(live)("exec e2e (live)", () => {
     expectSequential(result.stdout);
   }, 90_000);
 
+  it("applies cwd and env to the command", async () => {
+    const result = await sandbox.exec("pwd; printf '%s\\n' \"$GREETING\"", {
+      cwd: "/tmp",
+      env: { GREETING: "hello world" },
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("/tmp\nhello world\n");
+
+    // Missing cwd fails the exec rather than running somewhere else.
+    const missing = await sandbox.exec("pwd", { cwd: "/no/such/dir" });
+    expect(missing.exitCode).not.toBe(0);
+    expect(missing.stdout).toBe("");
+  }, 90_000);
+
   it("enforces timeoutSec client-side", async () => {
     const result = await sandbox.exec("echo start; sleep 300", {
       timeoutSec: 8,

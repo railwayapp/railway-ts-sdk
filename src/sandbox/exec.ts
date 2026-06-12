@@ -10,6 +10,7 @@ import {
   type RailwayGenerateShellTokenMutation,
   type RailwayGenerateShellTokenMutationVariables,
 } from "../generated/graphql.js";
+import { wrapCommand } from "./shell.js";
 import type { ExecOptions, ExecResult, ExecSignal, ExecTarget } from "./types.js";
 
 const decoder = () => new TextDecoder();
@@ -148,6 +149,16 @@ export function startExec(
   target: ExecTarget,
   options: ExecOptions,
 ): ExecHandle {
+  if (
+    typeof target !== "string" &&
+    (options.cwd !== undefined ||
+      (options.env && Object.keys(options.env).length > 0))
+  ) {
+    throw new RailwayError(
+      "cwd/env apply only to fresh execs; a reattached session is already running.",
+    );
+  }
+
   let resolveSessionName!: (value: string) => void;
   let rejectSessionName!: (reason?: unknown) => void;
   const sessionName = new Promise<string>((resolve, reject) => {
@@ -200,7 +211,9 @@ async function runExec(
   control: ExecControl,
 ): Promise<ExecResult> {
   const reattach = typeof target !== "string";
-  const command = reattach ? REATTACH_PLACEHOLDER_COMMAND : target;
+  const command = reattach
+    ? REATTACH_PLACEHOLDER_COMMAND
+    : wrapCommand(target, options);
   const sessionName = reattach ? target.sessionName : undefined;
 
   // Resolve the session name once: to the resume name immediately on reattach,

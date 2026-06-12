@@ -87,6 +87,20 @@ export interface ExecOptions {
    * `timedOut: true`. Enforced client-side by closing the exec session.
    */
   timeoutSec?: number;
+  /**
+   * Working directory for the command (the sandbox default is `/`).
+   * The exec fails if the directory does not exist.
+   * Fresh execs only — rejected on reattach (`exec({ sessionName })`).
+   */
+  cwd?: string;
+  /**
+   * Extra environment variables for this command, layered over the sandbox's
+   * own env. Values travel inside the command string (the SDK composes a
+   * `cd`/assignment prefix around the command), so they are visible to `ps`
+   * in the sandbox — for secrets prefer `env` on `Sandbox.create`.
+   * Fresh execs only — rejected on reattach (`exec({ sessionName })`).
+   */
+  env?: Record<string, string>;
   /** Receives each stdout chunk as it arrives. A throw rejects the exec. */
   onStdout?: (chunk: string) => void;
   /** Receives each stderr chunk as it arrives. A throw rejects the exec. */
