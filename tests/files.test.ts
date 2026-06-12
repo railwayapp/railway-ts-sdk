@@ -78,7 +78,7 @@ const fileEntry = (size: number) => ({
   modTime: "2026-06-11T00:00:00Z",
 });
 
-/** Answers the stat request that precedes every read. */
+/** Answers the stat request issued for a tail (`fromEnd`) read. */
 async function acceptStat(socket: MockFilesSocket, size: number) {
   const request = await socket.nextRequest();
   expect(request.type).toBe("stat");
@@ -335,7 +335,7 @@ describe("files.read", () => {
 
   it("survives more drops than the retry budget when each attempt progresses", async () => {
     const kb = 1024;
-    const drops = 5; // more than TRANSFER_MAX_RETRIES — progress resets the budget
+    const drops = 5; // more than TRANSFER_MAX_RETRIES; progress resets the budget
     const { sandbox, ws } = await filesSandbox(drops + 1);
     const promise = sandbox.files.read("/flaky.bin", { format: "bytes" });
 

@@ -184,7 +184,7 @@ export class Sandbox implements AsyncDisposable {
   /**
    * File operations on this sandbox's filesystem: `read`, `write`, `list`,
    * `stat`, `exists`, `mkdir`, `remove`, `rename`. Reads and writes stream,
-   * so arbitrarily large files transfer with bounded memory.
+   * so files larger than memory transfer safely.
    */
   get files(): SandboxFiles {
     this.#files ??= this.#engine.files(this.id);

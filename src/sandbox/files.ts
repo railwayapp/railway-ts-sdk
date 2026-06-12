@@ -53,7 +53,7 @@ let constructFiles: (context: FilesContext) => SandboxFiles;
  * Paths are absolute within the sandbox filesystem. Content streams in
  * 64KB frames both ways: pushes accept streams without buffering, and
  * `read(path, { format: "stream" })` holds at most one transfer segment in
- * memory, so massive files transfer with bounded memory.
+ * memory, so files larger than memory transfer safely.
  */
 export class SandboxFiles {
   readonly #context: FilesContext;
@@ -76,7 +76,7 @@ export class SandboxFiles {
     options: FileReadOptions & { format: "bytes" },
   ): Promise<Uint8Array>;
   /**
-   * Read a file as a stream of byte chunks — memory stays bounded regardless
+   * Read a file as a stream of byte chunks. Memory stays bounded regardless
    * of file size: a consumer slower than the network holds back the transfer
    * rather than buffering it. Cancelling the stream aborts the transfer.
    * Errors after the stream is returned (including a missing file) surface

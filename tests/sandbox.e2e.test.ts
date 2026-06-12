@@ -301,7 +301,7 @@ describe.runIf(live)("files e2e (live)", () => {
 
   it("streams a large unknown-size push and pull with intact content", async () => {
     // ~24MB pushed as an async iterable (no declared size) and pulled as a
-    // stream — both directions exercise chunking and backpressure.
+    // stream; both directions exercise chunking and backpressure.
     const chunkBytes = 1024 * 1024;
     const chunkCount = 24;
 
@@ -504,7 +504,7 @@ describe.runIf(live)("fork + template e2e (live)", () => {
 
     // destroy() returns before the sandbox has fully stopped; wait until it
     // leaves RUNNING (or disappears) so the checkpoint attempt can't race a
-    // still-running VM and succeed. Only a not-found means gone — transient
+    // still-running VM and succeed. Only a not-found means gone; transient
     // refresh failures must keep polling, not masquerade as destroyed.
     const start = Date.now();
     for (;;) {

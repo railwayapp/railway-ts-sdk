@@ -10,9 +10,9 @@ import type { FileReadOptions, FileWriteData, SandboxFileEntry } from "./types.j
  * replayable upload sources. The policies here compensate for two server
  * behaviors (see AGENTS.md): sessions are killed when keepalive replies
  * stall behind a long-streaming read request, and dropped sessions are a
- * routine failure mode for multi-second transfers — so reads are issued as
- * bounded range segments and resumed by byte position, and writes retry
- * when their source can produce the content again.
+ * routine failure mode for multi-second transfers. Reads are therefore
+ * issued as bounded range segments and resumed by byte position, and writes
+ * retry when their source can produce the content again.
  */
 
 /**
@@ -44,8 +44,9 @@ export function isNotFound(message: string): boolean {
 
 /**
  * A transport-level transfer failure: the session dropped, or the server
- * reported losing its own stream to the sandbox ("connection lost") — the
- * WS session is healthy in that case, but the operation failed the same way.
+ * reported losing its own stream to the sandbox ("connection lost"). The WS
+ * session is healthy in the latter case, but the operation failed the same
+ * way.
  */
 function isTransientTransfer(error: unknown): boolean {
   return (
@@ -87,12 +88,11 @@ interface PullRange {
 }
 
 /**
- * Drives a complete download: adaptive range segments, and — because the
- * byte position is tracked client-side — transparent resume on a fresh
- * connection when one drops. Only `fromEnd` needs the file size (one stat);
- * everything else reads ranges until a short segment signals EOF, so
- * missing files and directories surface the server's error from the first
- * read request.
+ * Drives a complete download: adaptive range segments, with transparent
+ * resume on a fresh connection when one drops (the byte position is tracked
+ * client-side). Only `fromEnd` needs the file size (one stat); everything
+ * else reads ranges until a short segment signals EOF, so missing files and
+ * directories surface the server's error from the first read request.
  */
 export function startPull(args: {
   connect: () => Promise<FilesWsConnection>;

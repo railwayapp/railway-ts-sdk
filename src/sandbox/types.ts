@@ -109,7 +109,7 @@ export interface SandboxFileEntry {
   size: number;
   /**
    * File mode. The low 9 bits (`mode & 0o777`) are the POSIX permission
-   * bits; higher bits encode the file type in a non-POSIX layout — use
+   * bits; higher bits encode the file type in a non-POSIX layout, so use
    * `isDir` rather than masking type bits.
    */
   mode: number;
@@ -125,14 +125,14 @@ export interface FileReadOptions {
   offset?: number;
   /** Read at most this many bytes (to EOF when omitted). Must be positive. */
   length?: number;
-  /** Read the last `length` bytes — a tail read. Requires `length`. */
+  /** Read the last `length` bytes (a tail read). Requires `length`. */
   fromEnd?: boolean;
 }
 
 /**
  * Content accepted by `files.write`. Streams and async iterables upload
- * without buffering, so arbitrarily large pushes stay memory-bounded — but
- * they are one-shot: a dropped session can't be retried. Pass a factory
+ * without buffering, so pushes larger than memory are safe, but they are
+ * one-shot: a dropped session can't be retried. Pass a factory
  * (`() => stream`) when the content can be produced again; the write is then
  * retried automatically like the in-memory forms.
  */

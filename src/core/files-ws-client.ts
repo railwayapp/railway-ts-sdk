@@ -9,8 +9,8 @@ import type { RailwayWsSocket } from "./ws-socket.js";
 /**
  * tcp-proxy `/ws/files` wire protocol: JSON text frames carry requests and
  * replies (`{type, id, data}`); file content rides binary frames with a
- * 12-byte header — request id (u16), frame type (u16), sequence (u32), and
- * payload length (u32), all big-endian — followed by the payload.
+ * 12-byte big-endian header (request id u16, frame type u16, sequence u32,
+ * payload length u32) followed by the payload.
  */
 const BINARY_HEADER_BYTES = 12;
 const FRAME_READ_END = 0x02;
@@ -25,10 +25,10 @@ const FILES_CHUNK_BYTES = 64 * 1024;
 
 /**
  * Pause sending upload chunks while the socket holds more than this. Bounds
- * memory on massive pushes, and — critically — keeps the client's keepalive
- * replies from queueing behind seconds of buffered data: the server drops
- * sessions whose replies lag more than a few seconds, so the send buffer
- * must stay shallow relative to drain rate even on a slow link.
+ * memory on large pushes and keeps the client's keepalive replies from
+ * queueing behind seconds of buffered data: the server drops sessions whose
+ * replies lag more than a few seconds, so the send buffer must stay shallow
+ * relative to drain rate even on a slow link.
  */
 const SEND_HIGH_WATER_BYTES = 128 * 1024;
 const SEND_POLL_MS = 10;
@@ -41,7 +41,7 @@ const INACTIVITY_TIMEOUT_MS = 30_000;
 
 /**
  * While an upload waits on a slow source, send an empty content frame at
- * this cadence so the server's per-chunk idle timeout (30s) never fires —
+ * this cadence so the server's per-chunk idle timeout (30s) never fires;
  * sources may pause arbitrarily long between chunks.
  */
 const WRITE_HEARTBEAT_MS = 10_000;
@@ -50,7 +50,7 @@ const WRITE_HEARTBEAT_MS = 10_000;
 export class FilesRemoteError extends Error {
   /**
    * For uploads: whether the failure happened at `write_start` (before any
-   * content was consumed — safe to retry) or while streaming.
+   * content was consumed, so a retry is safe) or while streaming.
    */
   readonly stage?: "start" | "stream";
 
@@ -523,9 +523,9 @@ async function streamUpload(args: {
 }
 
 /**
- * Pulls the next source chunk, racing the settled signal. Returns null —
- * after releasing the source — when the write settled while waiting, so a
- * source that never yields again cannot suspend the transfer.
+ * Pulls the next source chunk, racing the settled signal. When the write
+ * settled while waiting, releases the source and returns null, so a source
+ * that never yields again cannot suspend the transfer.
  */
 async function nextChunkOrSettled(args: {
   iterator: AsyncIterator<Uint8Array>;
