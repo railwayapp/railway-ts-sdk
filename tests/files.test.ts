@@ -211,6 +211,23 @@ describe("files.read", () => {
     ).rejects.toThrow(TypeError);
   });
 
+  it("clamps a tail read larger than the file to offset 0", async () => {
+    const { sandbox, ws } = await filesSandbox();
+    const promise = sandbox.files.read("/small.txt", {
+      length: 4096,
+      fromEnd: true,
+    });
+    const socket = await ws.nextSocket();
+    await acceptStat(socket, 10);
+    expect(await socket.nextRequest()).toEqual({
+      type: "read",
+      id: "2",
+      data: { path: "/small.txt", offset: 0, length: 10 },
+    });
+    socket.serverBinary(2, FRAME_READ_END, 0, enc("whole file"));
+    await expect(promise).resolves.toBe("whole file");
+  });
+
   it("streams chunks for format=stream and closes on completion", async () => {
     const { sandbox, ws } = await filesSandbox();
     const stream = await sandbox.files.read("/big.bin", { format: "stream" });
@@ -571,6 +588,38 @@ describe("files.write", () => {
     });
     exec.serverReply("exit", "0", { exit_code: 0 });
 
+    await expect(promise).resolves.toBeUndefined();
+  });
+
+  it("shell-quotes paths with single quotes in the chmod command", async () => {
+    const { sandbox, ws } = await filesSandbox(2);
+    const promise = sandbox.files.write("/tmp/it's.sh", "#!/bin/sh\n", {
+      mode: 0o700,
+    });
+
+    const upload = await ws.nextSocket();
+    await acceptWrite(upload, 1);
+
+    const exec = await ws.nextSocket();
+    const init = await exec.nextRequest();
+    expect(init).toMatchObject({
+      type: "init_exec",
+      data: { command: "chmod 700 -- '/tmp/it'\\''s.sh'" },
+    });
+    exec.serverReply("exit", "0", { exit_code: 0 });
+    await expect(promise).resolves.toBeUndefined();
+  });
+
+  it("declares byteLength as the size for ArrayBuffer sources", async () => {
+    const { sandbox, ws } = await filesSandbox();
+    const buffer = new ArrayBuffer(5);
+    new Uint8Array(buffer).set([1, 2, 3, 4, 5]);
+    const promise = sandbox.files.write("/buf.bin", buffer);
+    const socket = await ws.nextSocket();
+
+    const request = await acceptWrite(socket, 1);
+    expect(request.data).toMatchObject({ size: 5 });
+    expect(socket.sentBinary[0]?.payload).toEqual(new Uint8Array([1, 2, 3, 4, 5]));
     await expect(promise).resolves.toBeUndefined();
   });
 
