@@ -2,7 +2,6 @@ import {
   deriveFilesWsEndpoint,
   type NormalizedRailwayClientConfig,
 } from "../core/config.js";
-import { RailwayConnectionError } from "../core/errors.js";
 import {
   connectFilesWs,
   FilesRemoteError,
@@ -16,6 +15,15 @@ import {
 } from "../generated/graphql.js";
 import { SandboxFileNotFoundError, SandboxFilesError } from "./errors.js";
 import { startExec } from "./exec.js";
+import {
+  canRetryWrite,
+  isNotFound,
+  retryDelay,
+  startPull,
+  uploadSource,
+  type PullHandle,
+  type UploadSource,
+} from "./files-transfer.js";
 import type {
   FileReadFormat,
   FileReadOptions,
@@ -29,27 +37,6 @@ export interface FilesContext {
   environmentId: string;
   sandboxId: string;
 }
-
-/**
- * Reads are issued as bounded range requests rather than one whole-file
- * read: the server ends a session whose keepalive replies stall behind a
- * long-streaming read request (observed at ~15s), so no single request may
- * run that long. Segment size adapts toward the target duration, so faster
- * links use fewer round trips.
- */
-const READ_SEGMENT_TARGET_MS = 5_000;
-const READ_SEGMENT_MIN_BYTES = 256 * 1024;
-const READ_SEGMENT_MAX_BYTES = 32 * 1024 * 1024;
-const READ_SEGMENT_INITIAL_BYTES = 2 * 1024 * 1024;
-
-/**
- * Transfers ride sessions the server may drop mid-flight (e.g. when its
- * keepalive stalls); dropped reads resume from the exact byte position on a
- * fresh connection, and dropped writes of replayable sources restart from
- * scratch. The retry budget resets whenever bytes flow.
- */
-const TRANSFER_MAX_RETRIES = 3;
-const TRANSFER_RETRY_DELAY_MS = 300;
 
 /** Read scope for inspection ops; the rw scope for anything that mutates. */
 type FilesScope = "files:read" | "files:read files:write";
@@ -124,11 +111,11 @@ export class SandboxFiles {
 
   /**
    * Write a file, creating it (and truncating any existing content). Missing
-   * parent directories are created automatically. Strings, bytes, and blobs
-   * upload with their size declared and are retried automatically if the
-   * session drops mid-transfer; streams and async iterables upload
-   * unbuffered but are one-shot, so a dropped session surfaces as
-   * `RailwayConnectionError` (and a partial file may remain at `path`).
+   * parent directories are created automatically. Strings, bytes, blobs, and
+   * factory sources upload with retry if the session drops mid-transfer;
+   * bare streams and async iterables upload unbuffered but are one-shot, so
+   * a dropped session surfaces as `RailwayConnectionError` (and a partial
+   * file may remain at `path`).
    *
    * Files are created `0644`; pass `mode` to set permissions (applied right
    * after the upload completes).
@@ -161,55 +148,12 @@ export class SandboxFiles {
           throw this.#wrapError("write", target, error);
         }
         this.#log(`files write ${target} retrying after connection loss`);
-        await sleep(TRANSFER_RETRY_DELAY_MS);
+        await retryDelay();
       }
     }
 
     if (mode !== undefined) await this.#applyMode(target, mode);
     this.#log(`files write ${target} done`);
-  }
-
-  /** Sets `path`'s permissions with a chmod run through the exec primitive. */
-  async #applyMode(path: string, mode: number): Promise<void> {
-    const octal = mode.toString(8).padStart(3, "0");
-    const result = await startExec(
-      this.#context,
-      `chmod ${octal} -- ${shellQuote(path)}`,
-      { timeoutSec: 30 },
-    );
-    if (result.exitCode !== 0) {
-      throw new SandboxFilesError({
-        operation: "write",
-        path,
-        message:
-          result.stderr.trim() ||
-          `chmod ${octal} exited with code ${result.exitCode}`,
-      });
-    }
-  }
-
-  /** One upload attempt on its own connection, creating missing parents. */
-  async #writeOnce(
-    target: string,
-    start: { path: string; mode: number; size: number },
-    source: { chunks: () => AsyncIterable<Uint8Array> },
-  ): Promise<void> {
-    const connection = await this.#connect("files:read files:write");
-    try {
-      try {
-        await connection.write(start, source.chunks());
-      } catch (error) {
-        const parent = parentDir(target);
-        if (!isMissingParent(error) || !parent) throw error;
-        // The parent directory does not exist; create it and retry once.
-        // A `write_start` failure consumes no content, so the source is
-        // still intact.
-        await connection.call("mkdir", { path: parent });
-        await connection.write(start, source.chunks());
-      }
-    } finally {
-      connection.close();
-    }
   }
 
   /** List a directory (entries carry name, size, mode, and modify time). */
@@ -267,6 +211,49 @@ export class SandboxFiles {
     const from = validatePath(oldPath);
     const to = validatePath(newPath);
     await this.#call("rename", from, { old: from, new: to });
+  }
+
+  /** One upload attempt on its own connection, creating missing parents. */
+  async #writeOnce(
+    target: string,
+    start: { path: string; mode: number; size: number },
+    source: UploadSource,
+  ): Promise<void> {
+    const connection = await this.#connect("files:read files:write");
+    try {
+      try {
+        await connection.write(start, source.chunks());
+      } catch (error) {
+        const parent = parentDir(target);
+        if (!isMissingParent(error) || !parent) throw error;
+        // The parent directory does not exist; create it and retry once.
+        // A `write_start` failure consumes no content, so the source is
+        // still intact.
+        await connection.call("mkdir", { path: parent });
+        await connection.write(start, source.chunks());
+      }
+    } finally {
+      connection.close();
+    }
+  }
+
+  /** Sets `path`'s permissions with a chmod run through the exec primitive. */
+  async #applyMode(path: string, mode: number): Promise<void> {
+    const octal = mode.toString(8).padStart(3, "0");
+    const result = await startExec(
+      this.#context,
+      `chmod ${octal} -- ${shellQuote(path)}`,
+      { timeoutSec: 30 },
+    );
+    if (result.exitCode !== 0) {
+      throw new SandboxFilesError({
+        operation: "write",
+        path,
+        message:
+          result.stderr.trim() ||
+          `chmod ${octal} exited with code ${result.exitCode}`,
+      });
+    }
   }
 
   /** One-shot request/reply op on its own connection, with error mapping. */
@@ -341,63 +328,20 @@ export class SandboxFiles {
     return stream;
   }
 
-  /**
-   * Drives a complete download: stat, adaptive range segments, and — because
-   * the byte position is tracked client-side — transparent resume on a new
-   * connection when one drops. Zero-size and directory paths fall back to a
-   * single direct read so empty files resolve instantly, pseudo files that
-   * stat as 0 bytes still stream, and directories surface the server's
-   * canonical error.
-   */
   #startPull(
     path: string,
     options: FileReadOptions,
     onChunk: (bytes: Uint8Array) => void,
     waitForCapacity?: () => Promise<void>,
   ): PullHandle {
-    let connection: FilesWsConnection | undefined;
-    let aborted = false;
-
-    const state: PullState = { direct: false, directDelivered: 0 };
-    const done = (async () => {
-      let retries = 0;
-      for (;;) {
-        if (aborted) return; // cancelled during a retry backoff
-        try {
-          connection = await this.#connect("files:read");
-          if (aborted) return;
-          await runPullAttempt({
-            connection,
-            path,
-            options,
-            state,
-            isAborted: () => aborted,
-            onChunk: bytes => {
-              retries = 0; // progress restores the retry budget
-              onChunk(bytes);
-            },
-            ...(waitForCapacity && { waitForCapacity }),
-          });
-          return;
-        } catch (error) {
-          if (aborted) return;
-          if (!canResumePull(error, state, ++retries)) throw error;
-          this.#log(`files read ${path} resuming after connection loss`);
-          await sleep(TRANSFER_RETRY_DELAY_MS);
-        } finally {
-          connection?.close();
-          connection = undefined;
-        }
-      }
-    })();
-
-    return {
-      done,
-      abort: () => {
-        aborted = true;
-        connection?.close();
-      },
-    };
+    return startPull({
+      connect: () => this.#connect("files:read"),
+      log: message => this.#log(message),
+      path,
+      options,
+      onChunk,
+      ...(waitForCapacity && { waitForCapacity }),
+    });
   }
 
   /** Mints a files-scoped token and opens a `/ws/files` session with it. */
@@ -472,41 +416,6 @@ function requireIntegerAtLeast(
   }
 }
 
-/**
- * A dropped session — or the server losing its own stream to the sandbox —
- * is retriable when the source can be replayed (the file is truncated again
- * by the next write_start). One-shot streams can't be, so the error surfaces.
- */
-function canRetryWrite(
-  error: unknown,
-  replayable: boolean,
-  retries: number,
-): boolean {
-  return (
-    (error instanceof RailwayConnectionError || isTransientRemote(error)) &&
-    replayable &&
-    retries <= TRANSFER_MAX_RETRIES
-  );
-}
-
-/**
- * Whether a failed pull attempt may resume: only transport-level failures
- * (dropped session or the server losing its stream to the sandbox), never a
- * direct (unsegmented) read that already delivered bytes — re-reading those
- * would duplicate them.
- */
-function canResumePull(
-  error: unknown,
-  state: PullState,
-  retries: number,
-): boolean {
-  return (
-    (error instanceof RailwayConnectionError || isTransientRemote(error)) &&
-    !(state.direct && state.directDelivered > 0) &&
-    retries <= TRANSFER_MAX_RETRIES
-  );
-}
-
 function validateMode(mode: number | undefined): number | undefined {
   if (mode === undefined) return undefined;
   if (!Number.isInteger(mode) || mode < 0 || mode > 0o7777) {
@@ -518,151 +427,6 @@ function validateMode(mode: number | undefined): number | undefined {
 /** Single-quotes a path for the in-sandbox shell. */
 function shellQuote(path: string): string {
   return `'${path.replaceAll("'", `'\\''`)}'`;
-}
-
-/** An in-flight download; `abort()` stops it and resolves `done`. */
-interface PullHandle {
-  done: Promise<void>;
-  abort(): void;
-}
-
-/** Download progress shared across resume attempts. */
-interface PullState {
-  /** Set once stat resolves a normal file; `position` advances per chunk. */
-  range?: { position: number; end: number };
-  /** Zero-size or directory path: a single unsegmented read. */
-  direct: boolean;
-  directDelivered: number;
-}
-
-/** One download attempt: resolve the plan if needed, then stream from it. */
-async function runPullAttempt(args: {
-  connection: FilesWsConnection;
-  path: string;
-  options: FileReadOptions;
-  state: PullState;
-  isAborted: () => boolean;
-  onChunk: (bytes: Uint8Array) => void;
-  waitForCapacity?: () => Promise<void>;
-}): Promise<void> {
-  const { connection, path, options, state, isAborted, onChunk } = args;
-
-  if (!state.range && !state.direct) {
-    const info = (await connection.call("stat", { path })) as SandboxFileEntry;
-    if (!info.size || info.isDir) {
-      state.direct = true;
-    } else {
-      const [position, end] = readRange(info.size, options);
-      state.range = { position, end };
-    }
-  }
-
-  if (state.direct) {
-    await connection.read(directReadPayload(path, options), bytes => {
-      state.directDelivered += bytes.length;
-      onChunk(bytes);
-    });
-    return;
-  }
-
-  await pullSegments({
-    connection,
-    path,
-    range: state.range!,
-    isAborted,
-    onChunk,
-    ...(args.waitForCapacity && { waitForCapacity: args.waitForCapacity }),
-  });
-}
-
-const sleep = (ms: number): Promise<void> =>
-  new Promise(resolve => setTimeout(resolve, ms));
-
-/**
- * Streams `[range.position, range.end)` as adaptive bounded segments,
- * advancing `range.position` as bytes arrive so a caller can resume after a
- * drop. A segment that comes back short is EOF (the file shrank since stat).
- */
-async function pullSegments(args: {
-  connection: FilesWsConnection;
-  path: string;
-  range: { position: number; end: number };
-  isAborted: () => boolean;
-  onChunk: (bytes: Uint8Array) => void;
-  /** Resolves when the consumer has room for the next segment. */
-  waitForCapacity?: () => Promise<void>;
-}): Promise<void> {
-  const { connection, path, range, isAborted, onChunk } = args;
-  let segmentBytes = READ_SEGMENT_INITIAL_BYTES;
-  while (range.position < range.end) {
-    await args.waitForCapacity?.();
-    if (isAborted()) return;
-    const length = Math.min(segmentBytes, range.end - range.position);
-    const started = Date.now();
-    let received = 0;
-    await connection.read({ path, offset: range.position, length }, bytes => {
-      received += bytes.length;
-      range.position += bytes.length;
-      onChunk(bytes);
-    });
-    if (received < length) return; // EOF before the requested range
-    segmentBytes = nextSegmentSize(segmentBytes, Date.now() - started);
-  }
-}
-
-/**
- * Scales the segment size toward the per-segment duration target. Growth is
- * capped at 4x per step so one unusually fast segment can't jump straight to
- * a size that takes far longer than the target if bandwidth drops.
- */
-function nextSegmentSize(current: number, elapsedMs: number): number {
-  const scaled = Math.round(
-    (current * READ_SEGMENT_TARGET_MS) / Math.max(elapsedMs, 1),
-  );
-  return Math.min(
-    READ_SEGMENT_MAX_BYTES,
-    current * 4,
-    Math.max(READ_SEGMENT_MIN_BYTES, scaled),
-  );
-}
-
-/** Resolves read options against the stat-reported size to a `[start, end)` range. */
-function readRange(size: number, options: FileReadOptions): [number, number] {
-  if (options.fromEnd) {
-    const length = options.length ?? size;
-    return [Math.max(0, size - length), size];
-  }
-  const start = Math.min(options.offset ?? 0, size);
-  const end =
-    options.length !== undefined ? Math.min(start + options.length, size) : size;
-  return [start, end];
-}
-
-/** Single-request read payload, passing the caller's range through verbatim. */
-function directReadPayload(
-  path: string,
-  options: FileReadOptions,
-): Record<string, unknown> {
-  return {
-    path,
-    ...(options.offset !== undefined && { offset: options.offset }),
-    ...(options.length !== undefined && { length: options.length }),
-    ...(options.fromEnd !== undefined && { fromEnd: options.fromEnd }),
-  };
-}
-
-/** The server reports a missing path with an `os.ErrNotExist`-style message. */
-function isNotFound(message: string): boolean {
-  return /file does not exist|no such file|not found/i.test(message);
-}
-
-/**
- * A remote error frame reporting that the server's own stream to the sandbox
- * died mid-transfer. The WS session is still healthy, but the operation is as
- * retriable as a dropped connection.
- */
-function isTransientRemote(error: unknown): boolean {
-  return error instanceof FilesRemoteError && /connection lost/i.test(error.message);
 }
 
 /** A `write_start` rejection caused by a missing parent directory. */
@@ -691,100 +455,4 @@ function concat(chunks: Uint8Array[]): Uint8Array {
     offset += chunk.length;
   }
   return merged;
-}
-
-/**
- * Normalizes accepted write inputs to a chunk-source factory; size 0 means
- * unknown. Replayable sources (the factory yields fresh content each call)
- * let `write` retry a dropped transfer; streams and iterables are one-shot.
- */
-function uploadSource(data: FileWriteData): {
-  chunks: () => AsyncIterable<Uint8Array>;
-  size: number;
-  replayable: boolean;
-} {
-  if (typeof data === "string") {
-    const bytes = new TextEncoder().encode(data);
-    return { chunks: () => single(bytes), size: bytes.length, replayable: true };
-  }
-  if (data instanceof Uint8Array) {
-    return { chunks: () => single(data), size: data.length, replayable: true };
-  }
-  if (data instanceof ArrayBuffer) {
-    const bytes = new Uint8Array(data);
-    return { chunks: () => single(bytes), size: bytes.length, replayable: true };
-  }
-  const streaming = streamingSource(data);
-  if (streaming) return streaming;
-  throw new TypeError(
-    "Unsupported write data: pass a string, Uint8Array, ArrayBuffer, Blob, " +
-      "ReadableStream, AsyncIterable of Uint8Array, or a function returning " +
-      "a stream or iterable.",
-  );
-}
-
-/** The streaming-shaped write inputs; undefined when `data` is none of them. */
-function streamingSource(data: FileWriteData):
-  | { chunks: () => AsyncIterable<Uint8Array>; size: number; replayable: boolean }
-  | undefined {
-  if (typeof Blob !== "undefined" && data instanceof Blob) {
-    return {
-      chunks: () => streamChunks(data.stream()),
-      size: data.size,
-      replayable: true,
-    };
-  }
-  if (typeof ReadableStream !== "undefined" && data instanceof ReadableStream) {
-    const chunks = streamChunks(data);
-    return { chunks: () => chunks, size: 0, replayable: false };
-  }
-  if (isAsyncIterable(data)) {
-    return { chunks: () => data, size: 0, replayable: false };
-  }
-  if (typeof data === "function") {
-    // A factory produces fresh content per call, so the write may retry.
-    return { chunks: () => producedChunks(data()), size: 0, replayable: true };
-  }
-  return undefined;
-}
-
-async function* single(bytes: Uint8Array): AsyncGenerator<Uint8Array> {
-  if (bytes.length > 0) yield bytes;
-}
-
-function producedChunks(
-  produced: ReadableStream<Uint8Array> | AsyncIterable<Uint8Array>,
-): AsyncIterable<Uint8Array> {
-  return produced instanceof ReadableStream ? streamChunks(produced) : produced;
-}
-
-async function* streamChunks(
-  stream: ReadableStream<Uint8Array>,
-): AsyncGenerator<Uint8Array> {
-  const reader = stream.getReader();
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) return;
-      if (value && value.length > 0) yield value;
-    }
-  } finally {
-    // Covers abnormal exits too (transfer failure): release the source.
-    try {
-      await reader.cancel();
-    } catch {
-      // source may already be errored
-    }
-    reader.releaseLock();
-  }
-}
-
-function isAsyncIterable(value: unknown): value is AsyncIterable<Uint8Array> {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    Symbol.asyncIterator in value &&
-    typeof (value as AsyncIterable<Uint8Array>)[Symbol.asyncIterator] ===
-      "function"
-  );
 }

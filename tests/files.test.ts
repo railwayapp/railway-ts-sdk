@@ -29,6 +29,9 @@ afterEach(() => {
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 const enc = (text: string) => new TextEncoder().encode(text);
 
+/** The initial download segment size (READ_SEGMENT_INITIAL_BYTES). */
+const SEGMENT = 2 * 1024 * 1024;
+
 const shellToken = (token: string) => ({ data: { generateShellToken: token } });
 
 /** Creates a files-ws-backed sandbox with `tokens` shell-token responses queued. */
@@ -102,14 +105,15 @@ describe("files.read", () => {
     const promise = sandbox.files.read("/tmp/hello.txt");
     const socket = await ws.nextSocket();
 
-    await acceptStat(socket, 11);
+    // No stat round trip: the first segment is requested directly and a
+    // short result signals EOF.
     expect(await socket.nextRequest()).toEqual({
       type: "read",
-      id: "2",
-      data: { path: "/tmp/hello.txt", offset: 0, length: 11 },
+      id: "1",
+      data: { path: "/tmp/hello.txt", offset: 0, length: SEGMENT },
     });
-    socket.serverBinary(2, FRAME_READ_CHUNK, 0, enc("hello "));
-    socket.serverBinary(2, FRAME_READ_END, 1, enc("world"));
+    socket.serverBinary(1, FRAME_READ_CHUNK, 0, enc("hello "));
+    socket.serverBinary(1, FRAME_READ_END, 1, enc("world"));
 
     await expect(promise).resolves.toBe("hello world");
     expect(mock.calls[1]?.body.variables).toEqual({
@@ -130,48 +134,41 @@ describe("files.read", () => {
     const { sandbox, ws } = await filesSandbox();
     const promise = sandbox.files.read("/data.bin", { format: "bytes" });
     const socket = await ws.nextSocket();
-    await acceptStat(socket, 3);
     await socket.nextRequest();
 
-    socket.serverBinary(2, FRAME_READ_CHUNK, 0, new Uint8Array([1, 2]));
-    socket.serverBinary(2, FRAME_READ_END, 1, new Uint8Array([3]));
+    socket.serverBinary(1, FRAME_READ_CHUNK, 0, new Uint8Array([1, 2]));
+    socket.serverBinary(1, FRAME_READ_END, 1, new Uint8Array([3]));
     await expect(promise).resolves.toEqual(new Uint8Array([1, 2, 3]));
   });
 
-  it("reads an empty file via a single direct request", async () => {
+  it("resolves an empty file from an empty first segment", async () => {
     const { sandbox, ws } = await filesSandbox();
     const promise = sandbox.files.read("/empty");
     const socket = await ws.nextSocket();
-    await acceptStat(socket, 0);
-    expect(await socket.nextRequest()).toEqual({
-      type: "read",
-      id: "2",
-      data: { path: "/empty" },
-    });
-    socket.serverBinary(2, FRAME_READ_END, 0, new Uint8Array(0));
+    await socket.nextRequest();
+    socket.serverBinary(1, FRAME_READ_END, 0, new Uint8Array(0));
     await expect(promise).resolves.toBe("");
   });
 
-  it("segments large reads and adapts to the stat-reported size", async () => {
+  it("requests follow-up segments until one comes back short", async () => {
     const { sandbox, ws } = await filesSandbox();
-    // 3MB file: first segment is the 2MB initial size, the rest follows.
     const promise = sandbox.files.read("/big.bin", { format: "bytes" });
     const socket = await ws.nextSocket();
     const mb = 1024 * 1024;
-    await acceptStat(socket, 3 * mb);
 
+    // First segment fills completely, so the read continues.
     expect(await socket.nextRequest()).toEqual({
       type: "read",
-      id: "2",
+      id: "1",
       data: { path: "/big.bin", offset: 0, length: 2 * mb },
     });
-    socket.serverBinary(2, FRAME_READ_END, 0, new Uint8Array(2 * mb).fill(1));
+    socket.serverBinary(1, FRAME_READ_END, 0, new Uint8Array(2 * mb).fill(1));
 
+    // Next segment grows (clamped to 4x per step) and comes back short: EOF.
     const second = await socket.nextRequest();
     expect(second.type).toBe("read");
-    expect((second.data as { offset: number }).offset).toBe(2 * mb);
-    expect((second.data as { length: number }).length).toBe(mb);
-    socket.serverBinary(3, FRAME_READ_END, 0, new Uint8Array(mb).fill(2));
+    expect(second.data).toMatchObject({ offset: 2 * mb, length: 8 * mb });
+    socket.serverBinary(2, FRAME_READ_END, 0, new Uint8Array(mb).fill(2));
 
     const bytes = (await promise) as Uint8Array;
     expect(bytes.length).toBe(3 * mb);
@@ -179,19 +176,24 @@ describe("files.read", () => {
     expect(bytes[3 * mb - 1]).toBe(2);
   });
 
-  it("stops at EOF when a segment comes back short", async () => {
+  it("passes an explicit range through and stops at its end", async () => {
     const { sandbox, ws } = await filesSandbox();
-    const promise = sandbox.files.read("/shrunk.bin", { format: "bytes" });
+    const promise = sandbox.files.read("/blob.bin", {
+      format: "bytes",
+      offset: 1000,
+      length: 64,
+    });
     const socket = await ws.nextSocket();
-    await acceptStat(socket, 4 * 1024 * 1024);
-
-    await socket.nextRequest();
-    // File shrank to 5 bytes after stat: short segment ends the read.
-    socket.serverBinary(2, FRAME_READ_END, 0, new Uint8Array([1, 2, 3, 4, 5]));
-    await expect(promise).resolves.toEqual(new Uint8Array([1, 2, 3, 4, 5]));
+    expect(await socket.nextRequest()).toEqual({
+      type: "read",
+      id: "1",
+      data: { path: "/blob.bin", offset: 1000, length: 64 },
+    });
+    socket.serverBinary(1, FRAME_READ_END, 0, new Uint8Array(64).fill(3));
+    await expect(promise).resolves.toEqual(new Uint8Array(64).fill(3));
   });
 
-  it("resolves range options against the file size and rejects offset+fromEnd", async () => {
+  it("stats only for tail reads and rejects offset+fromEnd", async () => {
     const { sandbox, ws } = await filesSandbox();
     const promise = sandbox.files.read("/log.txt", { length: 100, fromEnd: true });
     const socket = await ws.nextSocket();
@@ -213,11 +215,10 @@ describe("files.read", () => {
     const { sandbox, ws } = await filesSandbox();
     const stream = await sandbox.files.read("/big.bin", { format: "stream" });
     const socket = await ws.nextSocket();
-    await acceptStat(socket, 2);
     await socket.nextRequest();
 
-    socket.serverBinary(2, FRAME_READ_CHUNK, 0, new Uint8Array([7]));
-    socket.serverBinary(2, FRAME_READ_END, 1, new Uint8Array([8]));
+    socket.serverBinary(1, FRAME_READ_CHUNK, 0, new Uint8Array([7]));
+    socket.serverBinary(1, FRAME_READ_END, 1, new Uint8Array([8]));
 
     const reader = stream.getReader();
     expect((await reader.read()).value).toEqual(new Uint8Array([7]));
@@ -230,9 +231,8 @@ describe("files.read", () => {
     const { sandbox, ws } = await filesSandbox();
     const stream = await sandbox.files.read("/big.bin", { format: "stream" });
     const socket = await ws.nextSocket();
-    await acceptStat(socket, 1024 * 1024);
     await socket.nextRequest();
-    socket.serverBinary(2, FRAME_READ_CHUNK, 0, new Uint8Array([7]));
+    socket.serverBinary(1, FRAME_READ_CHUNK, 0, new Uint8Array([7]));
 
     await stream.cancel();
     expect(socket.readyState).toBe(3);
@@ -252,19 +252,17 @@ describe("files.read", () => {
   it("maps server errors to typed file errors", async () => {
     const { sandbox, ws } = await filesSandbox(2);
 
-    // A missing file fails at the stat that precedes the read.
+    // A missing file fails on the first segment request.
     const missing = sandbox.files.read("/missing");
     const socket1 = await ws.nextSocket();
     await socket1.nextRequest();
     socket1.serverError("1", "file does not exist");
     await expect(missing).rejects.toBeInstanceOf(SandboxFileNotFoundError);
 
-    // An unreadable file stats fine and fails at the content request.
     const denied = sandbox.files.read("/etc/shadow");
     const socket2 = await ws.nextSocket();
-    await acceptStat(socket2, 100);
     await socket2.nextRequest();
-    socket2.serverError("2", "permission denied");
+    socket2.serverError("1", "permission denied");
     const error = await denied.catch((e: unknown) => e);
     expect(error).toBeInstanceOf(SandboxFilesError);
     expect(error).not.toBeInstanceOf(SandboxFileNotFoundError);
@@ -278,16 +276,15 @@ describe("files.read", () => {
     const { sandbox, ws } = await filesSandbox();
     const stream = await sandbox.files.read("/big.bin", { format: "stream" });
     const socket = await ws.nextSocket();
-    await acceptStat(socket, 5 * mb);
 
     expect(await socket.nextRequest()).toMatchObject({
       data: { offset: 0, length: 2 * mb },
     });
-    socket.serverBinary(2, FRAME_READ_END, 0, new Uint8Array(2 * mb).fill(1));
+    socket.serverBinary(1, FRAME_READ_END, 0, new Uint8Array(2 * mb).fill(1));
 
     // Nothing consumes the stream, so the next segment must not be requested.
     for (let i = 0; i < 20; i++) await tick();
-    expect(socket.sentText.length).toBe(2); // stat + first read only
+    expect(socket.sentText.length).toBe(1); // the first read only
 
     // Consuming the queued chunk frees capacity and triggers the next segment.
     const reader = stream.getReader();
@@ -296,7 +293,7 @@ describe("files.read", () => {
     expect(next.data).toMatchObject({ offset: 2 * mb });
 
     socket.serverBinary(
-      3,
+      2,
       FRAME_READ_END,
       0,
       new Uint8Array(3 * mb).fill(2),
@@ -309,14 +306,12 @@ describe("files.read", () => {
     const { sandbox, ws } = await filesSandbox();
     const promise = sandbox.files.read("/weird", { format: "bytes" });
     const socket = await ws.nextSocket();
-    // Zero-size stat takes the single direct-read path.
-    await acceptStat(socket, 0);
     await socket.nextRequest();
 
     // Header declares 3 payload bytes but the frame carries 6: only 3 count.
     const frame = new Uint8Array(12 + 6);
     const view = new DataView(frame.buffer);
-    view.setUint16(0, 2); // request id
+    view.setUint16(0, 1); // request id
     view.setUint16(2, FRAME_READ_END);
     view.setUint32(8, 3); // declared payload length
     frame.set([10, 11, 12, 99, 99, 99], 12);
@@ -344,14 +339,10 @@ describe("files.read", () => {
     const { sandbox, ws } = await filesSandbox(drops + 1);
     const promise = sandbox.files.read("/flaky.bin", { format: "bytes" });
 
-    const first = await ws.nextSocket();
-    await acceptStat(first, 100 * kb);
-
-    let socket = first;
+    let socket = await ws.nextSocket();
     for (let i = 1; i <= drops; i++) {
       await socket.nextRequest();
-      const reqId = socket === first ? 2 : 1;
-      socket.serverBinary(reqId, FRAME_READ_CHUNK, 0, new Uint8Array(kb).fill(i));
+      socket.serverBinary(1, FRAME_READ_CHUNK, 0, new Uint8Array(kb).fill(i));
       await tick(); // deliver progress before the drop
       socket.serverClose(1006, "flaky");
       socket = await ws.nextSocket();
@@ -379,22 +370,18 @@ describe("files.read", () => {
     const promise = sandbox.files.read("/big.bin", { format: "bytes" });
 
     const first = await ws.nextSocket();
-    await acceptStat(first, 3 * mb);
     const read = await first.nextRequest();
-    first.serverBinary(2, FRAME_READ_CHUNK, 0, new Uint8Array(1024).fill(9));
+    first.serverBinary(1, FRAME_READ_CHUNK, 0, new Uint8Array(1024).fill(9));
     await tick();
     first.serverError(read.id!, "connection lost");
 
     const second = await ws.nextSocket();
     const resume = await second.nextRequest();
     expect(resume.data).toMatchObject({ offset: 1024 });
-    second.serverBinary(1, FRAME_READ_END, 0, new Uint8Array(2 * mb).fill(8));
-    const rest = await second.nextRequest();
-    const restLength = (rest.data as { length: number }).length;
-    second.serverBinary(2, FRAME_READ_END, 0, new Uint8Array(restLength).fill(7));
+    second.serverBinary(1, FRAME_READ_END, 0, new Uint8Array(mb).fill(8));
 
     const bytes = (await promise) as Uint8Array;
-    expect(bytes.length).toBe(3 * mb);
+    expect(bytes.length).toBe(1024 + mb);
   }, 15_000);
 
   it("resumes a segmented read from the dropped byte position", async () => {
@@ -403,29 +390,24 @@ describe("files.read", () => {
     const promise = sandbox.files.read("/big.bin", { format: "bytes" });
 
     const first = await ws.nextSocket();
-    await acceptStat(first, 3 * mb);
     await first.nextRequest(); // read offset=0 length=2MB
-    first.serverBinary(2, FRAME_READ_CHUNK, 0, new Uint8Array(1024).fill(9));
+    first.serverBinary(1, FRAME_READ_CHUNK, 0, new Uint8Array(1024).fill(9));
     await tick(); // let the chunk deliver before the connection drops
     first.serverClose(1006, "tunnel lost");
 
-    // A fresh connection resumes mid-segment — no second stat.
+    // A fresh connection resumes mid-segment from the exact byte position.
     const second = await ws.nextSocket();
     const resume = await second.nextRequest();
     expect(resume.type).toBe("read");
-    expect(resume.data).toEqual({ path: "/big.bin", offset: 1024, length: 2 * mb });
-    second.serverBinary(1, FRAME_READ_END, 0, new Uint8Array(2 * mb).fill(8));
-
-    const rest = await second.nextRequest();
-    expect((rest.data as { offset: number }).offset).toBe(2 * mb + 1024);
-    const restLength = (rest.data as { length: number }).length;
-    second.serverBinary(2, FRAME_READ_END, 0, new Uint8Array(restLength).fill(7));
+    expect(resume.data).toEqual({ path: "/big.bin", offset: 1024, length: SEGMENT });
+    // A short segment ends the read.
+    second.serverBinary(1, FRAME_READ_END, 0, new Uint8Array(mb).fill(8));
 
     const bytes = (await promise) as Uint8Array;
-    expect(bytes.length).toBe(3 * mb);
+    expect(bytes.length).toBe(1024 + mb);
     expect(bytes[0]).toBe(9);
     expect(bytes[1024]).toBe(8);
-    expect(bytes[3 * mb - 1]).toBe(7);
+    expect(bytes[1024 + mb - 1]).toBe(8);
   }, 15_000);
 
   it("gives up after repeated connection drops", async () => {
