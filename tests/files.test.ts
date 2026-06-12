@@ -734,7 +734,7 @@ describe("files.write", () => {
     await expect(promise).resolves.toBeUndefined();
   }, 15_000);
 
-  it("does not retry one-shot stream sources after a drop", async () => {
+  it("does not retry one-shot stream sources dropped after streaming began", async () => {
     const { sandbox, ws } = await filesSandbox();
     async function* chunks() {
       yield enc("data");
@@ -743,8 +743,59 @@ describe("files.write", () => {
     const socket = await ws.nextSocket();
     const start = await socket.nextRequest();
     socket.serverReply("write_ready", start.id!);
+    // Drop only after the source has been pulled; a drop before that is now
+    // retried even for one-shot sources (nothing was consumed).
+    await until(() => socket.sentBinary.length > 0, "content frame sent");
     socket.serverClose(1006, "gone");
     await expect(promise).rejects.toBeInstanceOf(RailwayConnectionError);
+  });
+
+  it("retries a one-shot source when write_start fails with connection lost", async () => {
+    // The source was never pulled, so even a one-shot iterable is intact.
+    const { sandbox, ws } = await filesSandbox(2);
+    async function* chunks() {
+      yield enc("data");
+    }
+    const promise = sandbox.files.write("/f.bin", chunks());
+
+    const first = await ws.nextSocket();
+    const start = await first.nextRequest();
+    first.serverError(start.id!, "connection lost");
+
+    const second = await ws.nextSocket();
+    await acceptWrite(second, 1);
+    expect(second.sentBinary[0]?.payload).toEqual(enc("data"));
+    await expect(promise).resolves.toBeUndefined();
+  }, 15_000);
+
+  it("retries a one-shot source when the connection drops before write_ready", async () => {
+    const { sandbox, ws } = await filesSandbox(2);
+    async function* chunks() {
+      yield enc("data");
+    }
+    const promise = sandbox.files.write("/f.bin", chunks());
+
+    const first = await ws.nextSocket();
+    await first.nextRequest();
+    first.serverClose(1006, "gone");
+
+    const second = await ws.nextSocket();
+    await acceptWrite(second, 1);
+    expect(second.sentBinary[0]?.payload).toEqual(enc("data"));
+    await expect(promise).resolves.toBeUndefined();
+  }, 15_000);
+
+  it("rejects a write acked before write_ready as a protocol error", async () => {
+    const { sandbox, ws } = await filesSandbox();
+    const promise = sandbox.files.write("/f.txt", "data");
+    const socket = await ws.nextSocket();
+    const request = await socket.nextRequest();
+    socket.serverReply("ok", request.id!);
+
+    const error = await promise.catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(SandboxFilesError);
+    expect((error as Error).message).toContain("ok before write_ready");
+    expect(socket.sentBinary).toHaveLength(0);
   });
 
   it("rejects when write_start fails", async () => {

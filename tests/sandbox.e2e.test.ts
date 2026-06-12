@@ -357,6 +357,17 @@ describe.runIf(live)("files e2e (live)", () => {
     expect(await sandbox.files.exists("/tmp/files-e2e/nested/b.txt")).toBe(false);
   }, 120_000);
 
+  it("creates missing parent directories on write", async () => {
+    // Unique path so the write_start-fails → mkdir → retry fallback runs on
+    // the live bridge (it assumes the connection survives the failed start).
+    const path = `/tmp/files-e2e-parents-${Date.now()}/deep/nested/file.txt`;
+    await sandbox.files.write(path, "made it\n");
+    expect(await sandbox.files.read(path)).toBe("made it\n");
+
+    const parent = await sandbox.files.stat(path.slice(0, path.lastIndexOf("/")));
+    expect(parent.isDir).toBe(true);
+  }, 120_000);
+
   it("applies the mode option", async () => {
     await sandbox.files.write("/tmp/run.sh", "#!/bin/sh\necho ok\n", {
       mode: 0o755,
