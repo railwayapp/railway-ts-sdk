@@ -140,6 +140,18 @@ describe.runIf(live)("exec e2e (live)", () => {
     expect(missing.stdout).toBe("");
   }, 90_000);
 
+  it("keeps the image PATH (mise shims) under cwd/env wrapping", async () => {
+    // The wrapper shell inherits the baked container-spec env, so tools
+    // resolved through PATH — including mise and its shims — keep working.
+    const result = await sandbox.exec("which node && which mise && node -v", {
+      cwd: "/tmp",
+      env: { PROBE: "1" },
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("/mise/shims/node");
+    expect(result.stdout).toContain("/mise");
+  }, 90_000);
+
   it("enforces timeoutSec client-side", async () => {
     const result = await sandbox.exec("echo start; sleep 300", {
       timeoutSec: 8,
