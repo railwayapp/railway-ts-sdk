@@ -308,6 +308,17 @@ export function connectFilesWs(args: {
             if (replyType === "ok") {
               disarm();
               pending.delete(id);
+              if (awaitingReady) {
+                // The server acked a write whose content was never sent;
+                // resolving would claim success for a file it never received.
+                const error = new FilesRemoteError(
+                  "protocol error: ok before write_ready",
+                  "start",
+                );
+                ready.reject(error);
+                settle.reject(error);
+                return;
+              }
               settle.resolve();
             }
           },

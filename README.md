@@ -114,7 +114,7 @@ await sandbox.files.write("/app/run.sh", "#!/bin/sh\n...", { mode: 0o755 });
 `AsyncIterable<Uint8Array>`, or a function returning a stream or iterable. It creates
 missing parent directories automatically. Strings, bytes, blobs, and function sources are
 retried automatically if the connection drops mid-transfer. A bare stream is one-shot: a
-drop surfaces `RailwayConnectionError` and may leave a partial file. Streams upload
+drop mid-stream surfaces `RailwayConnectionError` and may leave a partial file. Streams upload
 without buffering, so a large file can be pushed from disk; prefer the function form so
 a retry can read a fresh stream:
 

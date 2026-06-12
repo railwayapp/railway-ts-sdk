@@ -56,17 +56,20 @@ function isTransientTransfer(error: unknown): boolean {
 }
 
 /**
- * A dropped session is retriable when the source can be replayed (the file
- * is truncated again by the next write_start). One-shot streams can't be,
- * so the error surfaces.
+ * A dropped session is retriable when the source can still produce the full
+ * content: it is replayable, or it was never pulled (a failure during the
+ * write_start handshake consumes nothing, so even one-shot streams are
+ * intact). The file is truncated again by the next write_start.
  */
 export function canRetryWrite(
   error: unknown,
-  replayable: boolean,
+  source: UploadSource,
   retries: number,
 ): boolean {
   return (
-    isTransientTransfer(error) && replayable && retries <= TRANSFER_MAX_RETRIES
+    isTransientTransfer(error) &&
+    (source.replayable || !source.consumed()) &&
+    retries <= TRANSFER_MAX_RETRIES
   );
 }
 
@@ -225,10 +228,60 @@ export interface UploadSource {
   size: number;
   /** Whether `chunks()` can produce the content again (enables retry). */
   replayable: boolean;
+  /** Whether the source has ever been pulled (one-shot sources can't replay after this). */
+  consumed: () => boolean;
 }
 
-/** Normalizes accepted write inputs to a chunk-source factory. */
+/**
+ * Normalizes accepted write inputs to a chunk-source factory and tracks
+ * whether the source was ever pulled: a one-shot source that was never
+ * started is still safe to retry.
+ */
 export function uploadSource(data: FileWriteData): UploadSource {
+  const source = normalizeSource(data);
+  let consumed = false;
+  return {
+    ...source,
+    chunks: () =>
+      markOnFirstPull(source.chunks(), () => {
+        consumed = true;
+      }),
+    consumed: () => consumed,
+  };
+}
+
+/**
+ * Wraps an iterable so `mark` fires when `next()` is first *called*, not when
+ * it resolves: a one-shot generator loses the in-flight value to any replay
+ * the moment it is pulled.
+ */
+function markOnFirstPull(
+  iterable: AsyncIterable<Uint8Array>,
+  mark: () => void,
+): AsyncIterable<Uint8Array> {
+  return {
+    [Symbol.asyncIterator]() {
+      const inner = iterable[Symbol.asyncIterator]();
+      const iterator: AsyncIterator<Uint8Array> = {
+        next: (...args) => {
+          mark();
+          return inner.next(...args);
+        },
+      };
+      if (inner.return) iterator.return = inner.return.bind(inner);
+      if (inner.throw) iterator.throw = inner.throw.bind(inner);
+      return iterator;
+    },
+  };
+}
+
+interface NormalizedSource {
+  chunks: () => AsyncIterable<Uint8Array>;
+  size: number;
+  replayable: boolean;
+}
+
+function normalizeSource(data: FileWriteData): NormalizedSource {
   if (typeof data === "string") {
     const bytes = new TextEncoder().encode(data);
     return { chunks: () => single(bytes), size: bytes.length, replayable: true };
@@ -250,7 +303,7 @@ export function uploadSource(data: FileWriteData): UploadSource {
 }
 
 /** The streaming-shaped write inputs; undefined when `data` is none of them. */
-function streamingSource(data: FileWriteData): UploadSource | undefined {
+function streamingSource(data: FileWriteData): NormalizedSource | undefined {
   if (typeof Blob !== "undefined" && data instanceof Blob) {
     return {
       chunks: () => streamChunks(data.stream()),

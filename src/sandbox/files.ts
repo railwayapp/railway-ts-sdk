@@ -114,8 +114,8 @@ export class SandboxFiles {
    * parent directories are created automatically. Strings, bytes, blobs, and
    * factory sources upload with retry if the session drops mid-transfer;
    * bare streams and async iterables upload unbuffered but are one-shot, so
-   * a dropped session surfaces as `RailwayConnectionError` (and a partial
-   * file may remain at `path`).
+   * a session dropped mid-stream surfaces as `RailwayConnectionError` (and a
+   * partial file may remain at `path`).
    *
    * Files are created `0644`; pass `mode` to set permissions (applied right
    * after the upload completes).
@@ -144,7 +144,7 @@ export class SandboxFiles {
         await this.#writeOnce(target, start, source);
         break;
       } catch (error) {
-        if (!canRetryWrite(error, source.replayable, ++retries)) {
+        if (!canRetryWrite(error, source, ++retries)) {
           throw this.#wrapError("write", target, error);
         }
         this.#log(`files write ${target} retrying after connection loss`);

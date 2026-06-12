@@ -132,7 +132,7 @@ export interface FileReadOptions {
 /**
  * Content accepted by `files.write`. Streams and async iterables upload
  * without buffering, so pushes larger than memory are safe, but they are
- * one-shot: a dropped session can't be retried. Pass a factory
+ * one-shot: a session dropped mid-stream can't be retried. Pass a factory
  * (`() => stream`) when the content can be produced again; the write is then
  * retried automatically like the in-memory forms.
  */
