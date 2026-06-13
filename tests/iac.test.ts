@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { bucket, diffGraphs, graphToEnvironmentConfig, postgres, project } from "../src/index.js";
-import { projectDefinitionToGraph } from "../src/iac/compiler.js";
+import { environmentConfigToGraph, projectDefinitionToGraph } from "../src/iac/compiler.js";
 
 describe("Railway IaC", () => {
   it("maps database region to service and volume placement", () => {
@@ -38,6 +38,32 @@ describe("Railway IaC", () => {
         summary: "Move database db to europe-west4",
       },
     ]);
+  });
+
+  it("does not churn region or mount path for an imported database with no explicit region", () => {
+    // An imported database carries the platform-assigned region and requiredMountPath in
+    // deploy; the authoring helpers never reproduce these. The diff must stay clean rather than
+    // planning a destructive "move to default region" + requiredMountPath unmount.
+    const current = environmentConfigToGraph(
+      {
+        services: {
+          "db-id": {
+            source: { image: "ghcr.io/railwayapp-templates/postgres-ssl:18" },
+            deploy: {
+              multiRegionConfig: { "us-east4-eqdc4a": { numReplicas: 1 } },
+              requiredMountPath: "/var/lib/postgresql/data",
+            },
+            volumeMounts: { "vol-id": { mountPath: "/var/lib/postgresql/data" } },
+          },
+        },
+      },
+      { serviceNamesById: { "db-id": "postgres" } },
+    );
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [postgres("postgres")],
+    }));
+
+    expect(diffGraphs({ current, desired }).changes).toEqual([]);
   });
 
   it("typechecks known bucket regions", () => {

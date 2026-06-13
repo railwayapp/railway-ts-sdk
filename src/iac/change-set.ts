@@ -1,5 +1,5 @@
 import { composePatch, graphToEnvironmentConfig } from "./compiler.js";
-import type { GraphCompileOptions, RailwayGraph, ResourceAddress, ResourceNode, VariableValue } from "./graph.js";
+import type { DatabaseNode, GraphCompileOptions, RailwayGraph, ResourceAddress, ResourceNode, VariableValue } from "./graph.js";
 import type { EnvironmentConfig } from "./schema.js";
 
 export const RAILWAY_CHANGE_SET_VERSION = 0 as const;
@@ -116,16 +116,8 @@ export function diffGraphs({ current, desired }: { current: RailwayGraph; desire
     diffVariables({ previous, resource, changes, resourcesByAddress: desiredByAddress });
     diffTopLevelField({ previous, resource, field: "source", changes });
     diffTopLevelField({ previous, resource, field: "build", changes });
-    if (previous.type === "database" && resource.type === "database" && databaseRegion(previous) !== databaseRegion(resource)) {
-      changes.push(update(
-        resource.address,
-        "deploy",
-        previous.deploy,
-        resource.deploy,
-        `Move database ${resource.name} to ${databaseRegion(resource) ?? "default region"}`,
-        changedLeafPaths(normalizeForDiff("deploy", previous.deploy), normalizeForDiff("deploy", resource.deploy), "deploy"),
-        "destructive",
-      ));
+    if (previous.type === "database" && resource.type === "database") {
+      diffDatabaseDeploy({ previous, resource, changes });
     } else {
       diffTopLevelField({ previous, resource, field: "deploy", changes });
     }
@@ -314,6 +306,42 @@ function diffTopLevelField({ previous, resource, field, changes }: { previous: R
   const normalizedAfter = normalizeForDiff(field, after);
   if (stableStringify(normalizedBefore) === stableStringify(normalizedAfter)) return;
   changes.push(update(resource.address, field, before, after, summaryForField(resource, field, normalizedBefore, normalizedAfter), changedLeafPaths(normalizedBefore, normalizedAfter, field)));
+}
+
+// A database realizes its mount path and (default) region through Backboard, not repo config:
+// the imported graph carries deploy.requiredMountPath and a platform-assigned region that the
+// authoring helpers never reproduce. Diff only what the user can actually author — an explicit
+// region pin — so we never plan an accidental unmount or a churn "move to default region" for a
+// database that simply didn't pin one.
+function diffDatabaseDeploy({ previous, resource, changes }: { previous: DatabaseNode; resource: DatabaseNode; changes: RailwayChange[] }) {
+  const previousRegion = databaseRegion(previous);
+  const desiredRegion = databaseRegion(resource);
+  if (desiredRegion !== undefined && desiredRegion !== previousRegion) {
+    changes.push(update(
+      resource.address,
+      "deploy",
+      previous.deploy,
+      resource.deploy,
+      `Move database ${resource.name} to ${desiredRegion}`,
+      changedLeafPaths(normalizeDatabaseDeploy(previous.deploy), normalizeDatabaseDeploy(resource.deploy), "deploy"),
+      "destructive",
+    ));
+    return;
+  }
+  const before = normalizeDatabaseDeploy(previous.deploy);
+  const after = normalizeDatabaseDeploy(resource.deploy);
+  if (stableStringify(before) === stableStringify(after)) return;
+  changes.push(update(resource.address, "deploy", previous.deploy, resource.deploy, summaryForField(resource, "deploy", before, after), changedLeafPaths(before, after, "deploy")));
+}
+
+// Backboard owns requiredMountPath; it is represented in the graph by node.defaultMountPath and
+// must never surface as a deploy diff (see diffDatabaseDeploy).
+function normalizeDatabaseDeploy(value: unknown): unknown {
+  const normalized = normalizeForDiff("deploy", value);
+  if (normalized == null || typeof normalized !== "object") return normalized;
+  const copy = { ...(normalized as Record<string, unknown>) };
+  delete copy.requiredMountPath;
+  return Object.keys(copy).length === 0 ? undefined : copy;
 }
 
 function summaryForField(resource: ResourceNode, field: string, before: unknown, after: unknown): string {
