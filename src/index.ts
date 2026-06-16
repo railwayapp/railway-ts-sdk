@@ -5,10 +5,14 @@ export {
 } from "./core/config.js";
 export {
   RailwayAuthError,
+  RailwayBackpressureError,
+  RailwayConcurrencyLimitError,
   RailwayConnectionError,
   RailwayError,
   RailwayGraphQLError,
   type RailwayGraphQLErrorItem,
+  RailwayRateLimitError,
+  RailwaySessionLimitError,
 } from "./core/errors.js";
 export {
   bucket,

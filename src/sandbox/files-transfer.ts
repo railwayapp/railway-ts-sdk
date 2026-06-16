@@ -1,4 +1,5 @@
 import { RailwayConnectionError } from "../core/errors.js";
+import type { FilesLease } from "../core/files-pool.js";
 import {
   FilesRemoteError,
   type FilesWsConnection,
@@ -98,7 +99,7 @@ interface PullRange {
  * directories surface the server's error from the first read request.
  */
 export function startPull(args: {
-  connect: () => Promise<FilesWsConnection>;
+  acquire: () => Promise<FilesLease>;
   log: (message: string) => void;
   path: string;
   options: FileReadOptions;
@@ -106,8 +107,7 @@ export function startPull(args: {
   /** Resolves when the consumer has room for the next segment. */
   waitForCapacity?: () => Promise<void>;
 }): PullHandle {
-  const { connect, log, path, options, onChunk } = args;
-  let connection: FilesWsConnection | undefined;
+  const { acquire, log, path, options, onChunk } = args;
   let aborted = false;
 
   const done = (async () => {
@@ -115,9 +115,11 @@ export function startPull(args: {
     let retries = 0;
     for (;;) {
       if (aborted) return; // cancelled during a retry backoff
+      let lease: FilesLease | undefined;
       try {
-        connection = await connect();
+        lease = await acquire();
         if (aborted) return;
+        const connection = lease.connection;
         range ??= await resolveRange(connection, path, options);
         await pullSegments({
           connection,
@@ -137,17 +139,17 @@ export function startPull(args: {
         log(`files read ${path} resuming after connection loss`);
         await retryDelay();
       } finally {
-        connection?.close();
-        connection = undefined;
+        lease?.release();
       }
     }
   })();
 
   return {
     done,
+    // Stop at the next segment boundary and release the lease via the loop's
+    // finally; the pooled connection is not closed (other ops may share it).
     abort: () => {
       aborted = true;
-      connection?.close();
     },
   };
 }

@@ -3,11 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { deriveFilesWsEndpoint } from "../src/core/config.js";
 import { RailwayConnectionError } from "../src/core/errors.js";
 import {
+  RailwayConcurrencyLimitError,
+  RailwayRateLimitError,
+  RailwaySessionLimitError,
   Sandbox,
   SandboxFileNotFoundError,
   SandboxFiles,
   SandboxFilesError,
 } from "../src/index.js";
+import { __resetFilesPool } from "../src/core/files-pool.js";
 import { clearRailwayEnv, createFetchMock, sandboxInfo } from "./test-helpers.js";
 import {
   createFilesWsMock,
@@ -22,6 +26,7 @@ const auth = { token: "token_123", environmentId: "environment_123" };
 
 beforeEach(clearRailwayEnv);
 afterEach(() => {
+  __resetFilesPool();
   vi.unstubAllEnvs();
   vi.useRealTimers();
 });
@@ -126,8 +131,9 @@ describe("files.read", () => {
     });
     expect(socket.url).toBe("wss://ssh.railway.com:2226/ws/files");
     expect(socket.protocols).toEqual(["railway-shell", "jwt_0"]);
-    // The per-op connection is closed once the read settles.
-    expect(socket.readyState).toBe(3);
+    // The pooled connection stays open after the read settles, ready to be
+    // reused by the next same-scope op.
+    expect(socket.readyState).toBe(1);
   });
 
   it("returns bytes for format=bytes, including the end-frame payload", async () => {
@@ -228,7 +234,7 @@ describe("files.read", () => {
     await expect(promise).resolves.toBe("whole file");
   });
 
-  it("streams chunks for format=stream and closes on completion", async () => {
+  it("streams chunks for format=stream and stays open on completion", async () => {
     const { sandbox, ws } = await filesSandbox();
     const stream = await sandbox.files.read("/big.bin", { format: "stream" });
     const socket = await ws.nextSocket();
@@ -241,7 +247,8 @@ describe("files.read", () => {
     expect((await reader.read()).value).toEqual(new Uint8Array([7]));
     expect((await reader.read()).value).toEqual(new Uint8Array([8]));
     expect((await reader.read()).done).toBe(true);
-    expect(socket.readyState).toBe(3);
+    // The pooled connection stays open after the stream drains.
+    expect(socket.readyState).toBe(1);
   });
 
   it("aborts the transfer when the stream is cancelled", async () => {
@@ -267,25 +274,27 @@ describe("files.read", () => {
   });
 
   it("maps server errors to typed file errors", async () => {
-    const { sandbox, ws } = await filesSandbox(2);
+    const { sandbox, ws } = await filesSandbox();
 
     // A missing file fails on the first segment request.
     const missing = sandbox.files.read("/missing");
-    const socket1 = await ws.nextSocket();
-    await socket1.nextRequest();
-    socket1.serverError("1", "file does not exist");
+    const socket = await ws.nextSocket();
+    const first = await socket.nextRequest();
+    socket.serverError(first.id!, "file does not exist");
     await expect(missing).rejects.toBeInstanceOf(SandboxFileNotFoundError);
 
+    // The second read reuses the same read-scoped pooled connection; it gets
+    // the next request id, so reply against that rather than a fresh socket.
     const denied = sandbox.files.read("/etc/shadow");
-    const socket2 = await ws.nextSocket();
-    await socket2.nextRequest();
-    socket2.serverError("1", "permission denied");
+    const second = await socket.nextRequest();
+    socket.serverError(second.id!, "permission denied");
     const error = await denied.catch((e: unknown) => e);
     expect(error).toBeInstanceOf(SandboxFilesError);
     expect(error).not.toBeInstanceOf(SandboxFileNotFoundError);
     expect((error as SandboxFilesError).operation).toBe("read");
     expect((error as SandboxFilesError).path).toBe("/etc/shadow");
     expect((error as Error).message).toContain("permission denied");
+    expect(ws.sockets.length).toBe(1);
   });
 
   it("applies consumer backpressure: no next segment until the stream drains", async () => {
@@ -383,22 +392,24 @@ describe("files.read", () => {
 
   it("resumes a read when the server reports connection lost mid-segment", async () => {
     const mb = 1024 * 1024;
-    const { sandbox, ws } = await filesSandbox(2);
+    const { sandbox, ws } = await filesSandbox();
     const promise = sandbox.files.read("/big.bin", { format: "bytes" });
 
-    const first = await ws.nextSocket();
-    const read = await first.nextRequest();
-    first.serverBinary(1, FRAME_READ_CHUNK, 0, new Uint8Array(1024).fill(9));
+    const socket = await ws.nextSocket();
+    const read = await socket.nextRequest();
+    socket.serverBinary(1, FRAME_READ_CHUNK, 0, new Uint8Array(1024).fill(9));
     await tick();
-    first.serverError(read.id!, "connection lost");
+    // "connection lost" is an error reply, not a socket close: the WS stays
+    // open, so the resume reuses the same pooled socket (no reconnect).
+    socket.serverError(read.id!, "connection lost");
 
-    const second = await ws.nextSocket();
-    const resume = await second.nextRequest();
+    const resume = await socket.nextRequest();
     expect(resume.data).toMatchObject({ offset: 1024 });
-    second.serverBinary(1, FRAME_READ_END, 0, new Uint8Array(mb).fill(8));
+    socket.serverBinary(Number(resume.id), FRAME_READ_END, 0, new Uint8Array(mb).fill(8));
 
     const bytes = (await promise) as Uint8Array;
     expect(bytes.length).toBe(1024 + mb);
+    expect(ws.sockets.length).toBe(1);
   }, 15_000);
 
   it("resumes a segmented read from the dropped byte position", async () => {
@@ -410,7 +421,7 @@ describe("files.read", () => {
     await first.nextRequest(); // read offset=0 length=2MB
     first.serverBinary(1, FRAME_READ_CHUNK, 0, new Uint8Array(1024).fill(9));
     await tick(); // let the chunk deliver before the connection drops
-    first.serverClose(1006, "tunnel lost");
+    first.serverClose(1006, "connection lost");
 
     // A fresh connection resumes mid-segment from the exact byte position.
     const second = await ws.nextSocket();
@@ -468,7 +479,8 @@ describe("files.write", () => {
         scope: "files:read files:write",
       },
     });
-    expect(socket.readyState).toBe(3);
+    // The pooled connection stays open after the write settles.
+    expect(socket.readyState).toBe(1);
   });
 
   it("re-chunks large payloads to 64KB frames with the last one end-tagged", async () => {
@@ -680,19 +692,20 @@ describe("files.write", () => {
   }, 15_000);
 
   it("retries a replayable write when the server reports connection lost", async () => {
-    const { sandbox, ws } = await filesSandbox(2);
+    const { sandbox, ws } = await filesSandbox();
     const promise = sandbox.files.write("/f.txt", "hello");
 
-    const first = await ws.nextSocket();
-    const start = await first.nextRequest();
-    first.serverReply("write_ready", start.id!);
-    // The server's stream to the sandbox died; the WS session stays open.
-    first.serverError(start.id!, "connection lost");
+    const socket = await ws.nextSocket();
+    const start = await socket.nextRequest();
+    socket.serverReply("write_ready", start.id!);
+    // The server's stream to the sandbox died; the WS session stays open, so
+    // the retry reuses the same pooled socket rather than reconnecting.
+    socket.serverError(start.id!, "connection lost");
 
-    const second = await ws.nextSocket();
-    await acceptWrite(second, 1);
-    expect(second.sentBinary[0]?.payload).toEqual(enc("hello"));
+    await acceptWrite(socket, 1);
+    expect(socket.sentBinary[0]?.payload).toEqual(enc("hello"));
     await expect(promise).resolves.toBeUndefined();
+    expect(ws.sockets.length).toBe(1);
   }, 15_000);
 
   it("retries a replayable write on a fresh connection after a drop", async () => {
@@ -752,20 +765,21 @@ describe("files.write", () => {
 
   it("retries a one-shot source when write_start fails with connection lost", async () => {
     // The source was never pulled, so even a one-shot iterable is intact.
-    const { sandbox, ws } = await filesSandbox(2);
+    const { sandbox, ws } = await filesSandbox();
     async function* chunks() {
       yield enc("data");
     }
     const promise = sandbox.files.write("/f.bin", chunks());
 
-    const first = await ws.nextSocket();
-    const start = await first.nextRequest();
-    first.serverError(start.id!, "connection lost");
+    const socket = await ws.nextSocket();
+    const start = await socket.nextRequest();
+    // An error reply leaves the WS open, so the retry reuses the same socket.
+    socket.serverError(start.id!, "connection lost");
 
-    const second = await ws.nextSocket();
-    await acceptWrite(second, 1);
-    expect(second.sentBinary[0]?.payload).toEqual(enc("data"));
+    await acceptWrite(socket, 1);
+    expect(socket.sentBinary[0]?.payload).toEqual(enc("data"));
     await expect(promise).resolves.toBeUndefined();
+    expect(ws.sockets.length).toBe(1);
   }, 15_000);
 
   it("retries a one-shot source when the connection drops before write_ready", async () => {
@@ -858,11 +872,11 @@ describe("files metadata ops", () => {
   });
 
   it("stats a path and reports missing ones via exists()", async () => {
-    const { sandbox, ws } = await filesSandbox(2);
+    const { sandbox, ws } = await filesSandbox();
 
     const statPromise = sandbox.files.stat("/app/index.ts");
-    const socket1 = await ws.nextSocket();
-    expect(await socket1.nextRequest()).toEqual({
+    const socket = await ws.nextSocket();
+    expect(await socket.nextRequest()).toEqual({
       type: "stat",
       id: "1",
       data: { path: "/app/index.ts" },
@@ -874,48 +888,52 @@ describe("files metadata ops", () => {
       isDir: false,
       modTime: "2026-06-11T00:00:00Z",
     };
-    socket1.serverReply("stat_result", "1", entry);
+    socket.serverReply("stat_result", "1", entry);
     await expect(statPromise).resolves.toEqual(entry);
 
+    // The second same-scope op reuses the pooled connection (one socket); the
+    // bridge routes it by the next request id.
     const existsPromise = sandbox.files.exists("/nope");
-    const socket2 = await ws.nextSocket();
-    await socket2.nextRequest();
-    socket2.serverError("1", "file does not exist");
+    const second = await socket.nextRequest();
+    expect(second).toMatchObject({ type: "stat", id: "2", data: { path: "/nope" } });
+    socket.serverError(second.id!, "file does not exist");
     await expect(existsPromise).resolves.toBe(false);
+    expect(ws.sockets.length).toBe(1);
   });
 
   it("creates directories, removes, and renames", async () => {
-    const { sandbox, ws } = await filesSandbox(3);
+    const { sandbox, ws } = await filesSandbox();
 
+    // All three are rw-scoped, so they multiplex over one pooled connection;
+    // the bridge routes each by its sequential request id.
     const mkdirPromise = sandbox.files.mkdir("/a/b/c");
-    const socket1 = await ws.nextSocket();
-    expect(await socket1.nextRequest()).toEqual({
+    const socket = await ws.nextSocket();
+    expect(await socket.nextRequest()).toEqual({
       type: "mkdir",
       id: "1",
       data: { path: "/a/b/c" },
     });
-    socket1.serverReply("ok", "1");
+    socket.serverReply("ok", "1");
     await expect(mkdirPromise).resolves.toBeUndefined();
 
     const removePromise = sandbox.files.remove("/a/b/c");
-    const socket2 = await ws.nextSocket();
-    expect(await socket2.nextRequest()).toEqual({
+    expect(await socket.nextRequest()).toEqual({
       type: "rm",
-      id: "1",
+      id: "2",
       data: { path: "/a/b/c" },
     });
-    socket2.serverReply("ok", "1");
+    socket.serverReply("ok", "2");
     await expect(removePromise).resolves.toBeUndefined();
 
     const renamePromise = sandbox.files.rename("/old.txt", "/new.txt");
-    const socket3 = await ws.nextSocket();
-    expect(await socket3.nextRequest()).toEqual({
+    expect(await socket.nextRequest()).toEqual({
       type: "rename",
-      id: "1",
+      id: "3",
       data: { old: "/old.txt", new: "/new.txt" },
     });
-    socket3.serverReply("ok", "1");
+    socket.serverReply("ok", "3");
     await expect(renamePromise).resolves.toBeUndefined();
+    expect(ws.sockets.length).toBe(1);
   });
 
   it("mints the rw scope for mutations", async () => {
@@ -947,6 +965,223 @@ describe("files metadata ops", () => {
     await expect(
       sandbox.files.read("/f", { length: 0 }),
     ).rejects.toThrow(TypeError);
+  });
+});
+
+describe("files multiplexing", () => {
+  it("runs concurrent same-scope ops over one pooled socket", async () => {
+    const { sandbox, ws, mock } = await filesSandbox();
+
+    // Fire three reads at once; same scope, so they share one connection.
+    const a = sandbox.files.stat("/a");
+    const b = sandbox.files.stat("/b");
+    const c = sandbox.files.stat("/c");
+
+    const socket = await ws.nextSocket();
+    const requests = [
+      await socket.nextRequest(),
+      await socket.nextRequest(),
+      await socket.nextRequest(),
+    ];
+
+    // All three are in flight on the one socket with distinct request ids.
+    expect(ws.sockets.length).toBe(1);
+    expect(new Set(requests.map(r => r.id)).size).toBe(3);
+    expect(new Set(requests.map(r => (r.data as { path: string }).path))).toEqual(
+      new Set(["/a", "/b", "/c"]),
+    );
+
+    for (const request of requests) {
+      socket.serverReply("stat_result", request.id!, fileEntry(1));
+    }
+
+    await Promise.all([a, b, c]);
+    // One connection means one minted shell token.
+    expect(
+      mock.calls.filter(call =>
+        call.body.query.includes("generateShellToken"),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("multiplexes concurrent writes on one rw-scoped socket", async () => {
+    const { sandbox, ws } = await filesSandbox();
+
+    // Both writes share the rw-scoped pooled connection.
+    const w1 = sandbox.files.write("/one.txt", "a");
+    const w2 = sandbox.files.write("/two.txt", "b");
+
+    const socket = await ws.nextSocket();
+    const first = await socket.nextRequest();
+    const second = await socket.nextRequest();
+    expect(ws.sockets.length).toBe(1);
+    expect(first.type).toBe("write_start");
+    expect(second.type).toBe("write_start");
+    expect(first.id).not.toBe(second.id);
+
+    for (const start of [first, second]) {
+      socket.serverReply("write_ready", start.id!);
+    }
+    await until(
+      () => socket.sentBinary.length === 2,
+      "both writes streamed their content",
+    );
+    for (const start of [first, second]) socket.serverReply("ok", start.id!);
+
+    await Promise.all([w1, w2]);
+    expect(ws.sockets.length).toBe(1);
+  });
+});
+
+describe("files connection limits", () => {
+  it("maps the session-limit close to RailwaySessionLimitError with a clean message", async () => {
+    const { sandbox, ws } = await filesSandbox();
+    const promise = sandbox.files.stat("/whatever");
+    promise.catch(() => {}); // assertion attaches after the close settles
+    const socket = await ws.nextSocket();
+    await socket.nextRequest();
+
+    socket.serverClose(
+      4001,
+      "\r\nMaximum SSH connections reached for this sandbox.\r\n\r\n",
+    );
+
+    const error = await promise.catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(RailwaySessionLimitError);
+    expect((error as RailwaySessionLimitError).closeCode).toBe(4001);
+    expect((error as RailwaySessionLimitError).closeReason).toContain(
+      "Maximum SSH connections",
+    );
+    expect((error as Error).message).toBe(
+      "Maximum SSH connections reached for this sandbox.",
+    );
+    expect((error as Error).message).not.toContain("\r");
+  });
+
+  it("surfaces the close code and raw reason for an unrecognized close", async () => {
+    const { sandbox, ws } = await filesSandbox();
+    const promise = sandbox.files.stat("/x");
+    promise.catch(() => {});
+    const socket = await ws.nextSocket();
+    await socket.nextRequest();
+
+    socket.serverClose(1011, "internal error: boom");
+
+    const error = await promise.catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(RailwayConnectionError);
+    expect((error as RailwayConnectionError).closeCode).toBe(1011);
+    expect((error as RailwayConnectionError).closeReason).toBe(
+      "internal error: boom",
+    );
+    // The detail is in the message too, not a generic string.
+    expect((error as Error).message).toContain("1011");
+    expect((error as Error).message).toContain("internal error: boom");
+  });
+
+  it("surfaces RailwayConcurrencyLimitError after the pool exhausts its retries", async () => {
+    const { sandbox, ws } = await filesSandbox();
+    const promise = sandbox.files.stat("/busy");
+    promise.catch(() => {}); // assertion attaches after retries are spent
+
+    const socket = await ws.nextSocket();
+    // The pool retries a busy frame up to 3 times (4 attempts total) on the
+    // same open socket; reject every attempt so the typed error surfaces.
+    for (let i = 0; i < 4; i++) {
+      const request = await socket.nextRequest();
+      socket.serverReply("error", request.id!, {
+        code: "too_many_concurrent_operations",
+        limit: 16,
+        message: "too many parallel file operations",
+      });
+    }
+
+    const error = await promise.catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(RailwayConcurrencyLimitError);
+    expect((error as RailwayConcurrencyLimitError).limit).toBe(16);
+    // All retries stayed on the one pooled socket.
+    expect(ws.sockets.length).toBe(1);
+  });
+
+  it("self-heals: reconnects after a pre-open connection failure", async () => {
+    const { sandbox, ws } = await filesSandbox(2); // failed attempt + retry each mint a token
+    ws.failNextOpen({ kind: "transport" });
+
+    const promise = sandbox.files.stat("/x");
+    // The first socket fails before opening; the pool retries on a fresh socket.
+    const socket = await ws.nextSocket();
+    const request = await socket.nextRequest();
+    socket.serverReply("stat_result", request.id!, fileEntry(1));
+
+    await expect(promise).resolves.toMatchObject({ size: 1 });
+    expect(ws.sockets.length).toBe(2); // the failed socket + the working retry
+  });
+
+  it("surfaces RailwayRateLimitError when the upgrade is rate-limited (429)", async () => {
+    // Every attempt is 429'd; after the bounded connect retries the typed error surfaces.
+    const { sandbox, ws } = await filesSandbox(3);
+    for (let i = 0; i < 3; i++) {
+      ws.failNextOpen({ kind: "unexpected-response", status: 429, retryAfter: "0" });
+    }
+
+    const error = await sandbox.files.stat("/x").catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(RailwayRateLimitError);
+    expect((error as RailwayRateLimitError).httpStatus).toBe(429);
+  });
+});
+
+describe("files pool lifecycle", () => {
+  it("reuses one socket and token across sequential same-scope ops", async () => {
+    const { sandbox, ws, mock } = await filesSandbox();
+
+    const firstStat = sandbox.files.stat("/first");
+    const socket = await ws.nextSocket();
+    const r1 = await socket.nextRequest();
+    socket.serverReply("stat_result", r1.id!, fileEntry(1));
+    await firstStat;
+
+    const secondStat = sandbox.files.stat("/second");
+    const r2 = await socket.nextRequest();
+    expect(r2.id).toBe("2"); // next id on the same connection
+    socket.serverReply("stat_result", r2.id!, fileEntry(2));
+    await secondStat;
+
+    expect(ws.sockets.length).toBe(1);
+    expect(
+      mock.calls.filter(call =>
+        call.body.query.includes("generateShellToken"),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("reconnects on a fresh socket after an unexpected close evicts the pool", async () => {
+    const { sandbox, ws, mock } = await filesSandbox(2);
+
+    const firstStat = sandbox.files.stat("/first");
+    const first = await ws.nextSocket();
+    const r1 = await first.nextRequest();
+    first.serverReply("stat_result", r1.id!, fileEntry(1));
+    await firstStat;
+
+    // An unexpected close evicts the pooled connection.
+    first.serverClose(1006, "gone");
+    await until(() => first.readyState === 3, "socket observed closed");
+
+    // The next op cannot reuse the dead connection; it reconnects (new socket,
+    // new token, id restarts at 1).
+    const secondStat = sandbox.files.stat("/second");
+    const second = await ws.nextSocket();
+    expect(second).not.toBe(first);
+    const r2 = await second.nextRequest();
+    expect(r2.id).toBe("1");
+    second.serverReply("stat_result", r2.id!, fileEntry(2));
+    await secondStat;
+
+    expect(ws.sockets.length).toBe(2);
+    expect(
+      mock.calls.filter(call =>
+        call.body.query.includes("generateShellToken"),
+      ),
+    ).toHaveLength(2);
   });
 });
 

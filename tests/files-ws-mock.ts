@@ -26,11 +26,18 @@ export interface SentBinaryFrame {
   payload: Uint8Array;
 }
 
+/** Makes the next-created socket fail to open instead of opening. */
+export type OpenFailure =
+  | { kind: "unexpected-response"; status: number; retryAfter?: string }
+  | { kind: "transport" };
+
 export interface FilesWsMock {
   webSocketImpl: WebSocketConstructor;
   sockets: MockFilesSocket[];
   /** Resolves with the next socket once it has opened. */
   nextSocket(): Promise<MockFilesSocket>;
+  /** Queue a pre-open failure for the next socket (FIFO). */
+  failNextOpen(failure: OpenFailure): void;
 }
 
 export interface MockFilesSocket {
@@ -62,6 +69,7 @@ export interface MockFilesSocket {
 export function createFilesWsMock(): FilesWsMock {
   const sockets: Socket[] = [];
   let socketWaiters: ((socket: Socket) => void)[] = [];
+  const openFailures: OpenFailure[] = [];
 
   class Socket implements MockFilesSocket {
     static readonly OPEN = 1;
@@ -82,6 +90,7 @@ export function createFilesWsMock(): FilesWsMock {
 
     private requestWaiters: ((frame: FilesRequestFrame) => void)[] = [];
     private unreadRequests: FilesRequestFrame[] = [];
+    private unexpectedResponseListeners: ((res: unknown) => void)[] = [];
 
     constructor(url: string, protocols?: string | string[]) {
       this.url = url;
@@ -89,6 +98,25 @@ export function createFilesWsMock(): FilesWsMock {
         typeof protocols === "string" ? [protocols] : (protocols ?? []).slice();
       sockets.push(this);
       queueMicrotask(() => {
+        const failure = openFailures.shift();
+        if (failure) {
+          this.readyState = Socket.CLOSED;
+          if (failure.kind === "unexpected-response") {
+            const res = {
+              statusCode: failure.status,
+              headers: failure.retryAfter
+                ? { "retry-after": failure.retryAfter }
+                : {},
+              resume: () => {},
+              destroy: () => {},
+            };
+            for (const listener of this.unexpectedResponseListeners) listener(res);
+          } else {
+            this.onerror?.({});
+            this.onclose?.({ code: 1006, reason: "" });
+          }
+          return;
+        }
         this.readyState = Socket.OPEN;
         this.onopen?.();
         const pending = socketWaiters;
@@ -123,6 +151,12 @@ export function createFilesWsMock(): FilesWsMock {
       if (this.readyState === Socket.CLOSED) return;
       this.readyState = Socket.CLOSED;
       queueMicrotask(() => this.onclose?.({ code, reason }));
+    }
+
+    on(event: string, listener: (...args: unknown[]) => void): void {
+      if (event === "unexpected-response") {
+        this.unexpectedResponseListeners.push(listener as (res: unknown) => void);
+      }
     }
 
     nextRequest(): Promise<FilesRequestFrame> {
@@ -176,5 +210,6 @@ export function createFilesWsMock(): FilesWsMock {
     webSocketImpl: Socket as unknown as WebSocketConstructor,
     sockets,
     nextSocket: () => new Promise(resolve => socketWaiters.push(resolve)),
+    failNextOpen: failure => openFailures.push(failure),
   };
 }
