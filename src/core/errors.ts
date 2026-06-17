@@ -36,6 +36,12 @@ export class RailwayConnectionError extends RailwayError {
   }
 }
 
+/** Stable code backboard sets in error extensions when an apply's base config is stale. */
+export const STALE_ENVIRONMENT_BASE_CODE = "STALE_ENVIRONMENT_BASE";
+
+/** Thrown by IaC apply when the environment changed since the plan's base snapshot. */
+export class StaleEnvironmentError extends RailwayError {}
+
 export class RailwayGraphQLError extends RailwayError {
   readonly status: number;
   readonly errors: readonly RailwayGraphQLErrorItem[];

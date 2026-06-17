@@ -1,9 +1,33 @@
 import { describe, expect, it } from "vitest";
 
-import { bucket, diffGraphs, graphToEnvironmentConfig, postgres, project } from "../src/index.js";
+import { bucket, createRailwayContext, diffGraphs, environmentConfigToGraph, github, graphToEnvironmentConfig, image, postgres, project, service } from "../src/index.js";
 import { projectDefinitionToGraph } from "../src/iac/compiler.js";
+import { RAILWAY_CHANGE_SET_VERSION, SUPPORTED_CHANGE_SET_VERSIONS } from "../src/iac/change-set.js";
+import { preserve } from "../src/iac/sdk.js";
 
 describe("Railway IaC", () => {
+  it("emits the current change-set wire version", () => {
+    const current = projectDefinitionToGraph(project("app", { resources: [] }));
+    const desired = projectDefinitionToGraph(project("app", { resources: [service("web", {})] }));
+
+    expect(RAILWAY_CHANGE_SET_VERSION).toBe(1);
+    expect(SUPPORTED_CHANGE_SET_VERSIONS).toContain(RAILWAY_CHANGE_SET_VERSION);
+    expect(diffGraphs({ current, desired }).version).toBe(1);
+  });
+
+
+  it("compiles shared variable references from context", () => {
+    const ctx = createRailwayContext();
+    const graph = projectDefinitionToGraph(project("app", {
+      resources: [service("web", { env: { API_KEY: ctx.shared.API_KEY, DASHED: ctx.shared["DASHED-KEY"] } })],
+    }));
+
+    expect(graphToEnvironmentConfig(graph).services?.web?.variables).toEqual({
+      API_KEY: { value: "${{shared.API_KEY}}" },
+      DASHED: { value: "${{shared.DASHED-KEY}}" },
+    });
+  });
+
   it("maps database region to service and volume placement", () => {
     const graph = projectDefinitionToGraph(project("app", {
       resources: [postgres("db", { region: "europe-west4" })],
@@ -42,5 +66,80 @@ describe("Railway IaC", () => {
 
   it("typechecks known bucket regions", () => {
     expect(bucket("assets", { region: "sjc" }).config?.region).toBe("sjc");
+  });
+
+  // The GA gate: compiling a desired graph to config and reading it straight back
+  // must produce zero changes. This is the "import → plan → ∅" round-trip the
+  // runner performs against a live environment.
+  it("plans no changes for an unchanged round-tripped config", () => {
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [
+        service("web", { source: github("railwayapp/demo", { branch: "main" }), env: { PUBLIC_FLAG: "on" } }),
+        service("worker", { source: image("ghcr.io/acme/worker:1.2.3") }),
+      ],
+    }));
+
+    const current = environmentConfigToGraph(graphToEnvironmentConfig(desired), { projectName: "app" });
+
+    expect(diffGraphs({ current, desired }).changes).toEqual([]);
+  });
+
+  it("marks removing a service as a destructive delete", () => {
+    const current = environmentConfigToGraph({
+      services: { web: { source: { repo: "railwayapp/demo" } }, api: { source: { repo: "railwayapp/api" } } },
+    }, { projectName: "app" });
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [service("web", { source: github("railwayapp/demo") })],
+    }));
+
+    const deletion = diffGraphs({ current, desired }).changes.find(change => change.kind === "resource.delete");
+    expect(deletion).toMatchObject({ kind: "resource.delete", address: "service.api", severity: "destructive" });
+  });
+
+  it("treats variable removal as destructive and addition as safe", () => {
+    const current = environmentConfigToGraph({
+      services: { web: { source: { repo: "r" }, variables: { OLD: { value: "1" } } } },
+    }, { projectName: "app" });
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [service("web", { source: github("r"), env: { NEW: "2" } })],
+    }));
+
+    const changes = diffGraphs({ current, desired }).changes;
+    expect(changes).toContainEqual(expect.objectContaining({ kind: "variable.delete", variable: "OLD", severity: "destructive" }));
+    expect(changes).toContainEqual(expect.objectContaining({ kind: "variable.set", variable: "NEW", severity: "safe" }));
+  });
+
+  it("never plans a change for a preserve() variable", () => {
+    const current = environmentConfigToGraph({
+      services: { web: { source: { repo: "r" }, variables: { SECRET: { value: "existing" } } } },
+    }, { projectName: "app" });
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [service("web", { source: github("r"), env: { SECRET: preserve() } })],
+    }));
+
+    const varChanges = diffGraphs({ current, desired }).changes.filter(change => change.kind.startsWith("variable"));
+    expect(varChanges).toEqual([]);
+  });
+
+  it("refuses to manage a service still owned by railway.json/toml", () => {
+    const current = environmentConfigToGraph({
+      services: { web: { source: { repo: "r" }, configFile: "railway.json" } },
+    }, { projectName: "app" });
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [service("web", { source: github("r") })],
+    }));
+
+    const { changes, diagnostics } = diffGraphs({ current, desired });
+    expect(diagnostics).toContainEqual(expect.objectContaining({ severity: "error", message: expect.stringContaining("railway.json") }));
+    expect(changes).toEqual([]);
+  });
+
+  it("flags a bucket region change as an immutable-region error", () => {
+    const current = environmentConfigToGraph({ buckets: { assets: { region: "sjc" } } }, { projectName: "app" });
+    const desired = projectDefinitionToGraph(project("app", { resources: [bucket("assets", { region: "ams" })] }));
+
+    expect(diffGraphs({ current, desired }).diagnostics).toContainEqual(
+      expect.objectContaining({ severity: "error", message: expect.stringContaining("region") }),
+    );
   });
 });

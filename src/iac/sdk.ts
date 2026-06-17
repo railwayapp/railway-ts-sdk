@@ -35,6 +35,7 @@ export interface RailwayContextInput {
 export interface RailwayContext extends RailwayContextInput {
   randomString: (label?: string, bytes?: number) => string;
   isEnvironment: (name: string) => boolean;
+  shared: SharedVariableRef;
 }
 
 export type RailwayProgram = (
@@ -61,6 +62,7 @@ export function createRailwayContext(input: RailwayContextInput = {}): RailwayCo
     randomString: (label = "random", bytes = 12) =>
       createHash("sha256").update(`railway-iac:${environment ?? "default"}:${label}`).digest("hex").slice(0, bytes * 2),
     isEnvironment: (name: string) => environment === name,
+    shared: createSharedVariableRefs(),
   };
 }
 
@@ -121,6 +123,7 @@ export type MongoVariable = RailwayProvidedVariable | "MONGO_INITDB_ROOT_PASSWOR
 export type MySqlVariable = RailwayProvidedVariable | "MYSQL_DATABASE" | "MYSQL_PUBLIC_URL" | "MYSQL_ROOT_PASSWORD" | "MYSQL_URL" | "MYSQLDATABASE" | "MYSQLHOST" | "MYSQLPASSWORD" | "MYSQLPORT" | "MYSQLUSER";
 export type DatabaseVariable<E extends DatabaseNode["engine"]> = E extends "postgres" ? PostgresVariable : E extends "redis" ? RedisVariable : E extends "mongo" ? MongoVariable : E extends "mysql" ? MySqlVariable : RailwayProvidedVariable | string;
 export type ServiceVariableRef<K extends string = RailwayProvidedVariable | string> = { readonly [P in K]: VariableValue };
+export type SharedVariableRef = { readonly [name: string]: VariableValue } & { readonly [name: string]: any };
 export type ReferencableServiceNode<K extends string = RailwayProvidedVariable | string> = ServiceNode & { readonly env: ServiceVariableRef<K> };
 export type ReferencableDatabaseNode<E extends DatabaseNode["engine"]> = DatabaseNode & { readonly env: ServiceVariableRef<DatabaseVariable<E>> };
 
@@ -245,6 +248,19 @@ export function preserve(): VariableValue {
 
 function variableReference(resource: ResourceNode, output: string): VariableValue {
   return { type: "reference", resource: resource.address, output };
+}
+
+function sharedVariableReference(name: string): VariableValue {
+  return { type: "sharedReference", name };
+}
+
+function createSharedVariableRefs(): SharedVariableRef {
+  return new Proxy({} as SharedVariableRef, {
+    get(_target, property) {
+      if (typeof property !== "string") return undefined;
+      return sharedVariableReference(property);
+    },
+  });
 }
 
 function createVariableRefAccessor(resource: ResourceNode): ServiceVariableRef<string> {

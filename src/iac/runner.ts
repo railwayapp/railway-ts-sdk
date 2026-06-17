@@ -229,6 +229,8 @@ async function applyRailwayIac(input: EvaluatedCommandInput): Promise<RailwayIac
     environmentId: context.environmentId,
     changeSet: planned.changeSet,
     commitMessage: "Apply Railway configuration",
+    // Base snapshot the plan was diffed against; backboard rejects a stale apply.
+    ...(planned.currentEnvironment?.configEtag ? { baseEtag: planned.currentEnvironment.configEtag } : {}),
   });
 
   return {

@@ -2,6 +2,7 @@ import { parse } from "graphql";
 import type { TypedDocumentNode } from "@graphql-typed-document-node/core";
 import { normalizeRailwayClientConfig, type RailwayClientConfig, type NormalizedRailwayClientConfig } from "../core/config.js";
 import { requestGraphQL } from "../core/graphql-client.js";
+import { RailwayGraphQLError, StaleEnvironmentError, STALE_ENVIRONMENT_BASE_CODE } from "../core/errors.js";
 import type {
   BucketCreateInput,
   ServiceCreateInput,
@@ -17,6 +18,8 @@ export interface CurrentEnvironmentResult {
   environmentId: string;
   environmentName?: string | undefined;
   config: EnvironmentConfig;
+  /** Opaque snapshot token of the environment config the plan was computed against. */
+  configEtag?: string | undefined;
   serviceNamesById: Record<string, string>;
   bucketNamesById: Record<string, string>;
   customDomainsByServiceId: Record<string, Record<string, { port?: number }>>;
@@ -71,9 +74,9 @@ export class IacClient {
 
   async getCurrentEnvironment(environmentId: string, options: { decryptVariables?: boolean } = {}): Promise<CurrentEnvironmentResult> {
     const data = await gql<{
-      environment: { id: string; name?: string; projectId?: string; config: EnvironmentConfig };
+      environment: { id: string; name?: string; projectId?: string; config: EnvironmentConfig; configEtag?: string };
     }, { environmentId: string; decryptVariables: boolean }>(this.#config, `query IacEnvironmentConfig($environmentId: String!, $decryptVariables: Boolean) {
-      environment(id: $environmentId) { id name projectId config(decryptVariables: $decryptVariables) }
+      environment(id: $environmentId) { id name projectId config(decryptVariables: $decryptVariables) configEtag }
     }`, { environmentId, decryptVariables: options.decryptVariables ?? false });
 
     const projectName = data.environment.projectId ? await this.getProjectName(data.environment.projectId) : undefined;
@@ -89,6 +92,7 @@ export class IacClient {
       serviceNamesById: Object.fromEntries(services.map(service => [service.id, service.name])),
       bucketNamesById: Object.fromEntries(buckets.map(bucket => [bucket.id, bucket.name])),
       customDomainsByServiceId,
+      ...(data.environment.configEtag ? { configEtag: data.environment.configEtag } : {}),
     };
   }
 
@@ -170,13 +174,23 @@ export class IacClient {
     return data.environmentPreviewChangeSet;
   }
 
-  async applyChangeSet({ environmentId, changeSet, commitMessage }: { environmentId: string; changeSet: RailwayChangeSet; commitMessage?: string }): Promise<ChangeSetApplyResult> {
-    const variables: { environmentId: string; input: RailwayChangeSet; commitMessage?: string } = { environmentId, input: changeSet };
+  async applyChangeSet({ environmentId, changeSet, commitMessage, baseEtag }: { environmentId: string; changeSet: RailwayChangeSet; commitMessage?: string; baseEtag?: string }): Promise<ChangeSetApplyResult> {
+    const variables: { environmentId: string; input: RailwayChangeSet; commitMessage?: string; baseConfigEtag?: string } = { environmentId, input: changeSet };
     if (commitMessage !== undefined) variables.commitMessage = commitMessage;
-    const data = await gql<{ environmentApplyChangeSet: ChangeSetApplyResult }, typeof variables>(this.#config, `mutation IacApplyChangeSet($environmentId: String!, $input: JSON!, $commitMessage: String) {
-      environmentApplyChangeSet(environmentId: $environmentId, input: $input, commitMessage: $commitMessage) { id status deploymentId stagedPatchId diagnostics changes { kind path summary status outputs } }
-    }`, variables);
-    return data.environmentApplyChangeSet;
+    // Optimistic concurrency: the server rejects the apply if the environment moved
+    // since this plan's base. Omitted etag (older server/client) skips the check.
+    if (baseEtag !== undefined) variables.baseConfigEtag = baseEtag;
+    try {
+      const data = await gql<{ environmentApplyChangeSet: ChangeSetApplyResult }, typeof variables>(this.#config, `mutation IacApplyChangeSet($environmentId: String!, $input: JSON!, $commitMessage: String, $baseConfigEtag: String) {
+        environmentApplyChangeSet(environmentId: $environmentId, input: $input, commitMessage: $commitMessage, baseConfigEtag: $baseConfigEtag) { id status deploymentId stagedPatchId diagnostics changes { kind path summary status outputs } }
+      }`, variables);
+      return data.environmentApplyChangeSet;
+    } catch (error) {
+      if (isStaleBaseError(error)) {
+        throw new StaleEnvironmentError("The environment changed since this plan was computed. Re-run plan and review the changes before applying.", { cause: error });
+      }
+      throw error;
+    }
   }
 
   async commitStagedPatch({ environmentId, message, skipDeploys }: { environmentId: string; message?: string; skipDeploys?: boolean }): Promise<string> {
@@ -243,6 +257,11 @@ export class IacClient {
 
 async function gql<TResult, TVariables>(config: NormalizedRailwayClientConfig, source: string, variables: TVariables): Promise<TResult> {
   return requestGraphQL(config, parse(source) as TypedDocumentNode<TResult, TVariables>, variables);
+}
+
+function isStaleBaseError(error: unknown): boolean {
+  if (!(error instanceof RailwayGraphQLError)) return false;
+  return error.errors.some(item => item.extensions?.code === STALE_ENVIRONMENT_BASE_CODE);
 }
 
 function extractVolumeIdsByServiceName({ currentConfig, serviceIdsByName }: { currentConfig?: EnvironmentConfig; serviceIdsByName: Record<string, string> }): Record<string, string> {

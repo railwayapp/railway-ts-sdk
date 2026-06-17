@@ -2,7 +2,12 @@ import { composePatch, graphToEnvironmentConfig } from "./compiler.js";
 import type { GraphCompileOptions, RailwayGraph, ResourceAddress, ResourceNode, VariableValue } from "./graph.js";
 import type { EnvironmentConfig } from "./schema.js";
 
-export const RAILWAY_CHANGE_SET_VERSION = 0 as const;
+// Wire-contract version for the RailwayChangeSet exchanged with backboard.
+// v1 adds the optional base-config etag handshake on apply (compare-and-swap).
+// Compat guarantee: backboard accepts every version in SUPPORTED_CHANGE_SET_VERSIONS,
+// so backboard must deploy support for a new version before the SDK/CLI emit it.
+export const RAILWAY_CHANGE_SET_VERSION = 1 as const;
+export const SUPPORTED_CHANGE_SET_VERSIONS = [0, 1] as const;
 
 export type RailwayChangeSetVersion = typeof RAILWAY_CHANGE_SET_VERSION;
 export type ChangeSeverity = "safe" | "destructive";
@@ -404,10 +409,12 @@ function formatVariableDiffValue(value: VariableValue | undefined, resourcesByAd
     const name = resourcesByAddress.get(value.resource)?.name ?? value.resource.split(".").slice(1).join(".") ?? value.resource;
     return `${name}.${value.output}`;
   }
+  if (value.type === "sharedReference") return `shared.${value.name}`;
   return formatDiffValue(normalizeVariableForDiff(value, resourcesByAddress));
 }
 
 function normalizeVariableForDiff(value: VariableValue | undefined, resourcesByAddress: Map<ResourceAddress, ResourceNode>): unknown {
+  if (value?.type === "sharedReference") return { type: "literal", value: `\${{shared.${value.name}}}` };
   if (value?.type !== "reference") return value;
   const name = resourcesByAddress.get(value.resource)?.name ?? value.resource.split(".").slice(1).join(".") ?? value.resource;
   return { type: "literal", value: `\${{${name}.${value.output}}}` };
