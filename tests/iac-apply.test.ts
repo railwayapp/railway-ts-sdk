@@ -1,8 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { fileURLToPath } from "node:url";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RailwayGraphQLError, StaleEnvironmentError } from "../src/index.js";
 import { IacClient } from "../src/iac/client.js";
 import type { RailwayChangeSet } from "../src/iac/change-set.js";
+import { runRailwayIac } from "../src/iac/runner.js";
 import { createFetchMock } from "./test-helpers.js";
 
 const changeSet: RailwayChangeSet = { version: 1, changes: [], diagnostics: [] };
@@ -72,5 +74,37 @@ describe("IaC apply — configEtag handshake", () => {
     const current = await client(mock.fetch).getCurrentEnvironment("e1");
 
     expect(current.configEtag).toBe("etag-abc");
+  });
+});
+
+describe("IaC runner — threads configEtag from plan into apply", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const fixture = fileURLToPath(new URL("./fixtures/iac-apply/.railway/railway.ts", import.meta.url));
+
+  it("captures configEtag during plan and sends it as baseConfigEtag on apply", async () => {
+    // Ordered responses for: env config, project name, services, buckets, preview, apply.
+    const mock = createFetchMock([
+      { data: { environment: { id: "e1", name: "production", projectId: "p1", config: {}, configEtag: "etag-LIVE" } } },
+      { data: { project: { name: "e2e-thread" } } },
+      { data: { project: { services: { edges: [] } } } },
+      { data: { project: { buckets: { edges: [] } } } },
+      { data: { environmentPreviewChangeSet: { changeSet: { version: 1, changes: [], diagnostics: [] }, diagnostics: [], effects: [] } } },
+      { data: { environmentApplyChangeSet: { id: "op_1", status: "applied", changes: [], diagnostics: [], deploymentId: "deploy_1", stagedPatchId: null } } },
+    ]);
+    vi.stubGlobal("fetch", mock.fetch);
+
+    const result = await runRailwayIac({
+      command: "apply",
+      file: fixture,
+      backboard: { token: "t", environmentId: "e1" },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.command).toBe("apply");
+
+    const applyCall = mock.calls.find(call => call.body.query.includes("environmentApplyChangeSet"));
+    expect(applyCall, "expected an environmentApplyChangeSet request").toBeDefined();
+    expect((applyCall?.body.variables as Record<string, unknown>).baseConfigEtag).toBe("etag-LIVE");
   });
 });
