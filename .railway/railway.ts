@@ -22,7 +22,7 @@ export default defineRailway(() =>
     resources: [
       fn("iac-e2e", {
         source: github("railwayapp/railway-ts-sdk"),
-        start: "pnpm exec vitest run tests/*.e2e.test.ts",
+        start: "pnpm exec vitest run tests/iac.e2e.test.ts",
         deploy: { cronSchedule: "0 7 * * *" }, // nightly, 07:00 UTC
         env: {
           // Dedicated namespace — NOT RAILWAY_*, which the platform auto-injects
