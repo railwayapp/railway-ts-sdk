@@ -69,8 +69,11 @@ function connectBackoffMs(attempt: number, error: unknown): number {
   return CONNECT_BASE_DELAY_MS * 2 ** (attempt - 1);
 }
 
-/** A counting semaphore: at most `limit` holders, FIFO queue beyond. */
-class Gate {
+/**
+ * A counting semaphore: at most `limit` holders, FIFO queue beyond. Exported for
+ * unit testing the concurrency invariant.
+ */
+export class Gate {
   #active = 0;
   #limit: number;
   readonly #queue: (() => void)[] = [];
@@ -91,13 +94,22 @@ class Gate {
       this.#active++;
       return;
     }
+    // At the cap: wait for release() to hand us its slot. No increment on resume
+    // — the slot is transferred, so the holder count is unchanged.
     await new Promise<void>(resolve => this.#queue.push(resolve));
-    this.#active++;
   }
 
   release(): void {
+    // Hand the slot straight to the next waiter (count unchanged) rather than
+    // decrement-then-let-the-waiter-reincrement, which leaves a transient gap a
+    // fresh acquire() can barge into past the cap. Only hand off while within the
+    // cap; otherwise decrement, draining an over-subscribed gate (post-lower())
+    // down to the new ceiling before admitting a waiter.
+    if (this.#active <= this.#limit && this.#queue.length > 0) {
+      this.#queue.shift()!();
+      return;
+    }
     this.#active--;
-    this.#queue.shift()?.();
   }
 }
 

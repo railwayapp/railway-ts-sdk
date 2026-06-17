@@ -409,6 +409,47 @@ describe.runIf(live)("files e2e (live)", () => {
       .catch((e: unknown) => e);
     expect(error).toBeInstanceOf(SandboxFileNotFoundError);
   }, 120_000);
+
+  it("multiplexes many concurrent transfers over one pooled connection", async () => {
+    // All of these funnel through one pooled /ws/files connection, so this only
+    // passes against a proxy that demultiplexes concurrent transfers.
+    const files = Array.from({ length: 12 }, (_, i) => ({
+      path: `/tmp/mux-${i}.bin`,
+      bytes: randomBytes(64 * 1024 + i * 997), // varied sizes, distinct content
+    }));
+
+    await Promise.all(
+      files.map(f => sandbox.files.write(f.path, new Uint8Array(f.bytes))),
+    );
+    const checked = await Promise.all(
+      files.map(async f => {
+        const got = await sandbox.files.read(f.path, { format: "bytes" });
+        return Buffer.from(got).equals(f.bytes); // no cross-talk
+      }),
+    );
+
+    expect(checked.every(Boolean)).toBe(true);
+  }, 180_000);
+
+  it("interleaves mixed concurrent op types on one connection", async () => {
+    await sandbox.files.mkdir("/tmp/mux-mixed");
+    const seed = randomBytes(128 * 1024);
+    await sandbox.files.write("/tmp/mux-mixed/seed.bin", new Uint8Array(seed));
+
+    const [readBack, stat, list] = await Promise.all([
+      sandbox.files.read("/tmp/mux-mixed/seed.bin", { format: "bytes" }),
+      sandbox.files.stat("/tmp/mux-mixed/seed.bin"),
+      sandbox.files.list("/tmp/mux-mixed"),
+      sandbox.files.write("/tmp/mux-mixed/other.txt", "concurrent\n"),
+    ]);
+
+    expect(Buffer.from(readBack).equals(seed)).toBe(true);
+    expect(stat.size).toBe(seed.length);
+    expect(list.some(e => e.name === "seed.bin")).toBe(true);
+    expect(await sandbox.files.read("/tmp/mux-mixed/other.txt")).toBe(
+      "concurrent\n",
+    );
+  }, 180_000);
 });
 
 describe.runIf(live)("fork + template e2e (live)", () => {
