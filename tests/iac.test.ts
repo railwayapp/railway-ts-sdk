@@ -2,8 +2,19 @@ import { describe, expect, it } from "vitest";
 
 import { bucket, createRailwayContext, diffGraphs, graphToEnvironmentConfig, postgres, project, service } from "../src/index.js";
 import { projectDefinitionToGraph } from "../src/iac/compiler.js";
+import { RAILWAY_CHANGE_SET_VERSION, SUPPORTED_CHANGE_SET_VERSIONS } from "../src/iac/change-set.js";
 
 describe("Railway IaC", () => {
+  it("emits the current change-set wire version", () => {
+    const current = projectDefinitionToGraph(project("app", { resources: [] }));
+    const desired = projectDefinitionToGraph(project("app", { resources: [service("web", {})] }));
+
+    expect(RAILWAY_CHANGE_SET_VERSION).toBe(1);
+    expect(SUPPORTED_CHANGE_SET_VERSIONS).toContain(RAILWAY_CHANGE_SET_VERSION);
+    expect(diffGraphs({ current, desired }).version).toBe(1);
+  });
+
+
   it("compiles shared variable references from context", () => {
     const ctx = createRailwayContext();
     const graph = projectDefinitionToGraph(project("app", {
