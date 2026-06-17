@@ -3,7 +3,12 @@ import {
   type NormalizedRailwayClientConfig,
   type WebSocketConstructor,
 } from "./config.js";
-import { RailwayConnectionError } from "./errors.js";
+import {
+  RailwayConcurrencyLimitError,
+  RailwayConnectionError,
+  RailwayRateLimitError,
+  RailwaySessionLimitError,
+} from "./errors.js";
 import type { RailwayWsSocket } from "./ws-socket.js";
 
 /**
@@ -16,6 +21,11 @@ const BINARY_HEADER_BYTES = 12;
 const FRAME_READ_END = 0x02;
 const FRAME_WRITE_CHUNK = 0x03;
 const FRAME_WRITE_END = 0x04;
+
+/** Private-use WS close code for the sandbox's concurrent-session limit. */
+const WS_CLOSE_SESSION_LIMIT = 4001;
+/** Server error-frame code for the per-connection concurrency cap. */
+const CODE_TOO_MANY_CONCURRENT = "too_many_concurrent_operations";
 
 /** Subprotocol the tcp-proxy bridges expect alongside the JWT. */
 const SHELL_SUBPROTOCOL = "railway-shell";
@@ -80,6 +90,8 @@ export interface FilesWsConnection {
     start: { path: string; mode: number; size: number },
     chunks: AsyncIterable<Uint8Array>,
   ): Promise<void>;
+  /** Registers a listener fired once when the socket closes, with the close cause. */
+  onClose(listener: (error: Error) => void): void;
   close(): void;
 }
 
@@ -92,7 +104,7 @@ interface PendingOp {
   fail(error: Error): void;
 }
 
-const sleep = (ms: number): Promise<void> =>
+export const sleep = (ms: number): Promise<void> =>
   new Promise(resolve => setTimeout(resolve, ms));
 
 /**
@@ -100,8 +112,8 @@ const sleep = (ms: number): Promise<void> =>
  * The JWT travels as the last `Sec-WebSocket-Protocol` value, per the bridge's
  * token-extraction contract; a `files:*`-scoped token authorizes the path.
  *
- * The bridge handles one request at a time per connection (uploads are modal
- * server-side), so callers should open a connection per operation.
+ * The bridge demultiplexes by request id, so multiple operations may be in
+ * flight concurrently on one connection; a pool caps that concurrency.
  */
 export function connectFilesWs(args: {
   config: NormalizedRailwayClientConfig;
@@ -116,12 +128,22 @@ export function connectFilesWs(args: {
     let closed = false;
     let nextId = 1;
     const pending = new Map<string, PendingOp>();
+    const closeListeners: ((error: Error) => void)[] = [];
+    let closeError: Error | undefined;
 
     const socket = new WS(endpoint, [
       SHELL_SUBPROTOCOL,
       jwt,
     ]) as unknown as RailwayWsSocket;
     socket.binaryType = "arraybuffer";
+
+    // The `ws` package surfaces a non-101 upgrade status here (undici hides it);
+    // a 429 becomes a typed RailwayRateLimitError so the pool can back off.
+    captureUnexpectedResponse(socket, (status, retryAfterMs) => {
+      if (opened || closed) return;
+      closed = true;
+      reject(handshakeError(status, retryAfterMs));
+    });
 
     const failAll = (error: Error) => {
       const ops = [...pending.values()];
@@ -201,7 +223,7 @@ export function connectFilesWs(args: {
               disarm();
               pending.delete(id);
               if (replyType === "error") {
-                rejectCall(new FilesRemoteError(errorMessage(replyData)));
+                rejectCall(remoteError(replyData));
               } else {
                 resolveCall(replyData);
               }
@@ -225,7 +247,7 @@ export function connectFilesWs(args: {
               if (replyType !== "error") return;
               disarm();
               pending.delete(id);
-              rejectRead(new FilesRemoteError(errorMessage(replyData)));
+              rejectRead(remoteError(replyData));
             },
             onBinary: (frameType, payload) => {
               arm();
@@ -291,8 +313,8 @@ export function connectFilesWs(args: {
             if (replyType === "error") {
               disarm();
               pending.delete(id);
-              const error = new FilesRemoteError(
-                errorMessage(replyData),
+              const error = remoteError(
+                replyData,
                 awaitingReady ? "start" : "stream",
               );
               if (awaitingReady) ready.reject(error);
@@ -381,6 +403,11 @@ export function connectFilesWs(args: {
         return done;
       },
 
+      onClose(listener) {
+        if (closeError) listener(closeError);
+        else closeListeners.push(listener);
+      },
+
       close: closeSocket,
     };
 
@@ -406,24 +433,23 @@ export function connectFilesWs(args: {
     socket.onclose = event => {
       closed = true;
       if (!opened) {
+        const clean = sanitizeReason(event.reason);
         reject(
           new RailwayConnectionError({
             message: `tcp-proxy files WebSocket closed before opening (code ${event.code}${
-              event.reason ? `: ${event.reason}` : ""
+              clean ? `: ${clean}` : ""
             }).`,
             closeCode: event.code,
+            ...(event.reason && { closeReason: event.reason }),
           }),
         );
         return;
       }
-      failAll(
-        new RailwayConnectionError({
-          message: `tcp-proxy files WebSocket closed (code ${event.code}${
-            event.reason ? `: ${event.reason}` : ""
-          }).`,
-          closeCode: event.code,
-        }),
-      );
+      const error = filesCloseError(event.code, event.reason);
+      closeError = error;
+      failAll(error);
+      for (const listener of closeListeners) listener(error);
+      closeListeners.length = 0;
     };
 
     socket.onerror = event => {
@@ -467,6 +493,101 @@ export function connectFilesWs(args: {
 function errorMessage(data: unknown): string {
   const message = (data as { message?: string } | undefined)?.message;
   return message || "unknown error";
+}
+
+/** Typed error for a non-101 upgrade rejection (only the `ws` package exposes it). */
+function handshakeError(status: number, retryAfterMs: number | undefined): Error {
+  if (status === 429) {
+    return new RailwayRateLimitError({
+      message: "tcp-proxy files WebSocket rate limited (HTTP 429).",
+      httpStatus: 429,
+      ...(retryAfterMs !== undefined && { retryAfterMs }),
+    });
+  }
+  return new RailwayConnectionError({
+    message: `tcp-proxy files WebSocket handshake failed (HTTP ${status}).`,
+  });
+}
+
+/**
+ * Hooks the `ws` package's `unexpected-response` (undici exposes no upgrade
+ * status). It does not emit close/error afterwards, so drain the response and
+ * settle via `onResponse`; under undici this never fires and the failure falls
+ * to onerror/onclose as a RailwayConnectionError (which the pool retries).
+ */
+function captureUnexpectedResponse(
+  socket: unknown,
+  onResponse: (status: number, retryAfterMs: number | undefined) => void,
+): void {
+  const s = socket as {
+    on?: (event: string, listener: (...args: unknown[]) => void) => void;
+  };
+  if (typeof s.on !== "function") return;
+  s.on("unexpected-response", (...args: unknown[]) => {
+    const res = (args.length > 1 ? args[1] : args[0]) as
+      | {
+          statusCode?: number;
+          headers?: Record<string, string | string[] | undefined>;
+          resume?: () => void;
+          destroy?: () => void;
+        }
+      | undefined;
+    res?.resume?.();
+    res?.destroy?.();
+    onResponse(
+      res?.statusCode ?? 0,
+      parseRetryAfterMs(res?.headers?.["retry-after"]),
+    );
+  });
+}
+
+function parseRetryAfterMs(
+  value: string | string[] | undefined,
+): number | undefined {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (!raw) return undefined;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds) * 1000;
+  const date = Date.parse(raw);
+  if (Number.isNaN(date)) return undefined;
+  return Math.max(0, date - Date.now());
+}
+
+/** Collapses the terminal CRLF formatting the server uses so SDK errors read cleanly. */
+function sanitizeReason(reason: string): string {
+  return reason.replace(/\s+/g, " ").trim();
+}
+
+/** Typed error for a post-open socket close; the session limit gets its own type. */
+function filesCloseError(code: number, reason: string): Error {
+  const clean = sanitizeReason(reason);
+  if (code === WS_CLOSE_SESSION_LIMIT) {
+    return new RailwaySessionLimitError({
+      message:
+        clean ||
+        "Sandbox is at its connection limit (too many concurrent sessions). Close an existing session and retry.",
+      closeCode: code,
+      ...(reason && { closeReason: reason }),
+    });
+  }
+  return new RailwayConnectionError({
+    message: `tcp-proxy files WebSocket closed (code ${code}${clean ? `: ${clean}` : ""}).`,
+    closeCode: code,
+    ...(reason && { closeReason: reason }),
+  });
+}
+
+/** Maps a server `error` reply to a typed error, special-casing the concurrency cap. */
+function remoteError(data: unknown, stage?: "start" | "stream"): Error {
+  const code = (data as { code?: string } | undefined)?.code;
+  if (code === CODE_TOO_MANY_CONCURRENT) {
+    const limit = (data as { limit?: number } | undefined)?.limit;
+    return new RailwayConcurrencyLimitError({
+      message: errorMessage(data),
+      ...(typeof limit === "number" && { limit }),
+    });
+  }
+  return new FilesRemoteError(errorMessage(data), stage);
 }
 
 function binaryFrame(

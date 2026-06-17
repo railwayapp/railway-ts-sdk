@@ -1,18 +1,9 @@
 import {
-  deriveFilesWsEndpoint,
-  type NormalizedRailwayClientConfig,
-} from "../core/config.js";
-import {
-  connectFilesWs,
-  FilesRemoteError,
-  type FilesWsConnection,
-} from "../core/files-ws-client.js";
-import { requestGraphQL } from "../core/graphql-client.js";
-import {
-  RailwayGenerateShellTokenDocument,
-  type RailwayGenerateShellTokenMutation,
-  type RailwayGenerateShellTokenMutationVariables,
-} from "../generated/graphql.js";
+  getFilesPool,
+  type FilesScope,
+  type FilesTarget,
+} from "../core/files-pool.js";
+import { FilesRemoteError } from "../core/files-ws-client.js";
 import { SandboxFileNotFoundError, SandboxFilesError } from "./errors.js";
 import { startExec } from "./exec.js";
 import {
@@ -32,23 +23,17 @@ import type {
   SandboxFileEntry,
 } from "./types.js";
 
-export interface FilesContext {
-  config: NormalizedRailwayClientConfig;
-  environmentId: string;
-  sandboxId: string;
-}
-
-/** Read scope for inspection ops; the rw scope for anything that mutates. */
-type FilesScope = "files:read" | "files:read files:write";
+/** Where a SandboxFiles instance points; structurally the pool's FilesTarget. */
+export type FilesContext = FilesTarget;
 
 /** Module-internal access to SandboxFiles' private constructor. */
 let constructFiles: (context: FilesContext) => SandboxFiles;
 
 /**
- * File operations on a live sandbox, exposed as `sandbox.files`. Each
- * operation mints a short-lived `files`-scoped token and opens its own
- * tcp-proxy `/ws/files` session (the bridge serves one request per
- * connection), so concurrent operations run independently.
+ * File operations on a live sandbox, exposed as `sandbox.files`. Operations
+ * multiplex over a pooled `/ws/files` connection per (sandbox, scope), so
+ * concurrent transfers share one connection; a per-connection gate caps how many
+ * run at once and queues the rest.
  *
  * Paths are absolute within the sandbox filesystem. Content streams in
  * 64KB frames both ways: pushes accept streams without buffering, and
@@ -213,28 +198,29 @@ export class SandboxFiles {
     await this.#call("rename", from, { old: from, new: to });
   }
 
-  /** One upload attempt on its own connection, creating missing parents. */
+  /** One upload attempt over a pooled connection, creating missing parents. */
   async #writeOnce(
     target: string,
     start: { path: string; mode: number; size: number },
     source: UploadSource,
   ): Promise<void> {
-    const connection = await this.#connect("files:read files:write");
-    try {
-      try {
-        await connection.write(start, source.chunks());
-      } catch (error) {
-        const parent = parentDir(target);
-        if (!isMissingParent(error) || !parent) throw error;
-        // The parent directory does not exist; create it and retry once.
-        // A `write_start` failure consumes no content, so the source is
-        // still intact.
-        await connection.call("mkdir", { path: parent });
-        await connection.write(start, source.chunks());
-      }
-    } finally {
-      connection.close();
-    }
+    await getFilesPool().run(
+      this.#context,
+      "files:read files:write",
+      async connection => {
+        try {
+          await connection.write(start, source.chunks());
+        } catch (error) {
+          const parent = parentDir(target);
+          if (!isMissingParent(error) || !parent) throw error;
+          // The parent directory does not exist; create it and retry once.
+          // A `write_start` failure consumes no content, so the source is
+          // still intact.
+          await connection.call("mkdir", { path: parent });
+          await connection.write(start, source.chunks());
+        }
+      },
+    );
   }
 
   /** Sets `path`'s permissions with a chmod run through the exec primitive. */
@@ -256,20 +242,19 @@ export class SandboxFiles {
     }
   }
 
-  /** One-shot request/reply op on its own connection, with error mapping. */
+  /** One-shot request/reply op over a pooled connection, with error mapping. */
   async #call(type: string, path: string, payload: unknown): Promise<unknown> {
     this.#log(`files ${type} ${path}`);
     const scope: FilesScope =
       type === "ls" || type === "stat"
         ? "files:read"
         : "files:read files:write";
-    const connection = await this.#connect(scope);
     try {
-      return await connection.call(type, payload);
+      return await getFilesPool().run(this.#context, scope, connection =>
+        connection.call(type, payload),
+      );
     } catch (error) {
       throw this.#wrapError(type, path, error);
-    } finally {
-      connection.close();
     }
   }
 
@@ -335,32 +320,12 @@ export class SandboxFiles {
     waitForCapacity?: () => Promise<void>,
   ): PullHandle {
     return startPull({
-      connect: () => this.#connect("files:read"),
+      acquire: () => getFilesPool().acquireLease(this.#context, "files:read"),
       log: message => this.#log(message),
       path,
       options,
       onChunk,
       ...(waitForCapacity && { waitForCapacity }),
-    });
-  }
-
-  /** Mints a files-scoped token and opens a `/ws/files` session with it. */
-  async #connect(scope: FilesScope): Promise<FilesWsConnection> {
-    const { config, environmentId, sandboxId } = this.#context;
-    const input: RailwayGenerateShellTokenMutationVariables["input"] = {
-      environmentId,
-      instanceId: sandboxId,
-      kind: "sandbox",
-      scope,
-    };
-    const tokenData = await requestGraphQL<
-      RailwayGenerateShellTokenMutation,
-      RailwayGenerateShellTokenMutationVariables
-    >(config, RailwayGenerateShellTokenDocument, { input });
-    return connectFilesWs({
-      config,
-      jwt: tokenData.generateShellToken,
-      endpoint: deriveFilesWsEndpoint(config.tcpProxyWsEndpoint),
     });
   }
 
