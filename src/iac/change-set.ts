@@ -404,10 +404,12 @@ function formatVariableDiffValue(value: VariableValue | undefined, resourcesByAd
     const name = resourcesByAddress.get(value.resource)?.name ?? value.resource.split(".").slice(1).join(".") ?? value.resource;
     return `${name}.${value.output}`;
   }
+  if (value.type === "sharedReference") return `shared.${value.name}`;
   return formatDiffValue(normalizeVariableForDiff(value, resourcesByAddress));
 }
 
 function normalizeVariableForDiff(value: VariableValue | undefined, resourcesByAddress: Map<ResourceAddress, ResourceNode>): unknown {
+  if (value?.type === "sharedReference") return { type: "literal", value: `\${{shared.${value.name}}}` };
   if (value?.type !== "reference") return value;
   const name = resourcesByAddress.get(value.resource)?.name ?? value.resource.split(".").slice(1).join(".") ?? value.resource;
   return { type: "literal", value: `\${{${name}.${value.output}}}` };

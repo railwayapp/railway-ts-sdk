@@ -1,9 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import { bucket, diffGraphs, graphToEnvironmentConfig, postgres, project } from "../src/index.js";
+import { bucket, createRailwayContext, diffGraphs, graphToEnvironmentConfig, postgres, project, service } from "../src/index.js";
 import { projectDefinitionToGraph } from "../src/iac/compiler.js";
 
 describe("Railway IaC", () => {
+  it("compiles shared variable references from context", () => {
+    const ctx = createRailwayContext();
+    const graph = projectDefinitionToGraph(project("app", {
+      resources: [service("web", { env: { API_KEY: ctx.shared.API_KEY, DASHED: ctx.shared["DASHED-KEY"] } })],
+    }));
+
+    expect(graphToEnvironmentConfig(graph).services?.web?.variables).toEqual({
+      API_KEY: { value: "${{shared.API_KEY}}" },
+      DASHED: { value: "${{shared.DASHED-KEY}}" },
+    });
+  });
+
   it("maps database region to service and volume placement", () => {
     const graph = projectDefinitionToGraph(project("app", {
       resources: [postgres("db", { region: "europe-west4" })],

@@ -286,13 +286,17 @@ function variablesToEnvironmentConfig(variables: Record<string, VariableValue>, 
       .filter((entry): entry is [string, Exclude<VariableValue, { type: "preserve" }>] => entry[1].type !== "preserve")
       .map(([key, value]) => [
         key,
-        value.type === "literal" ? literalVariable(value) : value.type === "raw" ? value.value : referenceVariable(value, resourceNamesById),
+        value.type === "literal" ? literalVariable(value) : value.type === "raw" ? value.value : value.type === "sharedReference" ? sharedReferenceVariable(value) : referenceVariable(value, resourceNamesById),
       ]),
   );
 }
 
 function referenceVariable(value: Extract<VariableValue, { type: "reference" }>, resourceNamesById: Record<string, string>): VariableConfig {
   return { value: `\${{${resourceNamesById[value.resource] ?? value.resource}.${value.output}}}` };
+}
+
+function sharedReferenceVariable(value: Extract<VariableValue, { type: "sharedReference" }>): VariableConfig {
+  return { value: `\${{shared.${value.name}}}` };
 }
 
 function literalVariable(value: Extract<VariableValue, { type: "literal" }>): VariableConfig {
