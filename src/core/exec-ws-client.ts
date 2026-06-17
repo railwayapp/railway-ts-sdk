@@ -49,13 +49,17 @@ export function connectExecWs(args: {
   config: NormalizedRailwayClientConfig;
   jwt: string;
   command: string;
+  /** Working directory for the command; omit for the sandbox default. */
+  cwd?: string;
+  /** Extra environment variables for the command. */
+  env?: Record<string, string>;
   /** Resume an existing durable session by name; omit/empty to start fresh. */
   sessionName?: string;
   /** Resume from the server's last-read cursor. Note some loss if previous clients read didn't keep up */
   resumeFromLastRead?: boolean;
   handlers: ExecWsHandlers;
 }): Promise<ExecWsConnection> {
-  const { config, jwt, command, sessionName, resumeFromLastRead, handlers } = args;
+  const { config, jwt, command, cwd, env, sessionName, resumeFromLastRead, handlers } = args;
   const WS: WebSocketConstructor = resolveWebSocketImpl(config);
 
   return new Promise<ExecWsConnection>((resolve, reject) => {
@@ -70,9 +74,13 @@ export function connectExecWs(args: {
       opened = true;
       const data: {
         command: string;
+        cwd?: string;
+        env?: Record<string, string>;
         durable_session_name?: string;
         resume_from_last_read?: boolean;
       } = { command };
+      if (cwd) data.cwd = cwd;
+      if (env && Object.keys(env).length > 0) data.env = env;
       if (sessionName) data.durable_session_name = sessionName;
       if (resumeFromLastRead) data.resume_from_last_read = true;
       socket.send(JSON.stringify({ type: "init_exec", data }));

@@ -10,7 +10,6 @@ import {
   type RailwayGenerateShellTokenMutation,
   type RailwayGenerateShellTokenMutationVariables,
 } from "../generated/graphql.js";
-import { wrapCommand } from "./shell.js";
 import type { ExecOptions, ExecResult, ExecSignal, ExecTarget } from "./types.js";
 
 const decoder = () => new TextDecoder();
@@ -211,9 +210,7 @@ async function runExec(
   control: ExecControl,
 ): Promise<ExecResult> {
   const reattach = typeof target !== "string";
-  const command = reattach
-    ? REATTACH_PLACEHOLDER_COMMAND
-    : wrapCommand(target, options);
+  const command = reattach ? REATTACH_PLACEHOLDER_COMMAND : target;
   const sessionName = reattach ? target.sessionName : undefined;
 
   // Resolve the session name once: to the resume name immediately on reattach,
@@ -283,6 +280,9 @@ async function runExec(
     config: context.config,
     jwt,
     command,
+    ...(reattach
+      ? {}
+      : { cwd: options.cwd, env: options.env }),
     ...(sessionName
       ? {
           sessionName,

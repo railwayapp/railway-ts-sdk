@@ -227,7 +227,7 @@ describe("exec", () => {
     });
   });
 
-  it("wraps the command when cwd/env are given", async () => {
+  it("sends cwd/env on the init frame", async () => {
     const { handle, socket } = await execSocket("npm test", {
       cwd: "/app",
       env: { NODE_ENV: "test" },
@@ -235,7 +235,7 @@ describe("exec", () => {
 
     expect(socket.sentText[0]).toEqual({
       type: "init_exec",
-      data: { command: "cd /app && NODE_ENV=test sh -c 'npm test'" },
+      data: { command: "npm test", cwd: "/app", env: { NODE_ENV: "test" } },
     });
 
     socket.serverExit(0);
