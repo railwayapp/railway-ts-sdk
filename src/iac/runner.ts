@@ -14,6 +14,8 @@ export interface RailwayIacRunnerRequest {
   file?: string;
   includeTypes?: boolean;
   pretty?: boolean;
+  /** Print literal variable values in the plan diff instead of redacting them (--show-values). */
+  revealValues?: boolean;
   context?: RailwayContextInput;
   backboard?: RailwayIacBackboardContext;
 }
@@ -183,7 +185,7 @@ async function planRailwayIac({ file, graph: desiredGraph, request, diagnostics 
   const client = new IacClient(clientConfig(context));
   const current = await readCurrentEnvironment(client, context);
   const currentGraph = graphFromCurrentEnvironment(current, desiredGraph);
-  const changeSet = diffGraphs({ current: currentGraph, desired: desiredGraph });
+  const changeSet = diffGraphs({ current: currentGraph, desired: desiredGraph, revealValues: request.revealValues ?? false });
   const allDiagnostics = [...diagnostics, ...changeSetDiagnostics(changeSet)];
   const { config: _config, ...currentEnvironment } = current;
   const hasErrors = !hasNoErrors(allDiagnostics);
@@ -229,6 +231,8 @@ async function applyRailwayIac(input: EvaluatedCommandInput): Promise<RailwayIac
     environmentId: context.environmentId,
     changeSet: planned.changeSet,
     commitMessage: "Apply Railway configuration",
+    // Base snapshot the plan was diffed against; backboard rejects a stale apply.
+    ...(planned.currentEnvironment?.configEtag ? { baseEtag: planned.currentEnvironment.configEtag } : {}),
   });
 
   return {

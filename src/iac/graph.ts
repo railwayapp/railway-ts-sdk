@@ -103,6 +103,7 @@ export interface GroupNode extends GraphResourceBase {
 export type VariableValue =
   | ({ type: "literal" } & VariableConfig)
   | { type: "reference"; resource: ResourceAddress; output: string }
+  | { type: "sharedReference"; name: string }
   | { type: "preserve" }
   | { type: "raw"; value: VariableConfig };
 

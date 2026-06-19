@@ -95,10 +95,8 @@ export interface ExecOptions {
   cwd?: string;
   /**
    * Extra environment variables for this command, layered over the sandbox's
-   * own env. Values travel inside the command string (the SDK composes a
-   * `cd`/assignment prefix around the command), so they are visible to `ps`
-   * in the sandbox — for secrets prefer `env` on `Sandbox.create`.
-   * Fresh execs only — rejected on reattach (`exec({ sessionName })`).
+   * own env (these take precedence). Fresh execs only — rejected on reattach
+   * (`exec({ sessionName })`).
    */
   env?: Record<string, string>;
   /** Receives each stdout chunk as it arrives. A throw rejects the exec. */

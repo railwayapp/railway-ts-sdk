@@ -9,6 +9,8 @@ export {
   RailwayError,
   RailwayGraphQLError,
   type RailwayGraphQLErrorItem,
+  StaleEnvironmentError,
+  STALE_ENVIRONMENT_BASE_CODE,
 } from "./core/errors.js";
 export {
   bucket,
