@@ -401,16 +401,22 @@ function marker(change: RailwayChange): string {
   return "~";
 }
 
+// Variable values can be secrets, and plan output goes to terminals and CI logs.
+// We never render a concrete value: the change (set/update) and any non-secret
+// pointers (references, shared, preserve) are shown, but literal/raw values are
+// redacted. The structured change still carries the real value for apply.
+const REDACTED_VARIABLE_VALUE = "«hidden»";
+
 function formatVariableDiffValue(value: VariableValue | undefined, resourcesByAddress: Map<ResourceAddress, ResourceNode>): string {
   if (value === undefined) return "unset";
   if (value.type === "preserve") return "preserve()";
-  if (value.type === "literal") return formatDiffValue(value.value);
   if (value.type === "reference") {
     const name = resourcesByAddress.get(value.resource)?.name ?? value.resource.split(".").slice(1).join(".") ?? value.resource;
     return `${name}.${value.output}`;
   }
   if (value.type === "sharedReference") return `shared.${value.name}`;
-  return formatDiffValue(normalizeVariableForDiff(value, resourcesByAddress));
+  // literal or raw — a concrete, possibly-secret value: never print it.
+  return REDACTED_VARIABLE_VALUE;
 }
 
 function normalizeVariableForDiff(value: VariableValue | undefined, resourcesByAddress: Map<ResourceAddress, ResourceNode>): unknown {
