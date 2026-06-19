@@ -1,6 +1,7 @@
 # railway
 
-TypeScript SDK for Railway. Create sandboxes, run commands in them, and tear them down.
+TypeScript SDK for Railway. Create sandboxes and run commands in them, and define your
+project's infrastructure as code.
 
 **The SDK is in beta and there will be breaking changes**. The version of this SDK started on v3.0.0.
 
@@ -258,6 +259,74 @@ Railway only when you build it or create a sandbox from it.
 Create a template with `Sandbox.template()`. Building throws `SandboxTemplateBuildError`
 on failure and `SandboxTimeoutError` if it exceeds the 5-minute timeout.
 
+## Infrastructure as Code
+
+> **Experimental.** The IaC API is in beta and will change.
+
+Describe a Railway project — services, databases, buckets, variables, domains, replicas,
+and canvas groups — in TypeScript, and let the Railway CLI plan and apply the difference
+against your environment. Authoring lives in a separate entrypoint, `railway/iac`:
+
+```ts
+// .railway/railway.ts
+import { defineRailway, github, postgres, project, service } from "railway/iac";
+
+export default defineRailway(() => {
+  const db = postgres("db");
+
+  const web = service("web", {
+    source: github("acme/web"),
+    build: "pnpm build",
+    start: "pnpm start",
+    healthcheck: "/health",
+    env: {
+      NODE_ENV: "production",
+      DATABASE_URL: db.env.DATABASE_URL, // typed cross-service reference
+    },
+  });
+
+  return project("my-app", { resources: [db, web] });
+});
+```
+
+Then, from the directory linked to your Railway project:
+
+```bash
+railway config plan    # preview the diff against the linked environment
+railway config apply   # apply it — prompts before destructive changes
+```
+
+How it works:
+
+- **Declarative and stateless.** Your `.railway/railway.ts` is diffed against the *live*
+  environment — there is no state file to manage or drift from.
+- **Plan, then apply.** `plan` previews; `apply` prompts interactively (`--yes` to skip).
+  Removing resources or variables is destructive and additionally requires
+  `--confirm-destructive` in non-interactive or agent sessions, so a stray `--yes` can't
+  silently delete infrastructure.
+- **Safe by construction.** An `apply` is rejected if the environment changed since the
+  plan it was computed against, and variable values are redacted from plan output so
+  secrets don't leak into terminals or CI logs.
+
+The DSL in brief:
+
+- Resources: `service`, `fn` (cron), `postgres` / `mysql` / `redis` / `mongo`, `bucket`,
+  `group`.
+- Sources: `github(repo)`, `image(ref)`, `template(name)`, `empty()`.
+- Variables: literals, typed references to another resource (`db.env.DATABASE_URL`),
+  shared variables (`ctx.shared.NAME`), and `preserve()` to keep a value Railway already
+  holds.
+- Per-environment logic via the context: `ctx.isEnvironment("production")`,
+  `ctx.environment`.
+
+Beta limitations to know:
+
+- Services managed by `railway.json` / `railway.toml` must be migrated before IaC can
+  manage them.
+- Bucket regions are immutable after creation.
+
+Full guide and reference: <https://docs.railway.com/infrastructure-as-code>.
+
 ## Configuration
 
 `token`, `environmentId`, and `endpoint` each resolve in order: an explicit option,
@@ -297,6 +366,8 @@ All errors extend `RailwayError`:
   resolved. Names the missing variable on `.variable`.
 - `RailwayGraphQLError`: the Railway API returned an error. Carries `.status`,
   `.errors`, and `.responseBody`.
+- `StaleEnvironmentError`: an IaC `apply` was rejected because the environment changed
+  since the plan was computed. Re-run `plan` and review before applying again.
 - `SandboxNotFoundError`: `connect` or `refresh` could not find the sandbox. Carries
   `.id` and `.environmentId`.
 - `SandboxFailedError`: a sandbox reached a terminal state (`FAILED`, `DESTROYING`,
