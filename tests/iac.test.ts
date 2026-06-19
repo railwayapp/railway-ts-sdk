@@ -141,6 +141,20 @@ describe("Railway IaC", () => {
     expect(change?.after).toMatchObject({ type: "literal", value: SECRET });
   });
 
+  it("reveals variable values when revealValues is set (--show-values)", () => {
+    const SECRET = "sk-super-secret-value-123";
+    const current = environmentConfigToGraph({ services: { web: { source: { repo: "r" } } } }, { projectName: "app" });
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [service("web", { source: github("r"), env: { API_KEY: SECRET } })],
+    }));
+
+    const changeSet = diffGraphs({ current, desired, revealValues: true });
+    const change = changeSet.changes.find((c): c is SetVariableChange => c.kind === "variable.set" && c.variable === "API_KEY");
+
+    expect(change?.details?.[0]).toContain(SECRET);
+    expect(change?.details?.[0]).not.toContain("«hidden»");
+  });
+
   it("refuses to manage a service still owned by railway.json/toml", () => {
     const current = environmentConfigToGraph({
       services: { web: { source: { repo: "r" }, configFile: "railway.json" } },

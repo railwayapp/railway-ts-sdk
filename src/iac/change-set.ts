@@ -85,7 +85,7 @@ export interface ChangeDiagnostic {
   message: string;
 }
 
-export function diffGraphs({ current, desired }: { current: RailwayGraph; desired: RailwayGraph }): RailwayChangeSet {
+export function diffGraphs({ current, desired, revealValues = false }: { current: RailwayGraph; desired: RailwayGraph; revealValues?: boolean }): RailwayChangeSet {
   const changes: RailwayChange[] = [];
   const diagnostics: ChangeDiagnostic[] = [];
   const currentByAddress = new Map(current.resources.map(resource => [resource.address, resource]));
@@ -118,7 +118,7 @@ export function diffGraphs({ current, desired }: { current: RailwayGraph; desire
       changes.push(update(resource.address, "name", previous.name, resource.name, `Rename ${resource.type} ${previous.name} to ${resource.name}`));
     }
 
-    diffVariables({ previous, resource, changes, resourcesByAddress: desiredByAddress });
+    diffVariables({ previous, resource, changes, resourcesByAddress: desiredByAddress, revealValues });
     diffTopLevelField({ previous, resource, field: "source", changes });
     diffTopLevelField({ previous, resource, field: "build", changes });
     if (previous.type === "database" && resource.type === "database" && databaseRegion(previous) !== databaseRegion(resource)) {
@@ -249,7 +249,7 @@ export function renderChangeSet(changeSet: RailwayChangeSet): string {
   return changeSet.changes.map(change => `${marker(change)} ${change.summary}`).join("\n");
 }
 
-function diffVariables({ previous, resource, changes, resourcesByAddress }: { previous: ResourceNode; resource: ResourceNode; changes: RailwayChange[]; resourcesByAddress: Map<ResourceAddress, ResourceNode> }) {
+function diffVariables({ previous, resource, changes, resourcesByAddress, revealValues }: { previous: ResourceNode; resource: ResourceNode; changes: RailwayChange[]; resourcesByAddress: Map<ResourceAddress, ResourceNode>; revealValues: boolean }) {
   if (!("variables" in previous) && !("variables" in resource)) return;
   const before = "variables" in previous ? previous.variables ?? {} : {};
   const after = "variables" in resource ? resource.variables ?? {} : {};
@@ -264,7 +264,7 @@ function diffVariables({ previous, resource, changes, resourcesByAddress }: { pr
       after: value,
       path: `resources.${resource.address}.variables.${key}`,
       summary: `${before[key] ? "Update" : "Set"} variable ${resource.name}.${key}`,
-      details: [`${resource.name}.${key} (${formatVariableDiffValue(before[key], resourcesByAddress)} → ${formatVariableDiffValue(value, resourcesByAddress)})`],
+      details: [`${resource.name}.${key} (${formatVariableDiffValue(before[key], resourcesByAddress, revealValues)} → ${formatVariableDiffValue(value, resourcesByAddress, revealValues)})`],
       severity: "safe",
       deployEffect: "deploy",
     });
@@ -402,12 +402,13 @@ function marker(change: RailwayChange): string {
 }
 
 // Variable values can be secrets, and plan output goes to terminals and CI logs.
-// We never render a concrete value: the change (set/update) and any non-secret
-// pointers (references, shared, preserve) are shown, but literal/raw values are
-// redacted. The structured change still carries the real value for apply.
+// By default we never render a concrete value: the change (set/update) and any
+// non-secret pointers (references, shared, preserve) are shown, but literal/raw
+// values are redacted. `revealValues` (the --show-values opt-in) prints them.
+// The structured change always carries the real value for apply.
 const REDACTED_VARIABLE_VALUE = "«hidden»";
 
-function formatVariableDiffValue(value: VariableValue | undefined, resourcesByAddress: Map<ResourceAddress, ResourceNode>): string {
+function formatVariableDiffValue(value: VariableValue | undefined, resourcesByAddress: Map<ResourceAddress, ResourceNode>, revealValues: boolean): string {
   if (value === undefined) return "unset";
   if (value.type === "preserve") return "preserve()";
   if (value.type === "reference") {
@@ -415,8 +416,9 @@ function formatVariableDiffValue(value: VariableValue | undefined, resourcesByAd
     return `${name}.${value.output}`;
   }
   if (value.type === "sharedReference") return `shared.${value.name}`;
-  // literal or raw — a concrete, possibly-secret value: never print it.
-  return REDACTED_VARIABLE_VALUE;
+  // literal or raw — a concrete, possibly-secret value: redacted unless revealed.
+  if (!revealValues) return REDACTED_VARIABLE_VALUE;
+  return value.type === "literal" ? formatDiffValue(value.value) : formatDiffValue(normalizeVariableForDiff(value, resourcesByAddress));
 }
 
 function normalizeVariableForDiff(value: VariableValue | undefined, resourcesByAddress: Map<ResourceAddress, ResourceNode>): unknown {
