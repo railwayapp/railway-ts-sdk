@@ -53,7 +53,7 @@ run = "pnpm run clean"
 [tasks.check]
 description = "Run typecheck, offline unit tests, and build (forces e2e off — clears creds)"
 depends = ["typecheck", "build"]
-run = "RAILWAY_API_TOKEN='' RAILWAY_ENVIRONMENT_ID='' pnpm run test"
+run = "RAILWAY_API_TOKEN='' RAILWAY_ENVIRONMENT_ID='' IAC_E2E_API_TOKEN='' IAC_E2E_ENVIRONMENT_ID='' pnpm run test"
 
 [tasks.example]
 description = "Run the default manual example using .env credentials"
