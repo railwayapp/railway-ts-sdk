@@ -91,6 +91,9 @@ function setBooleanFlag(
     case "--decrypt-variables":
       backboard.decryptVariables = true;
       return true;
+    case "--show-values":
+      parsed.revealValues = true;
+      return true;
     case "--replace":
       backboard.merge = false;
       return true;
