@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { bucket, createRailwayContext, diffGraphs, environmentConfigToGraph, github, graphToEnvironmentConfig, image, postgres, project, service } from "../src/index.js";
 import { projectDefinitionToGraph } from "../src/iac/compiler.js";
-import { RAILWAY_CHANGE_SET_VERSION, SUPPORTED_CHANGE_SET_VERSIONS } from "../src/iac/change-set.js";
+import { RAILWAY_CHANGE_SET_VERSION, SUPPORTED_CHANGE_SET_VERSIONS, renderChangeSet, type SetVariableChange } from "../src/iac/change-set.js";
 import { preserve } from "../src/iac/sdk.js";
 
 describe("Railway IaC", () => {
@@ -119,6 +119,26 @@ describe("Railway IaC", () => {
 
     const varChanges = diffGraphs({ current, desired }).changes.filter(change => change.kind.startsWith("variable"));
     expect(varChanges).toEqual([]);
+  });
+
+  it("redacts variable values in plan output but keeps them in the change", () => {
+    const SECRET = "sk-super-secret-value-123";
+    const current = environmentConfigToGraph({ services: { web: { source: { repo: "r" } } } }, { projectName: "app" });
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [service("web", { source: github("r"), env: { API_KEY: SECRET } })],
+    }));
+
+    const changeSet = diffGraphs({ current, desired });
+    const change = changeSet.changes.find((c): c is SetVariableChange => c.kind === "variable.set" && c.variable === "API_KEY");
+
+    // Human-facing output (rendered diff + per-change details/summary) must never leak the value.
+    const rendered = JSON.stringify({ diff: renderChangeSet(changeSet), summary: change?.summary, details: change?.details });
+    expect(rendered).not.toContain(SECRET);
+    expect(change?.details?.[0]).toContain("API_KEY");
+    expect(change?.details?.[0]).toContain("«hidden»");
+
+    // The structured change still carries the real value so apply works.
+    expect(change?.after).toMatchObject({ type: "literal", value: SECRET });
   });
 
   it("refuses to manage a service still owned by railway.json/toml", () => {
