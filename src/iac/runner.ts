@@ -258,6 +258,7 @@ function graphFromCurrentEnvironment(current: CurrentEnvironmentResult, desiredG
   return environmentConfigToGraph(current.config, {
     projectName: current.projectName ?? desiredGraph.project.name,
     serviceNamesById: current.serviceNamesById,
+    volumeNamesById: current.volumeNamesById,
     bucketNamesById: current.bucketNamesById,
     customDomainsByServiceId: current.customDomainsByServiceId,
   });

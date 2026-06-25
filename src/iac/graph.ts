@@ -62,6 +62,7 @@ export interface ServiceNode extends GraphResourceBase {
   networking?: ServiceNetworking;
   variables?: Record<string, VariableValue>;
   volumeMounts?: Record<string, VolumeMount | null>;
+  volumeAttachments?: Record<string, { volume: ResourceAddress; mountPath: string; backupSchedules?: VolumeMount["backupSchedules"] }>;
   configFile?: string;
   parentServiceId?: string;
   groupId?: string;
@@ -128,6 +129,7 @@ export interface GraphCompileOptions {
   serviceIdsByName?: Record<string, string>;
   existingServiceIds?: string[];
   volumeIdsByServiceName?: Record<string, string>;
+  volumeIdsByName?: Record<string, string>;
   bucketIdsByName?: Record<string, string>;
 }
 

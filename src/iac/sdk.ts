@@ -90,7 +90,7 @@ export interface IntentServiceConfig {
   tcpProxies?: string[];
   env?: Record<string, string | VariableConfig | VariableValue>;
   variables?: Record<string, string | VariableConfig | VariableValue>;
-  volumeMounts?: Record<string, VolumeMount | null>;
+  volumeMounts?: Record<string, VolumeMount | null | VolumeNode>;
   configFile?: string;
   parentServiceId?: string;
   groupId?: string;
@@ -155,7 +155,7 @@ export function service<const Env extends Record<string, string | VariableConfig
     deploy: normalizeDeploy(config),
     networking: normalizeNetworking(config),
     ...(config.env || config.variables ? { variables: normalizeVariables({ ...(config.variables ?? {}), ...(config.env ?? {}) }) } : {}),
-    ...(config.volumeMounts ? { volumeMounts: config.volumeMounts } : {}),
+    ...normalizeVolumeMounts(config.volumeMounts),
     ...(config.configFile ? { configFile: config.configFile } : {}),
     ...(config.parentServiceId ? { parentServiceId: config.parentServiceId } : {}),
     ...(config.groupId ? { groupId: config.groupId } : {}),
@@ -340,6 +340,20 @@ function normalizeVariables(variables: Record<string, string | VariableConfig | 
       return [key, { type: "raw", value }];
     }),
   );
+}
+
+function normalizeVolumeMounts(volumeMounts: ServiceConfigInput["volumeMounts"]): Pick<ServiceNode, "volumeMounts" | "volumeAttachments"> {
+  if (!volumeMounts) return {};
+  const rawMounts: ServiceNode["volumeMounts"] = {};
+  const attachments: NonNullable<ServiceNode["volumeAttachments"]> = {};
+  for (const [key, value] of Object.entries(volumeMounts)) {
+    if (value && typeof value === "object" && "type" in value && value.type === "volume") {
+      attachments[value.name] = { volume: value.address, mountPath: key };
+      continue;
+    }
+    rawMounts[key] = value as VolumeMount | null;
+  }
+  return pruneEmpty({ volumeMounts: rawMounts, volumeAttachments: attachments }) ?? {};
 }
 
 function pruneEmpty<T>(value: T): T | undefined {

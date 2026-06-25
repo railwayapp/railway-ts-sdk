@@ -68,6 +68,7 @@ describe("IaC apply — configEtag handshake", () => {
       { data: { environment: { id: "e1", name: "production", projectId: "p1", config: {}, configEtag: "etag-abc" } } },
       { data: { project: { name: "proj" } } },
       { data: { project: { services: { edges: [] } } } },
+      { data: { project: { volumes: { edges: [] } } } },
       { data: { project: { buckets: { edges: [] } } } },
     ]);
 
@@ -83,11 +84,12 @@ describe("IaC runner — threads configEtag from plan into apply", () => {
   const fixture = fileURLToPath(new URL("./fixtures/iac-apply/.railway/railway.ts", import.meta.url));
 
   it("captures configEtag during plan and sends it as baseConfigEtag on apply", async () => {
-    // Ordered responses for: env config, project name, services, buckets, preview, apply.
+    // Ordered responses for: env config, project name, services, volumes, buckets, preview, apply.
     const mock = createFetchMock([
       { data: { environment: { id: "e1", name: "production", projectId: "p1", config: {}, configEtag: "etag-LIVE" } } },
       { data: { project: { name: "e2e-thread" } } },
       { data: { project: { services: { edges: [] } } } },
+      { data: { project: { volumes: { edges: [] } } } },
       { data: { project: { buckets: { edges: [] } } } },
       { data: { environmentPreviewChangeSet: { changeSet: { version: 1, changes: [], diagnostics: [] }, diagnostics: [], effects: [] } } },
       { data: { environmentApplyChangeSet: { id: "op_1", status: "applied", changes: [], diagnostics: [], deploymentId: "deploy_1", stagedPatchId: null } } },

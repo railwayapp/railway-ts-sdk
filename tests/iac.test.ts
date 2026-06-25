@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { bucket, createRailwayContext, diffGraphs, environmentConfigToGraph, github, graphToEnvironmentConfig, image, postgres, project, service } from "../src/index.js";
+import { bucket, createRailwayContext, diffGraphs, environmentConfigToGraph, github, graphToEnvironmentConfig, image, postgres, project, service, volume } from "../src/index.js";
 import { projectDefinitionToGraph } from "../src/iac/compiler.js";
 import { RAILWAY_CHANGE_SET_VERSION, SUPPORTED_CHANGE_SET_VERSIONS, renderChangeSet, type SetVariableChange } from "../src/iac/change-set.js";
 import { preserve } from "../src/iac/sdk.js";
@@ -15,6 +15,31 @@ describe("Railway IaC", () => {
     expect(diffGraphs({ current, desired }).version).toBe(1);
   });
 
+
+  it("compiles service volume attachments", () => {
+    const data = volume("web-data", { region: "us-west2", sizeMB: 1024 });
+    const graph = projectDefinitionToGraph(project("app", {
+      resources: [service("web", { volumeMounts: { "/data": data } })],
+    }));
+
+    expect(graph.edges).toContainEqual({ from: "service.web", to: "volume.web-data", type: "mount", key: "/data" });
+    expect(graph.resources).toEqual(expect.arrayContaining([expect.objectContaining({ type: "volume", name: "web-data" })]));
+    expect(graphToEnvironmentConfig(graph, { volumeIdsByName: { "web-data": "vol-id" } }).services?.web?.volumeMounts).toEqual({
+      "vol-id": { mountPath: "/data" },
+    });
+  });
+
+  it("marks volume upsize safe and downsize destructive", () => {
+    const small = projectDefinitionToGraph(project("app", { resources: [volume("data", { sizeMB: 1024 })] }));
+    const large = projectDefinitionToGraph(project("app", { resources: [volume("data", { sizeMB: 2048 })] }));
+
+    expect(diffGraphs({ current: small, desired: large }).changes).toMatchObject([
+      { kind: "resource.update", address: "volume.data", field: "config", severity: "safe" },
+    ]);
+    expect(diffGraphs({ current: large, desired: small }).changes).toMatchObject([
+      { kind: "resource.update", address: "volume.data", field: "config", severity: "destructive" },
+    ]);
+  });
 
   it("compiles shared variable references from context", () => {
     const ctx = createRailwayContext();
