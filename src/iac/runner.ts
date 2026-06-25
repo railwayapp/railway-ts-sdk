@@ -193,6 +193,8 @@ async function planRailwayIac({ file, graph: desiredGraph, request, diagnostics 
     ? await client.previewChangeSet({ environmentId: context.environmentId, changeSet })
     : undefined;
 
+  const previewedChangeSet = preview?.changeSet ?? changeSet;
+
   return {
     ok: !hasErrors,
     command: "plan",
@@ -202,9 +204,9 @@ async function planRailwayIac({ file, graph: desiredGraph, request, diagnostics 
     desiredGraph,
     currentConfig: current.config,
     currentEnvironment,
-    changeSet,
+    changeSet: previewedChangeSet,
     ...(preview ? { preview } : {}),
-    diff: renderChangeSet(changeSet),
+    diff: renderChangeSet(previewedChangeSet),
     ...(request.includeTypes ? { graphTypes: renderRailwayGraphTypes(desiredGraph) } : {}),
     diagnostics: allDiagnostics,
   };

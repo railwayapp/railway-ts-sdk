@@ -91,7 +91,7 @@ describe("IaC runner — threads configEtag from plan into apply", () => {
       { data: { project: { services: { edges: [] } } } },
       { data: { project: { volumes: { edges: [] } } } },
       { data: { project: { buckets: { edges: [] } } } },
-      { data: { environmentPreviewChangeSet: { changeSet: { version: 1, changes: [], diagnostics: [] }, diagnostics: [], effects: [] } } },
+      { data: { environmentPreviewChangeSet: { changeSet: { version: 1, changes: [{ kind: "resource.create", address: "service.web", resource: { address: "service.web", type: "service", name: "web" }, path: "resources.service.web", summary: "Create service web", severity: "safe", deployEffect: "deploy" }], diagnostics: [] }, diagnostics: [], effects: [] } } },
       { data: { environmentApplyChangeSet: { id: "op_1", status: "applied", changes: [], diagnostics: [], deploymentId: "deploy_1", stagedPatchId: null } } },
     ]);
     vi.stubGlobal("fetch", mock.fetch);

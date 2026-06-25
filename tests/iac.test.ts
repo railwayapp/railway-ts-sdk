@@ -16,6 +16,19 @@ describe("Railway IaC", () => {
   });
 
 
+  it("plans literal variable changes when current value is unknown", () => {
+    const current = projectDefinitionToGraph(project("app", {
+      resources: [service("web", { env: { TOKEN: preserve() } })],
+    }));
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [service("web", { env: { TOKEN: "new-value" } })],
+    }));
+
+    expect(diffGraphs({ current, desired }).changes).toMatchObject([
+      { kind: "variable.set", address: "service.web", variable: "TOKEN" },
+    ]);
+  });
+
   it("compiles service volume attachments", () => {
     const data = volume("web-data", { region: "us-west2", sizeMB: 1024 });
     const graph = projectDefinitionToGraph(project("app", {
