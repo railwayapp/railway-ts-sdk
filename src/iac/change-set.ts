@@ -531,6 +531,8 @@ function normalizeForDiff(field: string, value: unknown): unknown {
   if (field === "build") {
     if (copy.builder === "RAILPACK") delete copy.builder;
     if (copy.buildEnvironment === "V3") delete copy.buildEnvironment;
+    if (copy.buildCommand === "") delete copy.buildCommand;
+    if (copy.dockerfilePath === "Dockerfile") delete copy.dockerfilePath;
   }
 
   if (field === "deploy") {
