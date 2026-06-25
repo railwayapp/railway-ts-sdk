@@ -3,11 +3,7 @@ import type { TypedDocumentNode } from "@graphql-typed-document-node/core";
 import { normalizeRailwayClientConfig, type RailwayClientConfig, type NormalizedRailwayClientConfig } from "../core/config.js";
 import { requestGraphQL } from "../core/graphql-client.js";
 import { RailwayGraphQLError, StaleEnvironmentError, STALE_ENVIRONMENT_BASE_CODE } from "../core/errors.js";
-import type {
-  BucketCreateInput,
-  ServiceCreateInput,
-  VolumeCreateInput,
-} from "../generated/graphql.js";
+import type { BucketCreateInput, ServiceCreateInput, VolumeCreateInput } from "../generated/graphql.js";
 import type { RailwayChangeSet } from "./change-set.js";
 import type { RailwayGraph, ResourceNode } from "./graph.js";
 import type { EnvironmentConfig } from "./schema.js";
@@ -21,6 +17,7 @@ export interface CurrentEnvironmentResult {
   /** Opaque snapshot token of the environment config the plan was computed against. */
   configEtag?: string | undefined;
   serviceNamesById: Record<string, string>;
+  volumeNamesById: Record<string, string>;
   bucketNamesById: Record<string, string>;
   customDomainsByServiceId: Record<string, Record<string, { port?: number }>>;
 }
@@ -81,6 +78,7 @@ export class IacClient {
 
     const projectName = data.environment.projectId ? await this.getProjectName(data.environment.projectId) : undefined;
     const services = data.environment.projectId ? await this.getProjectServices(data.environment.projectId) : [];
+    const volumes = data.environment.projectId ? await this.getProjectVolumes(data.environment.projectId) : [];
     const buckets = data.environment.projectId ? await this.getProjectBuckets(data.environment.projectId) : [];
     const customDomainsByServiceId = data.environment.projectId ? await this.getEnvironmentCustomDomains(data.environment.projectId, environmentId, services) : {};
     return {
@@ -90,6 +88,7 @@ export class IacClient {
       environmentName: data.environment.name,
       config: data.environment.config ?? {},
       serviceNamesById: Object.fromEntries(services.map(service => [service.id, service.name])),
+      volumeNamesById: Object.fromEntries(volumes.flatMap(volume => volume.name ? [[volume.id, volume.name] as const] : [])),
       bucketNamesById: Object.fromEntries(buckets.map(bucket => [bucket.id, bucket.name])),
       customDomainsByServiceId,
       ...(data.environment.configEtag ? { configEtag: data.environment.configEtag } : {}),
@@ -115,6 +114,13 @@ export class IacClient {
       project(id: $projectId) { services(first: 1000) { edges { node { id name } } } }
     }`, { projectId });
     return data.project.services.edges.map(edge => edge.node);
+  }
+
+  async getProjectVolumes(projectId: string): Promise<ProjectVolume[]> {
+    const data = await gql<{ project: { volumes: { edges: Array<{ node: ProjectVolume }> } } }, { projectId: string }>(this.#config, `query IacProjectVolumes($projectId: String!) {
+      project(id: $projectId) { volumes(first: 1000) { edges { node { id name } } } }
+    }`, { projectId });
+    return data.project.volumes?.edges.map(edge => edge.node) ?? [];
   }
 
   async getProjectBuckets(projectId: string): Promise<ProjectBucket[]> {

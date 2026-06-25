@@ -1,5 +1,5 @@
 import { composePatch, graphToEnvironmentConfig } from "./compiler.js";
-import type { DatabaseNode, GraphCompileOptions, RailwayGraph, ResourceAddress, ResourceNode, VariableValue } from "./graph.js";
+import type { DatabaseNode, GraphCompileOptions, RailwayGraph, ResourceAddress, ResourceNode, VariableValue, VolumeNode } from "./graph.js";
 import type { EnvironmentConfig } from "./schema.js";
 
 // Wire-contract version for the RailwayChangeSet exchanged with backboard.
@@ -136,9 +136,12 @@ export function diffGraphs({ current, desired, revealValues = false }: { current
         path: `resources.${resource.address}.config.region`,
         message: `Bucket region cannot be changed after creation. Create a new bucket in ${bucketRegion(resource) ?? "the desired region"} and migrate data instead.`,
       });
+    } else if (previous.type === "volume" && resource.type === "volume") {
+      diffVolumeConfig({ previous, resource, changes });
     } else {
       diffTopLevelField({ previous, resource, field: "config", changes });
     }
+    diffVolumeAttachments({ previous, resource, changes });
     // Database mount paths are product/template defaults in v0. Do not churn or attempt
     // mount-path updates after creation; Backboard owns the database realization details.
   }
@@ -303,6 +306,16 @@ function diffNetworking({ previous, resource, changes }: { previous: ResourceNod
   }
 }
 
+function diffVolumeAttachments({ previous, resource, changes }: { previous: ResourceNode; resource: ResourceNode; changes: RailwayChange[] }) {
+  const before = (previous as { volumeAttachments?: unknown }).volumeAttachments;
+  const after = (resource as { volumeAttachments?: unknown }).volumeAttachments;
+  const normalizedBefore = normalizeForDiff("volumeAttachments", before);
+  const normalizedAfter = normalizeForDiff("volumeAttachments", after);
+  if (stableStringify(normalizedBefore) === stableStringify(normalizedAfter)) return;
+  const destructive = Object.keys((before as Record<string, unknown> | undefined) ?? {}).some(key => !(key in ((after as Record<string, unknown> | undefined) ?? {})));
+  changes.push(update(resource.address, "volumeAttachments", before, after, summaryForField(resource, "volumeAttachments", normalizedBefore, normalizedAfter), changedLeafPaths(normalizedBefore, normalizedAfter, "volumeAttachments"), destructive ? "destructive" : "safe"));
+}
+
 function diffTopLevelField({ previous, resource, field, changes }: { previous: ResourceNode; resource: ResourceNode; field: string; changes: RailwayChange[] }) {
   const before = (previous as unknown as Record<string, unknown>)[field];
   const after = (resource as unknown as Record<string, unknown>)[field];
@@ -318,6 +331,19 @@ function diffTopLevelField({ previous, resource, field, changes }: { previous: R
 // authoring helpers never reproduce. Diff only what the user can actually author — an explicit
 // region pin — so we never plan an accidental unmount or a churn "move to default region" for a
 // database that simply didn't pin one.
+function diffVolumeConfig({ previous, resource, changes }: { previous: VolumeNode; resource: VolumeNode; changes: RailwayChange[] }) {
+  const before = normalizeForDiff("config", previous.config);
+  const after = normalizeForDiff("config", resource.config);
+  if (stableStringify(before) === stableStringify(after)) return;
+  const previousSize = previous.config?.sizeMB;
+  const desiredSize = resource.config?.sizeMB;
+  const severity = previous.config?.region !== resource.config?.region || (typeof previousSize === "number" && typeof desiredSize === "number" && desiredSize < previousSize) ? "destructive" : "safe";
+  const summary = typeof previousSize === "number" && typeof desiredSize === "number" && desiredSize > previousSize
+    ? `Resize volume ${resource.name} from ${previousSize}MB to ${desiredSize}MB`
+    : summaryForField(resource, "config", before, after);
+  changes.push(update(resource.address, "config", previous.config, resource.config, summary, changedLeafPaths(before, after, "config"), severity));
+}
+
 function diffDatabaseDeploy({ previous, resource, changes }: { previous: DatabaseNode; resource: DatabaseNode; changes: RailwayChange[] }) {
   const previousRegion = databaseRegion(previous);
   const desiredRegion = databaseRegion(resource);

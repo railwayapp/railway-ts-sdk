@@ -12,10 +12,23 @@ import type {
 import type { DeployConfig, EnvironmentConfig, ServiceConfig, ServiceNetworking, VariableConfig, VariableValues } from "./schema.js";
 
 export function projectDefinitionToGraph(definition: ProjectDefinition): RailwayGraph {
-  const resources = (definition.resources ?? definition.services ?? []).flat();
+  const resources = [...(definition.resources ?? definition.services ?? []).flat()];
+  const resourcesByAddress = new Set(resources.map(resource => resource.address));
+  for (const resource of [...resources]) {
+    if (resource.type !== "service" && resource.type !== "database") continue;
+    for (const attachment of Object.values(resource.volumeAttachments ?? {})) {
+      if (resourcesByAddress.has(attachment.volume)) continue;
+      const volumeName = attachment.volume.split(".").slice(1).join(".");
+      resources.push({ address: attachment.volume as `volume.${string}`, type: "volume", name: volumeName });
+      resourcesByAddress.add(attachment.volume);
+    }
+  }
   const edges: Edge[] = [];
   for (const resource of resources) {
     if (resource.type !== "service" && resource.type !== "database") continue;
+    for (const attachment of Object.values(resource.volumeAttachments ?? {})) {
+      edges.push({ from: resource.address, to: attachment.volume as Edge["to"], type: "mount", key: attachment.mountPath });
+    }
     for (const [key, value] of Object.entries(resource.variables ?? {})) {
       if (value.type !== "reference") continue;
       edges.push({ from: resource.address, to: value.resource as Edge["to"], type: "variable", key });
@@ -58,6 +71,7 @@ export function graphToEnvironmentConfig(graph: RailwayGraph, options: GraphComp
             })
           : serviceToEnvironmentConfig(resource, resourceNamesById, {
               isNew: !existingServiceIds.has(serviceKey),
+              volumeIdsByName: options.volumeIdsByName ?? {},
             });
 
       const volumeId = options.volumeIdsByServiceName?.[resource.name];
@@ -71,7 +85,8 @@ export function graphToEnvironmentConfig(graph: RailwayGraph, options: GraphComp
 
     if (resource.type === "volume") {
       config.volumes = config.volumes ?? {};
-      config.volumes[resource.name] = { isCreated: true, ...resource.config };
+      const existingVolumeId = options.volumeIdsByName?.[resource.name];
+      config.volumes[existingVolumeId ?? resource.name] = { ...(existingVolumeId ? {} : { isCreated: true }), ...resource.config };
       continue;
     }
 
@@ -100,7 +115,7 @@ export function graphToEnvironmentConfig(graph: RailwayGraph, options: GraphComp
 
 export function environmentConfigToGraph(
   config: EnvironmentConfig,
-  options: { projectName?: string; serviceNamesById?: Record<string, string>; bucketNamesById?: Record<string, string>; customDomainsByServiceId?: Record<string, Record<string, { port?: number }>> } = {},
+  options: { projectName?: string; serviceNamesById?: Record<string, string>; volumeNamesById?: Record<string, string>; bucketNamesById?: Record<string, string>; customDomainsByServiceId?: Record<string, Record<string, { port?: number }>> } = {},
 ): RailwayGraph {
   const resources: ResourceNode[] = [];
   const groupNamesById = Object.fromEntries(
@@ -154,9 +169,20 @@ export function environmentConfigToGraph(
       ...(serviceConfig.deploy ? { deploy: serviceConfig.deploy } : {}),
       ...(serviceConfig.variables ? { variables: variablesFromEnvironmentConfig(serviceConfig.variables) } : {}),
       ...(serviceConfig.networking || options.customDomainsByServiceId?.[serviceId] ? { networking: pruneEmpty({ ...serviceConfig.networking, customDomains: options.customDomainsByServiceId?.[serviceId] ?? serviceConfig.networking?.customDomains }) as ServiceNetworking } : {}),
-      ...(serviceConfig.volumeMounts ? { volumeMounts: serviceConfig.volumeMounts } : {}),
+      ...volumeAttachmentsFromEnvironmentConfig(serviceConfig.volumeMounts, options.volumeNamesById),
       ...(serviceConfig.configFile ? { configFile: serviceConfig.configFile } : {}),
       ...(serviceConfig.groupId ? { groupId: groupNamesById[serviceConfig.groupId] ?? serviceConfig.groupId } : {}),
+    });
+  }
+
+  for (const [volumeId, volumeConfig] of Object.entries(config.volumes ?? {})) {
+    if (volumeConfig == null || volumeConfig.isDeleted) continue;
+    const name = options.volumeNamesById?.[volumeId] ?? volumeId;
+    resources.push({
+      address: resourceAddress("volume", name) as `volume.${string}`,
+      type: "volume",
+      name,
+      config: volumeConfig,
     });
   }
 
@@ -185,6 +211,13 @@ export function composePatch({ currentConfig, desiredConfig }: { currentConfig: 
 
 function addDeletionMarkers({ currentConfig, desiredConfig }: { currentConfig: EnvironmentConfig; desiredConfig: EnvironmentConfig }): EnvironmentConfig {
   const next: EnvironmentConfig = structuredClone(desiredConfig);
+  for (const [volumeId, currentVolume] of Object.entries(currentConfig.volumes ?? {})) {
+    if (currentVolume == null || currentVolume.isDeleted) continue;
+    if (desiredConfig.volumes?.[volumeId] != null) continue;
+    next.volumes = next.volumes ?? {};
+    next.volumes[volumeId] = { isDeleted: true };
+  }
+
   for (const [serviceId, currentService] of Object.entries(currentConfig.services ?? {})) {
     if (currentService == null || currentService.isDeleted) continue;
     const desiredService = desiredConfig.services?.[serviceId];
@@ -251,7 +284,7 @@ function databaseToEnvironmentConfig(database: DatabaseNode, options: { isNew: b
   });
 }
 
-function serviceToEnvironmentConfig(service: ServiceNode, resourceNamesById: Record<string, string>, options: { isNew: boolean }): ServiceConfig {
+function serviceToEnvironmentConfig(service: ServiceNode, resourceNamesById: Record<string, string>, options: { isNew: boolean; volumeIdsByName?: Record<string, string> }): ServiceConfig {
   const config: ServiceConfig = { ...(options.isNew ? { isCreated: true } : {}) };
   if (service.source) {
     const source = pruneEmpty({
@@ -270,7 +303,14 @@ function serviceToEnvironmentConfig(service: ServiceNode, resourceNamesById: Rec
   if (service.deploy) config.deploy = service.deploy;
   if (service.variables) config.variables = variablesToEnvironmentConfig(service.variables, resourceNamesById);
   if (service.networking) config.networking = service.networking;
-  if (service.volumeMounts) config.volumeMounts = service.volumeMounts;
+  const attachedVolumeMounts = Object.fromEntries(
+    Object.entries(service.volumeAttachments ?? {}).map(([, attachment]) => {
+      const volumeName = resourceNamesById[attachment.volume] ?? attachment.volume.split(".").slice(1).join(".");
+      const volumeId = options.volumeIdsByName?.[volumeName] ?? volumeName;
+      return [volumeId, pruneEmpty({ mountPath: attachment.mountPath, ...(attachment.backupSchedules ? { backupSchedules: attachment.backupSchedules } : {}) })];
+    }),
+  );
+  if (service.volumeMounts || Object.keys(attachedVolumeMounts).length > 0) config.volumeMounts = { ...(service.volumeMounts ?? {}), ...attachedVolumeMounts };
   if (service.configFile) config.configFile = service.configFile;
   if (service.parentServiceId) config.parentServiceId = service.parentServiceId;
   if (service.groupId) config.groupId = service.groupId;
@@ -302,6 +342,17 @@ function sharedReferenceVariable(value: Extract<VariableValue, { type: "sharedRe
 function literalVariable(value: Extract<VariableValue, { type: "literal" }>): VariableConfig {
   const { type: _type, ...variable } = value;
   return variable;
+}
+
+function volumeAttachmentsFromEnvironmentConfig(volumeMounts: ServiceConfig["volumeMounts"], volumeNamesById: Record<string, string> = {}): Pick<ServiceNode, "volumeAttachments"> {
+  const attachments = Object.fromEntries(
+    Object.entries(volumeMounts ?? {}).flatMap(([volumeId, mount]) => {
+      if (!mount?.mountPath) return [];
+      const name = volumeNamesById[volumeId] ?? volumeId;
+      return [[name, { volume: resourceAddress("volume", name), mountPath: mount.mountPath, ...(mount.backupSchedules ? { backupSchedules: mount.backupSchedules } : {}) }]];
+    }),
+  );
+  return Object.keys(attachments).length > 0 ? { volumeAttachments: attachments as NonNullable<ServiceNode["volumeAttachments"]> } : {};
 }
 
 function variablesFromEnvironmentConfig(variables: VariableValues): Record<string, VariableValue> {
