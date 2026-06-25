@@ -29,6 +29,17 @@ describe("Railway IaC", () => {
     ]);
   });
 
+  it("does not plan Dockerfile build default drift", () => {
+    const current = projectDefinitionToGraph(project("app", {
+      resources: [service("backend", { build: { builder: "DOCKERFILE", dockerfilePath: "Dockerfile", buildCommand: "" } })],
+    }));
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [service("backend", { build: { builder: "DOCKERFILE" } })],
+    }));
+
+    expect(diffGraphs({ current, desired }).changes).toEqual([]);
+  });
+
   it("compiles service volume attachments", () => {
     const data = volume("web-data", { region: "us-west2", sizeMB: 1024 });
     const graph = projectDefinitionToGraph(project("app", {
