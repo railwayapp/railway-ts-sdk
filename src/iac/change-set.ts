@@ -249,8 +249,8 @@ function diffVariables({ previous, resource, changes, resourcesByAddress, reveal
   const before = "variables" in previous ? previous.variables ?? {} : {};
   const after = "variables" in resource ? resource.variables ?? {} : {};
   for (const [key, value] of Object.entries(after)) {
-    if (isPreservedVariable(value) || isPreservedVariable(before[key]) || isUnknownImportedVariable(before[key])) continue;
-    if (stableStringify(normalizeVariableForDiff(before[key], resourcesByAddress)) === stableStringify(normalizeVariableForDiff(value, resourcesByAddress))) continue;
+    if (isPreservedVariable(value)) continue;
+    if (!isUnknownCurrentVariable(before[key]) && stableStringify(normalizeVariableForDiff(before[key], resourcesByAddress)) === stableStringify(normalizeVariableForDiff(value, resourcesByAddress))) continue;
     changes.push({
       kind: "variable.set",
       address: resource.address,
@@ -511,8 +511,8 @@ function isPreservedVariable(value: VariableValue | undefined): boolean {
   return value?.type === "preserve";
 }
 
-function isUnknownImportedVariable(value: VariableValue | undefined): boolean {
-  return value?.type === "literal" && value.value === "";
+function isUnknownCurrentVariable(value: VariableValue | undefined): boolean {
+  return value?.type === "preserve" || (value?.type === "literal" && value.value === "");
 }
 
 function normalizeForDiff(field: string, value: unknown): unknown {
