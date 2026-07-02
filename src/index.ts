@@ -93,6 +93,7 @@ export {
   type ExecReattachTarget,
   type ExecResult,
   type ExecSignal,
+  type ExecStdin,
   type ExecTarget,
   type FileReadFormat,
   type FileReadOptions,

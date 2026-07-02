@@ -99,6 +99,15 @@ export interface ExecOptions {
    * (`exec({ sessionName })`).
    */
   env?: Record<string, string>;
+  /**
+   * Keep stdin open and expose `ExecHandle.stdin` for interactive writes.
+   * Defaults to `false`: stdin is EOF'd at start so commands that read stdin
+   * can finish. With `true`, write via `handle.stdin.write(...)` and signal
+   * EOF with `handle.stdin.end()` — many commands only exit after EOF.
+   * Works on fresh execs and on reattach (`exec({ sessionName })`), where
+   * writes reach the still-running process.
+   */
+  stdin?: boolean;
   /** Receives each stdout chunk as it arrives. A throw rejects the exec. */
   onStdout?: (chunk: string) => void;
   /** Receives each stderr chunk as it arrives. A throw rejects the exec. */

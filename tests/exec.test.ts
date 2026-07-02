@@ -253,6 +253,78 @@ describe("exec", () => {
     ).toThrow(/fresh execs/);
   });
 
+  it("keeps stdin open with stdin: true and frames writes onto the wire", async () => {
+    const { handle, socket } = await execSocket("cat", { stdin: true });
+
+    // Interactive stdin requested — no up-front EOF.
+    expect(socket.sentText.some(f => f.type === "stdin_close")).toBe(false);
+
+    await handle.stdin.write("hello\n");
+    await handle.stdin.write(new TextEncoder().encode("bytes too\n"));
+    expect(socket.sentStdin.map(b => new TextDecoder().decode(b))).toEqual([
+      "hello\n",
+      "bytes too\n",
+    ]);
+
+    await handle.stdin.end();
+    expect(socket.sentText.some(f => f.type === "stdin_close")).toBe(true);
+
+    socket.serverStdout("hello\nbytes too\n");
+    socket.serverExit(0);
+    await expect(handle).resolves.toMatchObject({ exitCode: 0 });
+  });
+
+  it("delivers stdin writes issued before the socket opens", async () => {
+    const { sandbox, ws } = await wsSandbox([shellToken("jwt_abc")]);
+    const handle = sandbox.exec("cat", { stdin: true });
+    // Write immediately — the token mint / connect hasn't finished yet.
+    const write = handle.stdin.write("early\n");
+
+    const socket = await ws.nextSocket();
+    await tick();
+    await write;
+
+    expect(socket.sentStdin.map(b => new TextDecoder().decode(b))).toEqual([
+      "early\n",
+    ]);
+    socket.serverExit(0);
+    await handle;
+  });
+
+  it("rejects stdin.write once the exec has settled", async () => {
+    const { handle, socket } = await execSocket("cat", { stdin: true });
+
+    socket.serverExit(0);
+    await handle;
+
+    await expect(handle.stdin.write("late\n")).rejects.toThrow(/closed/);
+  });
+
+  it("rejects stdin.write when stdin was not requested", async () => {
+    const { handle, socket } = await execSocket("echo hi");
+
+    await expect(handle.stdin.write("nope\n")).rejects.toThrow(/stdin: true/);
+
+    socket.serverExit(0);
+    await handle;
+  });
+
+  it("supports stdin on reattach — writes reach the running session", async () => {
+    const { handle, socket } = await execSocket(
+      { sessionName: "sess_xyz" },
+      { stdin: true },
+    );
+
+    expect(socket.sentText.some(f => f.type === "stdin_close")).toBe(false);
+    await handle.stdin.write("after reattach\n");
+    expect(socket.sentStdin.map(b => new TextDecoder().decode(b))).toEqual([
+      "after reattach\n",
+    ]);
+
+    socket.serverExit(0);
+    await expect(handle).resolves.toMatchObject({ exitCode: 0 });
+  });
+
   it("sends resume_from_last_read when the caller opts in", async () => {
     const { handle, socket } = await execSocket(
       { sessionName: "sess_xyz" },
