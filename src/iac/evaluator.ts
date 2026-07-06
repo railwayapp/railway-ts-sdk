@@ -9,7 +9,7 @@ export async function evaluateRailwayFile(filePath: string, options: GraphCompil
   const mod = await importRailwayFile(absolutePath) as {
     default?: RailwayProgram | ProjectDefinition;
   };
-  const exported = (mod.default ?? mod) as RailwayProgram | ProjectDefinition;
+  const exported = unwrapDefaultExport(mod) as RailwayProgram | ProjectDefinition;
   const definition = await resolveDefinition(exported, options.context);
   const graph = projectDefinitionToGraph(definition);
   const desiredConfig = graphToEnvironmentConfig(graph, options);
@@ -23,6 +23,22 @@ async function importRailwayFile(absolutePath: string): Promise<unknown> {
     return tsImport(url, import.meta.url);
   }
   return import(url);
+}
+
+function unwrapDefaultExport(value: unknown): unknown {
+  let current = value;
+  while (isModuleDefaultWrapper(current)) {
+    current = current.default;
+  }
+  return current;
+}
+
+function isModuleDefaultWrapper(value: unknown): value is { default: unknown } {
+  if (value == null || typeof value !== "object" || !("default" in value)) return false;
+  const candidate = value as Record<string, unknown>;
+  // Project definitions may technically contain arbitrary keys. Only unwrap
+  // module-like objects that do not already look like a Railway project.
+  return candidate.name == null && candidate.resources == null && candidate.services == null && candidate.environments == null;
 }
 
 async function resolveDefinition(exported: RailwayProgram | ProjectDefinition, context: RailwayContextInput = {}): Promise<ProjectDefinition> {
