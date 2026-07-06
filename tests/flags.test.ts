@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { signalBucketRatio } from "../src/flags/bucket.js";
-import { evaluateFlagRulesetSync } from "../src/flags/resolver.js";
+import { FlagsClient } from "../src/flags/client.js";
+import { evaluateFlagRulesetSync, parseRegistrySignal } from "../src/flags/resolver.js";
 import type { SignalRuleset } from "../src/flags/types.js";
 
 describe("signalBucketRatio", () => {
@@ -104,7 +105,7 @@ describe("evaluateFlagRulesetSync", () => {
 
 describe("FlagsClient", () => {
   it("loads registry snapshots and resolves flags in-process", async () => {
-    const { flags } = await import("../src/flags/client.js");
+    const flags = new FlagsClient();
 
     const fetch = viFetch([
       {
@@ -135,13 +136,83 @@ describe("FlagsClient", () => {
       fetch,
     });
 
-    expect(flags.getBoolean("checkout.v2", { attributes: { plan: "enterprise" } })).toBe(
-      true,
-    );
-    expect(flags.getBoolean("checkout.v2", { attributes: { plan: "free" } })).toBe(false);
+    expect(
+      flags.getBoolean("checkout.v2", false, {
+        attributes: { plan: "enterprise" },
+      }).value,
+    ).toBe(true);
+    expect(
+      flags.getBoolean("checkout.v2", true, { attributes: { plan: "free" } }).value,
+    ).toBe(false);
     expect(flags.list()).toEqual(["checkout.v2"]);
 
     flags.close();
+  });
+
+  it("returns errors as values and falls back for typed helpers", () => {
+    const flags = new FlagsClient();
+
+    const loading = flags.getBoolean("missing", false);
+    expect(loading.value).toBe(false);
+    expect(loading.loading).toBe(true);
+    expect(loading.err?.name).toBe("FlagsNotInitializedError");
+  });
+
+  it("clears stale rulesets when re-initialized for an empty owner", async () => {
+    const flags = new FlagsClient();
+    const fetch = viFetch([
+      {
+        data: {
+          signals: [
+            {
+              name: "checkout.v2",
+              type: "BOOL",
+              default: false,
+              version: "3",
+              rules: [],
+            },
+          ],
+        },
+      },
+      { data: { signals: [] } },
+    ]);
+
+    await flags.init({
+      owner: "workspace:one",
+      token: "token_123",
+      pollIntervalMs: 0,
+      fetch,
+    });
+    expect(flags.has("checkout.v2")).toBe(true);
+
+    await flags.init({
+      owner: "workspace:two",
+      token: "token_123",
+      pollIntervalMs: 0,
+      fetch,
+    });
+
+    expect(flags.has("checkout.v2")).toBe(false);
+    const missing = flags.getBoolean("checkout.v2", false);
+    expect(missing.value).toBe(false);
+    expect(missing.loading).toBe(false);
+    expect(missing.err?.name).toBe("FlagNotFoundError");
+
+    flags.close();
+  });
+});
+
+describe("parseRegistrySignal", () => {
+  it("normalizes uppercase Prisma/GraphQL enum values to lowercase SDK types", () => {
+    expect(
+      parseRegistrySignal({
+        name: "checkout.v2",
+        type: "BOOL",
+        default: false,
+        rules: [],
+        version: "1",
+      }).type,
+    ).toBe("bool");
   });
 });
 

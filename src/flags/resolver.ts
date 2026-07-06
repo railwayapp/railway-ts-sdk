@@ -1,6 +1,7 @@
 import type {
   FlagEvaluationContext,
   FlagEvaluationReason,
+  SignalType,
   SignalResolutionOutcome,
   SignalResolutionTrace,
   SignalResolveResult,
@@ -197,9 +198,9 @@ export function parseRegistrySignal(row: {
   rules: unknown;
   version: string;
 }): SignalRuleset {
-  const type = row.type;
+  const type = normalizeSignalType(row.type);
   if (type !== "bool" && type !== "string" && type !== "number" && type !== "json") {
-    throw new Error(`unsupported signal type: ${type}`);
+    throw new Error(`unsupported signal type: ${row.type}`);
   }
 
   return {
@@ -209,4 +210,8 @@ export function parseRegistrySignal(row: {
     rules: parseSignalRules(row.rules),
     version: row.version,
   };
+}
+
+function normalizeSignalType(type: string): SignalType | string {
+  return type.toLowerCase();
 }

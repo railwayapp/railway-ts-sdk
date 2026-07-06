@@ -36,9 +36,14 @@ export class FlagsClient {
   #versionFingerprint = "";
   #pollTimer: ReturnType<typeof setInterval> | null = null;
   #refreshInFlight: Promise<void> | null = null;
+  #generation = 0;
 
   async init(options: FlagsInitOptions = {}): Promise<void> {
     this.close();
+    this.#generation++;
+    this.#rulesets = new Map();
+    this.#versionFingerprint = "";
+    this.#refreshInFlight = null;
 
     this.#config = normalizeRailwayClientConfig({
       ...(options.token !== undefined ? { token: options.token } : {}),
@@ -71,13 +76,14 @@ export class FlagsClient {
       return this.#refreshInFlight;
     }
 
-    this.#refreshInFlight = this.#refreshOnce().finally(() => {
+    const generation = this.#generation;
+    this.#refreshInFlight = this.#refreshOnce(generation).finally(() => {
       this.#refreshInFlight = null;
     });
     return this.#refreshInFlight;
   }
 
-  async #refreshOnce(): Promise<void> {
+  async #refreshOnce(generation: number): Promise<void> {
     const config = this.requireConfig();
     const owner = this.requireOwner();
 
@@ -93,6 +99,9 @@ export class FlagsClient {
 
     versions.sort();
     const fingerprint = versions.join("|");
+    if (generation !== this.#generation) {
+      return;
+    }
     if (fingerprint !== this.#versionFingerprint) {
       this.#rulesets = next;
       this.#versionFingerprint = fingerprint;
@@ -104,29 +113,63 @@ export class FlagsClient {
     name: string,
     context: FlagEvaluationContext = {},
   ): FlagEvaluationResult<T> {
-    const ruleset = this.requireRuleset(name);
-    const evaluation = evaluateFlagRulesetSync(ruleset, context);
-    return {
-      value: evaluation.value as T,
-      reason: evaluation.reason,
-      trace: evaluation.trace,
-    };
+    const ruleset = this.getRuleset(name);
+    if (ruleset instanceof Error) {
+      return {
+        value: undefined,
+        loading: ruleset instanceof FlagsNotInitializedError,
+        err: ruleset,
+      };
+    }
+
+    try {
+      const evaluation = evaluateFlagRulesetSync(ruleset, context);
+      return {
+        value: evaluation.value as T,
+        loading: false,
+        reason: evaluation.reason,
+        trace: evaluation.trace,
+      };
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      return {
+        value: ruleset.default as T,
+        loading: false,
+        err: error,
+      };
+    }
   }
 
-  getBoolean(name: string, context: FlagEvaluationContext = {}): boolean {
-    return this.getTyped(name, "bool", context) as boolean;
+  getBoolean(
+    name: string,
+    defaultValue: boolean,
+    context: FlagEvaluationContext = {},
+  ): FlagEvaluationResult<boolean> {
+    return this.getTyped(name, "bool", defaultValue, context);
   }
 
-  getString(name: string, context: FlagEvaluationContext = {}): string {
-    return this.getTyped(name, "string", context) as string;
+  getString(
+    name: string,
+    defaultValue: string,
+    context: FlagEvaluationContext = {},
+  ): FlagEvaluationResult<string> {
+    return this.getTyped(name, "string", defaultValue, context);
   }
 
-  getNumber(name: string, context: FlagEvaluationContext = {}): number {
-    return this.getTyped(name, "number", context) as number;
+  getNumber(
+    name: string,
+    defaultValue: number,
+    context: FlagEvaluationContext = {},
+  ): FlagEvaluationResult<number> {
+    return this.getTyped(name, "number", defaultValue, context);
   }
 
-  getJson<T = unknown>(name: string, context: FlagEvaluationContext = {}): T {
-    return this.getTyped(name, "json", context) as T;
+  getJson<T = unknown>(
+    name: string,
+    defaultValue: T,
+    context: FlagEvaluationContext = {},
+  ): FlagEvaluationResult<T> {
+    return this.getTyped(name, "json", defaultValue, context);
   }
 
   has(name: string): boolean {
@@ -147,24 +190,43 @@ export class FlagsClient {
   private getTyped(
     name: string,
     expected: SignalType,
+    defaultValue: unknown,
     context: FlagEvaluationContext,
-  ): unknown {
-    const ruleset = this.requireRuleset(name);
-    if (ruleset.type !== expected) {
-      throw new Error(
-        `Feature flag "${name}" is type ${ruleset.type}, not ${expected}.`,
-      );
+  ): FlagEvaluationResult {
+    const ruleset = this.getRuleset(name);
+    if (ruleset instanceof Error) {
+      return {
+        value: defaultValue,
+        loading: ruleset instanceof FlagsNotInitializedError,
+        err: ruleset,
+      };
     }
-    return this.get(name, context).value;
+    if (ruleset.type !== expected) {
+      return {
+        value: defaultValue,
+        loading: false,
+        err: new Error(
+        `Feature flag "${name}" is type ${ruleset.type}, not ${expected}.`,
+        ),
+      };
+    }
+    const result = this.get(name, context);
+    if (result.err) {
+      return {
+        ...result,
+        value: result.value === undefined ? defaultValue : result.value,
+      };
+    }
+    return result;
   }
 
-  private requireRuleset(name: string): SignalRuleset {
+  private getRuleset(name: string): SignalRuleset | Error {
     if (!this.#config || !this.#owner) {
-      throw new FlagsNotInitializedError();
+      return new FlagsNotInitializedError();
     }
     const ruleset = this.#rulesets.get(name);
     if (!ruleset) {
-      throw new FlagNotFoundError(name);
+      return new FlagNotFoundError(name);
     }
     return ruleset;
   }

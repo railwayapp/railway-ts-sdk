@@ -96,9 +96,11 @@ export interface FlagEvaluationContext {
 export type FlagEvaluationReason = "DEFAULT" | "TARGETING_MATCH" | "SPLIT";
 
 export interface FlagEvaluationResult<T = unknown> {
-  value: T;
-  reason: FlagEvaluationReason;
-  trace: SignalResolutionTrace;
+  value: T | undefined;
+  loading: boolean;
+  err?: Error;
+  reason?: FlagEvaluationReason;
+  trace?: SignalResolutionTrace;
 }
 
 export const SIGNAL_TARGETING_KEY_ATTR = "targetingKey";
@@ -116,7 +118,7 @@ export interface FlagsInitOptions {
 
 export interface RegistrySignalRow {
   name: string;
-  type: SignalType;
+  type: string;
   default: unknown;
   rules: unknown;
   version: string;
