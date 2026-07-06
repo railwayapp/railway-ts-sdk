@@ -1,6 +1,9 @@
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { bucket, createRailwayContext, diffGraphs, environmentConfigToGraph, github, graphToEnvironmentConfig, image, postgres, project, service, volume } from "../src/index.js";
+import { bucket, createRailwayContext, diffGraphs, environmentConfigToGraph, evaluateRailwayFile, github, graphToEnvironmentConfig, image, postgres, project, service, volume } from "../src/index.js";
 import { projectDefinitionToGraph } from "../src/iac/compiler.js";
 import { RAILWAY_CHANGE_SET_VERSION, SUPPORTED_CHANGE_SET_VERSIONS, renderChangeSet, type SetVariableChange } from "../src/iac/change-set.js";
 import { preserve } from "../src/iac/sdk.js";
@@ -15,6 +18,24 @@ describe("Railway IaC", () => {
     expect(diffGraphs({ current, desired }).version).toBe(1);
   });
 
+
+  it("evaluates TypeScript default exports through tsx", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "railway-iac-test-"));
+    const file = join(dir, "railway.ts");
+    await writeFile(file, `
+      export default () => ({
+        name: "app",
+        resources: [{ address: "service.web", type: "service", name: "web" }],
+      });
+    `);
+
+    await expect(evaluateRailwayFile(file)).resolves.toMatchObject({
+      graph: {
+        project: { name: "app" },
+        resources: [{ address: "service.web" }],
+      },
+    });
+  });
 
   it("plans literal variable changes when current value is unknown", () => {
     const current = projectDefinitionToGraph(project("app", {
