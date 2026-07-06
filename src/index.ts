@@ -108,3 +108,22 @@ export {
   type SandboxTemplate,
   type TemplateBuildOptions,
 } from "./sandbox/index.js";
+export {
+  flags,
+  FlagsClient,
+  FlagNotFoundError,
+  FlagsNotInitializedError,
+  evaluateFlagRuleset,
+  evaluateFlagRulesetSync,
+  normalizeEvaluationContext,
+  signalBucketRatio,
+  type FlagEvaluationContext,
+  type FlagEvaluationReason,
+  type FlagEvaluationResult,
+  type FlagsInitOptions,
+  type SignalExpression,
+  type SignalResolutionTrace,
+  type SignalRule,
+  type SignalRuleset,
+  type SignalType,
+} from "./flags/index.js";
