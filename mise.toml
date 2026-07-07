@@ -83,3 +83,13 @@ run = "pnpm exec tsx examples/sandboxes/fork.ts"
 description = "Push, pull, stream, and manage sandbox files using .env credentials"
 run = "pnpm exec tsx examples/sandboxes/files.ts"
 
+[tasks."example:flags"]
+description = "Exercise the flags SDK against live registry data from .env credentials"
+depends = ["build"]
+run = "if [ -f .env ]; then set -a; . ./.env; set +a; fi; pnpm exec tsx examples/flags/demo.ts"
+
+[tasks."example:flags-quickstart"]
+description = "Minimal flags quickstart using .env credentials"
+depends = ["build"]
+run = "if [ -f .env ]; then set -a; . ./.env; set +a; fi; pnpm exec tsx examples/flags/quickstart.ts"
+
