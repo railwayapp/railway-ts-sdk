@@ -110,6 +110,9 @@ export {
 } from "./sandbox/index.js";
 export {
   flags,
+  FlagsScopeError,
+  RAILWAY_PROJECT_ID_ENV,
+  serializeScope,
   evaluateFlagRuleset,
   evaluateFlagRulesetSync,
   normalizeEvaluationContext,

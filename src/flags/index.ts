@@ -1,4 +1,5 @@
 export { flags, type FlagsReadSurface } from "./client.js";
+export { FlagsScopeError, RAILWAY_PROJECT_ID_ENV, serializeScope } from "./scope.js";
 export {
   evaluateFlagRuleset,
   evaluateFlagRulesetSync,

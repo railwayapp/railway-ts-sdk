@@ -1,8 +1,11 @@
-import { parse } from "graphql";
-
-import { normalizeRailwayClientConfig } from "../../src/core/config.js";
-import { requestGraphQL } from "../../src/core/graphql-client.js";
-import { flags, type Evaluation, type Reason } from "../../dist/index.js";
+/**
+ * Live flags demo. Requires RAILWAY_API_TOKEN in `.env`.
+ *
+ * On Railway, `await flags.init()` uses `RAILWAY_PROJECT_ID` for project-scoped flags.
+ * For workspace-scoped registries, pass an explicit scope:
+ *   await flags.init({ scope: { workspaceId: "<workspace-id>" } });
+ */
+import { flags, type Evaluation, type Reason } from "../../src/index.ts";
 import { runExample } from "./helpers.ts";
 
 type Expectation = {
@@ -20,81 +23,23 @@ type Case = {
 await runExample(async () => {
   section("read-before-init");
   try {
-    flags.getBoolean("checkout.v2");
+    flags.getBoolean("example-flag");
     fail("expected read-before-init to throw");
   } catch (error) {
     pass(`throws: ${error instanceof Error ? error.message : String(error)}`);
   }
 
-  section("resolve scope");
-  const workspaces = await fetchWorkspaces();
-  const workspaceId = resolveWorkspaceId(workspaces);
-  pass(`using workspaceId=${workspaceId}`);
-
   section("init");
-  await flags.init({ scope: { workspaceId }, verbose: true });
+  await flags.init({ verbose: true });
   await flags.ready;
   pass(`synced=${flags.synced}`);
 
   section("registry");
   const names = flags.list();
-  pass(`list=${names.join(", ")}`);
-  for (const name of ["beta.postgresHA", "checkout.v2", "theme"]) {
-    pass(`has(${name})=${flags.has(name)}`);
-  }
+  pass(`list=${names.length === 0 ? "(empty)" : names.join(", ")}`);
 
-  section("primitive reads");
-  logValue("checkout.v2 default", flags.getBoolean("checkout.v2"));
-  logValue("theme default", flags.getString("theme"));
-
+  section("emergency fallbacks");
   const cases: Case[] = [
-    {
-      name: "checkout.v2 enterprise plan forces false",
-      run: () => flags.evaluateBoolean("checkout.v2", { plan: "enterprise" }),
-      expect: { value: false, reason: "TARGETING_MATCH" },
-    },
-    {
-      name: "checkout.v2 legacy plan forces false",
-      run: () => flags.evaluateBoolean("checkout.v2", { plan: "legacy" }),
-      expect: { value: false, reason: "TARGETING_MATCH" },
-    },
-    {
-      name: "checkout.v2 pro plan uses registry default (true)",
-      run: () => flags.evaluateBoolean("checkout.v2", { plan: "pro" }),
-      expect: { value: true, reason: "NO_MATCH" },
-    },
-    {
-      name: "checkout.v2 empty context uses registry default",
-      run: () => flags.evaluateBoolean("checkout.v2"),
-      expect: { value: true, reason: "NO_MATCH" },
-    },
-    {
-      name: "theme registry default",
-      run: () => flags.evaluateString("theme"),
-      expect: { value: "dark", reason: "NO_MATCH" },
-    },
-    {
-      name: "theme via getBoolean → TYPE_MISMATCH + fallback",
-      run: () => flags.evaluateBoolean("theme", undefined, false),
-      expect: { value: false, reason: "TYPE_MISMATCH" },
-    },
-    {
-      name: "beta.postgresHA priority_boarding rule",
-      run: () =>
-        flags.evaluateBoolean("beta.postgresHA", { priority_boarding: true }),
-      expect: { value: true, reason: "TARGETING_MATCH" },
-    },
-    {
-      name: "beta.postgresHA no attrs → registry default false",
-      run: () => flags.evaluateBoolean("beta.postgresHA"),
-      expect: { value: false, reason: "NO_MATCH" },
-    },
-    {
-      name: "beta.postgresHA workspace_id bucket rule",
-      run: () =>
-        flags.evaluateBoolean("beta.postgresHA", { workspace_id: workspaceId }),
-      expect: { reasonOneOf: ["SPLIT", "NO_MATCH"] },
-    },
     {
       name: "NOT_FOUND uses caller fallback",
       run: () => flags.evaluateBoolean("does-not-exist", undefined, true),
@@ -107,26 +52,69 @@ await runExample(async () => {
     },
   ];
 
-  section("evaluate* trace");
-  const traced = flags.evaluateBoolean("checkout.v2", { plan: "enterprise" });
-  pass(`trace steps=${traced.trace.length}`);
-  for (const step of traced.trace) {
-    pass(
-      `  rule ${step.ruleId} matched=${step.matched} value=${JSON.stringify(step.value)}`,
+  section("typed reads");
+  if (flags.has("theme")) {
+    cases.push({
+      name: "TYPE_MISMATCH uses caller fallback",
+      run: () => flags.evaluateBoolean("theme", undefined, false),
+      expect: { value: false, reason: "TYPE_MISMATCH" },
+    });
+    logValue("theme", flags.getString("theme"));
+  } else {
+    pass("skip theme checks (flag not in registry)");
+  }
+
+  if (flags.has("checkout.v2")) {
+    cases.push(
+      {
+        name: "checkout.v2 enterprise plan",
+        run: () => flags.evaluateBoolean("checkout.v2", { plan: "enterprise" }),
+        expect: { value: false, reason: "TARGETING_MATCH" },
+      },
+      {
+        name: "checkout.v2 pro plan uses registry default",
+        run: () => flags.evaluateBoolean("checkout.v2", { plan: "pro" }),
+        expect: { value: true, reason: "NO_MATCH" },
+      },
     );
+    logValue("checkout.v2 default", flags.getBoolean("checkout.v2"));
+
+    const traced = flags.evaluateBoolean("checkout.v2", { plan: "enterprise" });
+    pass(`checkout.v2 trace steps=${traced.trace.length}`);
+  } else {
+    pass("skip checkout.v2 checks (flag not in registry)");
+  }
+
+  if (flags.has("beta.postgresHA")) {
+    cases.push(
+      {
+        name: "beta.postgresHA priority_boarding rule",
+        run: () =>
+          flags.evaluateBoolean("beta.postgresHA", { priority_boarding: true }),
+        expect: { value: true, reason: "TARGETING_MATCH" },
+      },
+      {
+        name: "beta.postgresHA workspace_id bucket rule",
+        run: () =>
+          flags.evaluateBoolean("beta.postgresHA", {
+            workspace_id: "00000000-0000-0000-0000-000000000001",
+          }),
+        expect: { reasonOneOf: ["SPLIT", "NO_MATCH"] },
+      },
+    );
+  } else {
+    pass("skip beta.postgresHA checks (flag not in registry)");
   }
 
   section("scoped view");
-  const scoped = flags.scope({ workspaceId });
-  await scoped.refresh();
-  const scopedList = scoped.list();
-  pass(
-    `scope.list matches default=${JSON.stringify(scopedList) === JSON.stringify(names)}`,
-  );
-  const scopedCheckout = scoped.evaluateBoolean("checkout.v2", { plan: "pro" });
-  pass(
-    `scope checkout.v2 pro=${scopedCheckout.value} reason=${scopedCheckout.reason}`,
-  );
+  const projectId = process.env.RAILWAY_PROJECT_ID;
+  if (projectId != null && projectId !== "") {
+    const scoped = flags.scope({ projectId });
+    await scoped.refresh();
+    pass(`scope.list count=${scoped.list().length}`);
+  } else {
+    pass("skip scoped view (RAILWAY_PROJECT_ID not set)");
+  }
 
   section("assertions");
   let failed = 0;
@@ -152,26 +140,6 @@ await runExample(async () => {
   pass("all cases passed");
   flags.close();
 });
-
-function resolveWorkspaceId(workspaces: Array<{ id: string; name: string }>): string {
-  const explicit = process.env.RAILWAY_FLAGS_WORKSPACE_ID;
-  if (explicit != null && explicit !== "") {
-    return explicit;
-  }
-
-  const railway = workspaces.find((workspace) => workspace.name === "Railway");
-  if (railway != null) {
-    return railway.id;
-  }
-
-  if (workspaces.length === 1) {
-    return workspaces[0]!.id;
-  }
-
-  throw new Error(
-    `token has ${workspaces.length} workspaces; set RAILWAY_FLAGS_WORKSPACE_ID to the one with flags`,
-  );
-}
 
 function assertEvaluation(evaluation: Evaluation<unknown>, expect: Expectation): string[] {
   const errors: string[] = [];
@@ -203,25 +171,4 @@ function fail(message: string): void {
 
 function logValue(name: string, value: unknown): void {
   console.log(`• ${name}: ${JSON.stringify(value)}`);
-}
-
-async function fetchWorkspaces(): Promise<Array<{ id: string; name: string }>> {
-  const config = normalizeRailwayClientConfig({});
-  const document = parse(`
-    query FlagsExampleApiToken {
-      apiToken {
-        workspaces {
-          id
-          name
-        }
-      }
-    }
-  `);
-  const data = await requestGraphQL(config, document as never, {});
-  const workspaces = (data as { apiToken?: { workspaces?: Array<{ id: string; name: string }> } })
-    .apiToken?.workspaces;
-  for (const workspace of workspaces ?? []) {
-    pass(`token workspace ${workspace.name} (${workspace.id})`);
-  }
-  return workspaces ?? [];
 }

@@ -133,7 +133,7 @@ export type FlagsScope =
 export interface FlagsInitOptions {
   /** Override token for off-platform/local dev. Defaults to `RAILWAY_API_TOKEN`. */
   token?: string;
-  /** Override scope. Defaults to server-side inference from the token. */
+  /** Flag scope. Omit on Railway to use `RAILWAY_PROJECT_ID`; use a project token for automatic project scope. */
   scope?: FlagsScope;
   /** Disable background polling after the initial load. */
   refresh?: false;

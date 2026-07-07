@@ -2,6 +2,7 @@ import {
   normalizeRailwayClientConfig,
   type NormalizedRailwayClientConfig,
 } from "../core/config.js";
+import { resolveFlagsRegistryOwner, serializeScope } from "./scope.js";
 import { contextFromPublic } from "./context.js";
 import {
   evaluateFlagRulesetSync,
@@ -330,7 +331,9 @@ class FlagsModule {
     this.#initialized = true;
     this.#config = normalizeFlagsConfig(options);
     this.#refreshEnabled = options.refresh !== false;
-    this.#defaultRegistry = new FlagsRegistry(resolveOwner(options.scope));
+    this.#defaultRegistry = new FlagsRegistry(
+      resolveFlagsRegistryOwner(options, this.#config),
+    );
     this.#scopedRegistries.clear();
 
     this.#ready = new Promise<void>((resolve) => {
@@ -514,17 +517,6 @@ async function refreshRegistry(
   config: NormalizedRailwayClientConfig,
 ): Promise<void> {
   await registry.load(config);
-}
-
-function resolveOwner(scope: FlagsScope | undefined): string | undefined {
-  return scope === undefined ? undefined : serializeScope(scope);
-}
-
-function serializeScope(scope: FlagsScope): string {
-  if ("workspaceId" in scope) {
-    return `workspace:${scope.workspaceId}`;
-  }
-  return `project:${scope.projectId}`;
 }
 
 function normalizeFlagsConfig(options: FlagsInitOptions): NormalizedRailwayClientConfig {

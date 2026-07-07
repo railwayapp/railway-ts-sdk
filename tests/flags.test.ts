@@ -2,11 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { signalBucketRatio } from "../src/flags/bucket.js";
 import { flags } from "../src/flags/client.js";
+import { FlagsScopeError, RAILWAY_PROJECT_ID_ENV } from "../src/flags/scope.js";
 import { evaluateFlagRulesetSync, parseRegistrySignal } from "../src/flags/resolver.js";
 import type { SignalRuleset } from "../src/flags/types.js";
 
 afterEach(() => {
   flags.close();
+  vi.unstubAllEnvs();
 });
 
 describe("signalBucketRatio", () => {
@@ -144,6 +146,7 @@ describe("flags module", () => {
       },
     ]);
 
+    vi.stubEnv(RAILWAY_PROJECT_ID_ENV, "proj-quickstart");
     await flags.init({ token: "token_123", refresh: false, fetch });
 
     const userId = "user-123";
@@ -250,6 +253,7 @@ describe("flags module", () => {
       throw new Error("network down");
     };
 
+    vi.stubEnv(RAILWAY_PROJECT_ID_ENV, "proj-stale");
     await flags.init({ token: "token_123", refresh: false, fetch });
 
     const result = flags.evaluateBoolean("missing", { key: "user" }, true);
@@ -263,12 +267,14 @@ describe("flags module", () => {
       throw new Error("network down");
     };
 
+    vi.stubEnv(RAILWAY_PROJECT_ID_ENV, "proj-required");
     await expect(
       flags.init({ token: "token_123", refresh: false, required: true, fetch }),
     ).rejects.toThrow(/network down/);
   });
 
   it("returns NOT_FOUND with caller fallback for unknown flags", async () => {
+    vi.stubEnv(RAILWAY_PROJECT_ID_ENV, "proj-not-found");
     await flags.init({
       token: "token_123",
       refresh: false,
@@ -281,6 +287,7 @@ describe("flags module", () => {
   });
 
   it("returns TYPE_MISMATCH with caller fallback for wrong typed reads", async () => {
+    vi.stubEnv(RAILWAY_PROJECT_ID_ENV, "proj-type");
     await flags.init({
       token: "token_123",
       refresh: false,
@@ -411,7 +418,7 @@ describe("flags module", () => {
     ]);
   });
 
-  it("omits scope so Backboard can infer it from auth", async () => {
+  it("uses RAILWAY_PROJECT_ID when no scope is provided", async () => {
     const requests: unknown[] = [];
     const fetch: typeof globalThis.fetch = async (_input, init) => {
       requests.push(JSON.parse(String(init?.body)));
@@ -421,8 +428,30 @@ describe("flags module", () => {
       });
     };
 
+    vi.stubEnv(RAILWAY_PROJECT_ID_ENV, "project_from_env");
+    await flags.init({ token: "token_123", refresh: false, fetch });
+
+    expect(requests).toMatchObject([
+      {
+        variables: { owner: "project:project_from_env" },
+      },
+    ]);
+  });
+
+  it("omits owner for project tokens so Backboard can infer scope", async () => {
+    const requests: unknown[] = [];
+    const fetch: typeof globalThis.fetch = async (_input, init) => {
+      requests.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ data: { signals: [] } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    vi.stubEnv(RAILWAY_PROJECT_ID_ENV, "ignored");
     await flags.init({
       token: "token_123",
+      authType: "project-token",
       refresh: false,
       fetch,
     });
@@ -432,6 +461,14 @@ describe("flags module", () => {
         variables: {},
       },
     ]);
+  });
+
+  it("throws when scope cannot be resolved", async () => {
+    const fetch = viFetch([{ data: { signals: [] } }]);
+
+    await expect(
+      flags.init({ token: "token_123", refresh: false, fetch }),
+    ).rejects.toThrow(FlagsScopeError);
   });
 
   it("exposes scoped views that share transport but use separate caches", async () => {
@@ -459,6 +496,7 @@ describe("flags module", () => {
       });
     };
 
+    vi.stubEnv(RAILWAY_PROJECT_ID_ENV, "default_project");
     await flags.init({ token: "token_123", refresh: false, fetch });
 
     const project = flags.scope({ projectId: "project_123" });
