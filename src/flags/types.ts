@@ -1,3 +1,5 @@
+import type { RailwayAuthType } from "../core/config.js";
+
 /** Radar-style attribute clause reused by signal expressions. */
 export type RadarOperator =
   | "eq"
@@ -88,29 +90,59 @@ export interface SignalResolveResult {
   trace: SignalResolutionTrace;
 }
 
+export type AttributeValue = string | number | boolean;
+
+/** Flat evaluation context. `key` is the stable bucketing identity for splits. */
+export type Context = { key?: string } & Record<string, AttributeValue>;
+
+/** Internal normalized shape used by the resolver pipeline. */
 export interface FlagEvaluationContext {
   targetingKey?: string;
   attributes?: Record<string, unknown>;
 }
 
-export type FlagEvaluationReason = "DEFAULT" | "TARGETING_MATCH" | "SPLIT";
+export const SIGNAL_TARGETING_KEY_ATTR = "targetingKey";
+export const SIGNAL_KEY_ATTR = "key";
 
-export interface FlagEvaluationResult<T = unknown> {
-  value: T | undefined;
-  loading: boolean;
-  err?: Error;
-  reason?: FlagEvaluationReason;
-  trace?: SignalResolutionTrace;
+export type Reason =
+  | "TARGETING_MATCH"
+  | "SPLIT"
+  | "NO_MATCH"
+  | "CONFLICT"
+  | "NOT_FOUND"
+  | "TYPE_MISMATCH"
+  | "STALE"
+  | "NO_KEY";
+
+export interface TraceStep {
+  ruleId: string;
+  matched: boolean;
+  value: unknown | null;
 }
 
-export const SIGNAL_TARGETING_KEY_ATTR = "targetingKey";
+export interface Evaluation<T> {
+  value: T;
+  reason: Reason;
+  trace: TraceStep[];
+}
+
+export type FlagsScope =
+  | { workspaceId: string; projectId?: never }
+  | { projectId: string; workspaceId?: never };
 
 export interface FlagsInitOptions {
-  /** Owner scope, e.g. `workspace:<id>`. Defaults to `RAILWAY_SIGNALS_OWNER`. */
-  owner?: string;
-  /** Registry poll interval in ms. Default 30_000. Set 0 to disable polling. */
-  pollIntervalMs?: number;
+  /** Override token for off-platform/local dev. Defaults to `RAILWAY_API_TOKEN`. */
   token?: string;
+  /** Override scope. Defaults to server-side inference from the token. */
+  scope?: FlagsScope;
+  /** Disable background polling after the initial load. */
+  refresh?: false;
+  /** Bound the initial sync wait (serverless cold starts). */
+  timeoutMs?: number;
+  /** Reject `init()` when the first registry sync fails. */
+  required?: true;
+  /** Auth header mode. Use `project-token` when passing a Railway project token. */
+  authType?: RailwayAuthType;
   endpoint?: string;
   fetch?: typeof fetch;
   verbose?: boolean;

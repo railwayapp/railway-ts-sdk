@@ -1,23 +1,27 @@
-import type { FlagEvaluationContext } from "./types.js";
-import { SIGNAL_TARGETING_KEY_ATTR } from "./types.js";
+import type { Context, FlagEvaluationContext } from "./types.js";
+import { SIGNAL_KEY_ATTR, SIGNAL_TARGETING_KEY_ATTR } from "./types.js";
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === "object" && !Array.isArray(value);
 }
 
+/** Normalize the public flat `Context` into the internal resolver shape. */
 export function normalizeEvaluationContext(raw: unknown): FlagEvaluationContext {
   if (!isPlainObject(raw)) {
     return {};
   }
 
-  const { targetingKey, attributes, ...rest } = raw;
+  const { key, targetingKey, attributes, ...rest } = raw;
+  const resolvedKey =
+    typeof key === "string" ? key : typeof targetingKey === "string" ? targetingKey : undefined;
+
   const normalizedAttributes: Record<string, unknown> = {
     ...rest,
     ...(isPlainObject(attributes) ? attributes : {}),
   };
 
   return {
-    ...(typeof targetingKey === "string" ? { targetingKey } : {}),
+    ...(resolvedKey !== undefined ? { targetingKey: resolvedKey } : {}),
     ...(Object.keys(normalizedAttributes).length > 0
       ? { attributes: normalizedAttributes }
       : {}),
@@ -62,6 +66,7 @@ export function flattenEvaluationContext(
 
   if (context.targetingKey != null) {
     flat[SIGNAL_TARGETING_KEY_ATTR] = context.targetingKey;
+    flat[SIGNAL_KEY_ATTR] = context.targetingKey;
   }
 
   if (context.attributes != null) {
@@ -104,4 +109,8 @@ export function createResolversFromContext(context: FlagEvaluationContext): {
     attrResolver: new StaticAttributeResolver(flat),
     listResolver: new StaticListResolver({}),
   };
+}
+
+export function contextFromPublic(ctx?: Context): FlagEvaluationContext {
+  return normalizeEvaluationContext(ctx ?? {});
 }

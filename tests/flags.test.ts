@@ -1,14 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { signalBucketRatio } from "../src/flags/bucket.js";
-import { FlagsClient } from "../src/flags/client.js";
+import { flags } from "../src/flags/client.js";
 import { evaluateFlagRulesetSync, parseRegistrySignal } from "../src/flags/resolver.js";
 import type { SignalRuleset } from "../src/flags/types.js";
 
+afterEach(() => {
+  flags.close();
+});
+
 describe("signalBucketRatio", () => {
   it("is deterministic for the same salt and subject", () => {
-    const a = signalBucketRatio("checkout.v2", "user-123");
-    const b = signalBucketRatio("checkout.v2", "user-123");
+    const a = signalBucketRatio("checkout-v2", "user-123");
+    const b = signalBucketRatio("checkout-v2", "user-123");
     expect(a).toBe(b);
   });
 
@@ -23,7 +27,7 @@ describe("signalBucketRatio", () => {
 
 describe("evaluateFlagRulesetSync", () => {
   const baseRuleset: SignalRuleset = {
-    name: "checkout.v2",
+    name: "checkout-v2",
     type: "bool",
     default: false,
     version: "1",
@@ -36,25 +40,21 @@ describe("evaluateFlagRulesetSync", () => {
     ],
   };
 
-  it("returns default when no rules match", () => {
-    const result = evaluateFlagRulesetSync(baseRuleset, {
-      attributes: { plan: "free" },
-    });
+  it("returns registry default with NO_MATCH when no rules match", () => {
+    const result = evaluateFlagRulesetSync(baseRuleset, { plan: "free" });
     expect(result.value).toBe(false);
-    expect(result.reason).toBe("DEFAULT");
+    expect(result.reason).toBe("NO_MATCH");
     expect(result.trace.outcome).toBe("no_match");
   });
 
   it("returns rule value when a rule matches", () => {
-    const result = evaluateFlagRulesetSync(baseRuleset, {
-      attributes: { plan: "enterprise" },
-    });
+    const result = evaluateFlagRulesetSync(baseRuleset, { plan: "enterprise" });
     expect(result.value).toBe(true);
     expect(result.reason).toBe("TARGETING_MATCH");
     expect(result.trace.outcome).toBe("agreed");
   });
 
-  it("falls back to default when matching rules disagree", () => {
+  it("returns registry default with CONFLICT when matching rules disagree", () => {
     const ruleset: SignalRuleset = {
       ...baseRuleset,
       rules: [
@@ -71,11 +71,9 @@ describe("evaluateFlagRulesetSync", () => {
       ],
     };
 
-    const result = evaluateFlagRulesetSync(ruleset, {
-      attributes: { plan: "enterprise", region: "us" },
-    });
+    const result = evaluateFlagRulesetSync(ruleset, { plan: "enterprise", region: "us" });
     expect(result.value).toBe(false);
-    expect(result.reason).toBe("DEFAULT");
+    expect(result.reason).toBe("CONFLICT");
     expect(result.trace.outcome).toBe("disagreement");
   });
 
@@ -86,7 +84,7 @@ describe("evaluateFlagRulesetSync", () => {
         {
           id: "canary",
           expression: {
-            bucket: { attr: "targetingKey" },
+            bucket: { attr: "key" },
             op: "lt",
             value: 1,
           },
@@ -95,24 +93,78 @@ describe("evaluateFlagRulesetSync", () => {
       ],
     };
 
-    const result = evaluateFlagRulesetSync(ruleset, {
-      targetingKey: "user-123",
-    });
+    const result = evaluateFlagRulesetSync(ruleset, { key: "user-123" });
     expect(result.value).toBe(true);
     expect(result.reason).toBe("SPLIT");
   });
+
+  it("returns NO_KEY for split flags evaluated without a bucketing key", () => {
+    const ruleset: SignalRuleset = {
+      ...baseRuleset,
+      rules: [
+        {
+          id: "canary",
+          expression: {
+            bucket: { attr: "key" },
+            op: "lt",
+            value: 1,
+          },
+          source: { type: "literal", value: true },
+        },
+      ],
+    };
+
+    const result = evaluateFlagRulesetSync(ruleset, { plan: "pro" });
+    expect(result.value).toBe(false);
+    expect(result.reason).toBe("NO_KEY");
+  });
 });
 
-describe("FlagsClient", () => {
-  it("loads registry snapshots and resolves flags in-process", async () => {
-    const flags = new FlagsClient();
-
+describe("flags module", () => {
+  it("matches the canonical quickstart", async () => {
     const fetch = viFetch([
       {
         data: {
           signals: [
             {
-              name: "checkout.v2",
+              name: "checkout-v2",
+              type: "bool",
+              default: false,
+              version: "1",
+              rules: [
+                {
+                  id: "pro",
+                  expression: { attr: "plan", op: "eq", value: "pro" },
+                  source: { type: "literal", value: true },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    ]);
+
+    await flags.init({ token: "token_123", refresh: false, fetch });
+
+    const userId = "user-123";
+    if (flags.getBoolean("checkout-v2", { key: userId, plan: "pro" })) {
+      expect(true).toBe(true);
+    } else {
+      throw new Error("expected checkout-v2 to be enabled for pro users");
+    }
+  });
+
+  it("throws when reading before init", () => {
+    expect(() => flags.getBoolean("checkout-v2")).toThrow(/await flags\.init\(\)/);
+  });
+
+  it("loads registry snapshots and resolves flags in-process", async () => {
+    const fetch = viFetch([
+      {
+        data: {
+          signals: [
+            {
+              name: "checkout-v2",
               type: "bool",
               default: false,
               version: "3",
@@ -130,75 +182,290 @@ describe("FlagsClient", () => {
     ]);
 
     await flags.init({
-      owner: "workspace:test",
+      scope: { workspaceId: "test" },
       token: "token_123",
-      pollIntervalMs: 0,
+      refresh: false,
       fetch,
     });
 
-    expect(
-      flags.getBoolean("checkout.v2", false, {
-        attributes: { plan: "enterprise" },
-      }).value,
-    ).toBe(true);
-    expect(
-      flags.getBoolean("checkout.v2", true, { attributes: { plan: "free" } }).value,
-    ).toBe(false);
-    expect(flags.list()).toEqual(["checkout.v2"]);
-
-    flags.close();
+    expect(flags.getBoolean("checkout-v2", { plan: "enterprise" })).toBe(true);
+    expect(flags.getBoolean("checkout-v2", { plan: "free" })).toBe(false);
+    expect(flags.evaluateBoolean("checkout-v2", { plan: "free" }).reason).toBe("NO_MATCH");
+    expect(flags.list()).toEqual(["checkout-v2"]);
+    expect(flags.synced).toBe(true);
+    await flags.ready;
   });
 
-  it("returns errors as values and falls back for typed helpers", () => {
-    const flags = new FlagsClient();
+  it("coalesces concurrent init calls with equivalent options", async () => {
+    let calls = 0;
+    const fetch: typeof globalThis.fetch = async () => {
+      calls++;
+      await Promise.resolve();
+      return new Response(JSON.stringify({ data: { signals: [] } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
 
-    const loading = flags.getBoolean("missing", false);
-    expect(loading.value).toBe(false);
-    expect(loading.loading).toBe(true);
-    expect(loading.err?.name).toBe("FlagsNotInitializedError");
-  });
-
-  it("clears stale rulesets when re-initialized for an empty owner", async () => {
-    const flags = new FlagsClient();
-    const fetch = viFetch([
-      {
-        data: {
-          signals: [
-            {
-              name: "checkout.v2",
-              type: "BOOL",
-              default: false,
-              version: "3",
-              rules: [],
-            },
-          ],
-        },
-      },
-      { data: { signals: [] } },
+    await Promise.all([
+      flags.init({
+        scope: { workspaceId: "factory" },
+        token: "token_123",
+        refresh: false,
+        fetch,
+      }),
+      flags.init({
+        scope: { workspaceId: "factory" },
+        token: "token_123",
+        refresh: false,
+        fetch,
+      }),
     ]);
 
-    await flags.init({
-      owner: "workspace:one",
-      token: "token_123",
-      pollIntervalMs: 0,
-      fetch,
-    });
-    expect(flags.has("checkout.v2")).toBe(true);
+    expect(calls).toBe(1);
+  });
+
+  it("throws when init is called again with conflicting options", async () => {
+    const fetch = viFetch([{ data: { signals: [] } }]);
 
     await flags.init({
-      owner: "workspace:two",
+      scope: { workspaceId: "one" },
       token: "token_123",
-      pollIntervalMs: 0,
+      refresh: false,
       fetch,
     });
 
-    expect(flags.has("checkout.v2")).toBe(false);
-    const missing = flags.getBoolean("checkout.v2", false);
-    expect(missing.value).toBe(false);
-    expect(missing.loading).toBe(false);
-    expect(missing.err?.name).toBe("FlagNotFoundError");
+    await expect(
+      flags.init({
+        scope: { workspaceId: "two" },
+        token: "token_123",
+        refresh: false,
+        fetch,
+      }),
+    ).rejects.toThrow(/conflicting options/);
+  });
 
-    flags.close();
+  it("returns STALE fallbacks when init sync fails and required is not set", async () => {
+    const fetch: typeof globalThis.fetch = async () => {
+      throw new Error("network down");
+    };
+
+    await flags.init({ token: "token_123", refresh: false, fetch });
+
+    const result = flags.evaluateBoolean("missing", { key: "user" }, true);
+    expect(result.value).toBe(true);
+    expect(result.reason).toBe("STALE");
+    expect(flags.synced).toBe(false);
+  });
+
+  it("rejects init when required is true and sync fails", async () => {
+    const fetch: typeof globalThis.fetch = async () => {
+      throw new Error("network down");
+    };
+
+    await expect(
+      flags.init({ token: "token_123", refresh: false, required: true, fetch }),
+    ).rejects.toThrow(/network down/);
+  });
+
+  it("returns NOT_FOUND with caller fallback for unknown flags", async () => {
+    await flags.init({
+      token: "token_123",
+      refresh: false,
+      fetch: viFetch([{ data: { signals: [] } }]),
+    });
+
+    const result = flags.evaluateBoolean("checkout-v2", undefined, true);
+    expect(result.value).toBe(true);
+    expect(result.reason).toBe("NOT_FOUND");
+  });
+
+  it("returns TYPE_MISMATCH with caller fallback for wrong typed reads", async () => {
+    await flags.init({
+      token: "token_123",
+      refresh: false,
+      fetch: viFetch([
+        {
+          data: {
+            signals: [
+              {
+                name: "checkout-v2",
+                type: "string",
+                default: "off",
+                version: "1",
+                rules: [],
+              },
+            ],
+          },
+        },
+      ]),
+    });
+
+    const result = flags.evaluateBoolean("checkout-v2", undefined, false);
+    expect(result.value).toBe(false);
+    expect(result.reason).toBe("TYPE_MISMATCH");
+  });
+
+  it("coalesces concurrent registry refreshes", async () => {
+    let calls = 0;
+    const fetch: typeof globalThis.fetch = async () => {
+      calls++;
+      await Promise.resolve();
+      return new Response(JSON.stringify({ data: { signals: [] } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    await Promise.all([
+      flags.init({
+        scope: { workspaceId: "test" },
+        token: "token_123",
+        refresh: false,
+        fetch,
+      }),
+      flags.refresh(),
+    ]);
+
+    expect(calls).toBe(1);
+  });
+
+  it("backs off idle refreshes but refreshes on active reads", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+
+    let calls = 0;
+    const fetch = viFetch(
+      [
+        {
+          data: {
+            signals: [
+              {
+                name: "checkout-v2",
+                type: "bool",
+                default: false,
+                version: "1",
+                rules: [],
+              },
+            ],
+          },
+        },
+        {
+          data: {
+            signals: [
+              {
+                name: "checkout-v2",
+                type: "bool",
+                default: true,
+                version: "2",
+                rules: [],
+              },
+            ],
+          },
+        },
+      ],
+      () => {
+        calls++;
+      },
+    );
+
+    await flags.init({
+      scope: { workspaceId: "test" },
+      token: "token_123",
+      fetch,
+    });
+
+    expect(calls).toBe(1);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(calls).toBe(1);
+
+    flags.getBoolean("checkout-v2");
+    await Promise.resolve();
+    await vi.runOnlyPendingTimersAsync();
+
+    expect(calls).toBeGreaterThanOrEqual(2);
+    vi.useRealTimers();
+  });
+
+  it("sends explicit scope when provided", async () => {
+    const requests: unknown[] = [];
+    const fetch: typeof globalThis.fetch = async (_input, init) => {
+      requests.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ data: { signals: [] } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    await flags.init({
+      scope: { projectId: "project_123" },
+      token: "token_123",
+      refresh: false,
+      fetch,
+    });
+
+    expect(requests).toMatchObject([
+      {
+        variables: { owner: "project:project_123" },
+      },
+    ]);
+  });
+
+  it("omits scope so Backboard can infer it from auth", async () => {
+    const requests: unknown[] = [];
+    const fetch: typeof globalThis.fetch = async (_input, init) => {
+      requests.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ data: { signals: [] } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    await flags.init({
+      token: "token_123",
+      refresh: false,
+      fetch,
+    });
+
+    expect(requests).toMatchObject([
+      {
+        variables: {},
+      },
+    ]);
+  });
+
+  it("exposes scoped views that share transport but use separate caches", async () => {
+    const requests: unknown[] = [];
+    const fetch: typeof globalThis.fetch = async (_input, init) => {
+      requests.push(JSON.parse(String(init?.body)));
+      const body = JSON.parse(String(init?.body)) as { variables?: { owner?: string } };
+      const owner = body.variables?.owner;
+      const signals =
+        owner === "project:project_123"
+          ? [
+              {
+                name: "checkout-v2",
+                type: "bool",
+                default: true,
+                version: "1",
+                rules: [],
+              },
+            ]
+          : [];
+
+      return new Response(JSON.stringify({ data: { signals } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    await flags.init({ token: "token_123", refresh: false, fetch });
+
+    const project = flags.scope({ projectId: "project_123" });
+    await project.refresh();
+    expect(project.getBoolean("checkout-v2")).toBe(true);
+    expect(flags.has("checkout-v2")).toBe(false);
+    expect(requests.some((req) => (req as { variables?: { owner?: string } }).variables?.owner === "project:project_123")).toBe(true);
   });
 });
 
@@ -206,7 +473,7 @@ describe("parseRegistrySignal", () => {
   it("normalizes uppercase Prisma/GraphQL enum values to lowercase SDK types", () => {
     expect(
       parseRegistrySignal({
-        name: "checkout.v2",
+        name: "checkout-v2",
         type: "BOOL",
         default: false,
         rules: [],
@@ -216,9 +483,13 @@ describe("parseRegistrySignal", () => {
   });
 });
 
-function viFetch(responses: Array<{ data: unknown }>): typeof fetch {
+function viFetch(
+  responses: Array<{ data: unknown }>,
+  onCall?: () => void,
+): typeof fetch {
   let index = 0;
   return async () => {
+    onCall?.();
     const body = responses[index++] ?? responses[responses.length - 1];
     return new Response(JSON.stringify(body), {
       status: 200,

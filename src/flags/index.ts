@@ -1,27 +1,26 @@
-export {
-  flags,
-  FlagsClient,
-  FlagNotFoundError,
-  FlagsNotInitializedError,
-} from "./client.js";
+export { flags, type FlagsReadSurface } from "./client.js";
 export {
   evaluateFlagRuleset,
   evaluateFlagRulesetSync,
   parseRegistrySignal,
   parseSignalRules,
   resolveSignal,
+  traceToSteps,
 } from "./resolver.js";
 export { signalBucketRatio } from "./bucket.js";
 export {
+  contextFromPublic,
   flattenEvaluationContext,
   normalizeEvaluationContext,
 } from "./context.js";
 export type {
+  Context,
+  Evaluation,
   FlagEvaluationContext,
-  FlagEvaluationReason,
-  FlagEvaluationResult,
   FlagsInitOptions,
+  FlagsScope,
   RadarClause,
+  Reason,
   RegistrySignalRow,
   SignalBucketCompare,
   SignalExpression,
@@ -31,4 +30,5 @@ export type {
   SignalRuleset,
   SignalSource,
   SignalType,
+  TraceStep,
 } from "./types.js";

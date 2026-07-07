@@ -10,11 +10,11 @@ export interface SignalsQueryResult {
 }
 
 export interface SignalsQueryVariables {
-  owner: string;
+  owner?: string;
 }
 
 const SIGNALS_QUERY = parse(`
-  query RailwaySignals($owner: String!) {
+  query RailwaySignals($owner: String) {
     signals(owner: $owner) {
       name
       type
@@ -32,9 +32,10 @@ export const RailwaySignalsDocument = SIGNALS_QUERY as TypedDocumentNode<
 
 export async function fetchRegistrySignals(
   config: NormalizedRailwayClientConfig,
-  owner: string,
+  owner: string | undefined,
 ): Promise<RegistrySignalRow[]> {
-  const data = await requestGraphQL(config, RailwaySignalsDocument, { owner });
+  const variables: SignalsQueryVariables = owner === undefined ? {} : { owner };
+  const data = await requestGraphQL(config, RailwaySignalsDocument, variables);
   return data.signals;
 }
 

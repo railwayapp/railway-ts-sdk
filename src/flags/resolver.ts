@@ -1,13 +1,14 @@
 import type {
+  Context,
   FlagEvaluationContext,
-  FlagEvaluationReason,
-  SignalType,
-  SignalResolutionOutcome,
-  SignalResolutionTrace,
-  SignalResolveResult,
+  Reason,
+  SignalBucketCompare,
   SignalRule,
   SignalRuleset,
-  SignalSource,
+  SignalResolutionTrace,
+  SignalResolveResult,
+  SignalExpression,
+  TraceStep,
 } from "./types.js";
 import type { AttributeResolver, ListResolver } from "./context.js";
 import {
@@ -19,8 +20,9 @@ import {
   evaluateSignalExpressionSync,
   flattenContextAttributes,
 } from "./expression-sync.js";
+import { SIGNAL_KEY_ATTR, SIGNAL_TARGETING_KEY_ATTR } from "./types.js";
 
-function sourceValue(source: SignalSource): unknown | null {
+function sourceValue(source: SignalRule["source"]): unknown | null {
   if (source.type === "literal") {
     return source.value;
   }
@@ -31,6 +33,62 @@ function valuesAgree(values: unknown[]): boolean {
   if (values.length <= 1) return true;
   const first = JSON.stringify(values[0]);
   return values.every((v) => JSON.stringify(v) === first);
+}
+
+function isBucketExpression(expr: SignalExpression): expr is SignalBucketCompare {
+  return "bucket" in expr;
+}
+
+function requiresBucketingKey(rules: SignalRule[]): boolean {
+  return rules.some((rule) => {
+    if (!isBucketExpression(rule.expression)) {
+      return false;
+    }
+    const attr = rule.expression.bucket.attr;
+    return attr === SIGNAL_KEY_ATTR || attr === SIGNAL_TARGETING_KEY_ATTR;
+  });
+}
+
+function hasBucketingKey(context: FlagEvaluationContext): boolean {
+  if (context.targetingKey != null && context.targetingKey !== "") {
+    return true;
+  }
+  const key = context.attributes?.[SIGNAL_KEY_ATTR];
+  return typeof key === "string" && key !== "";
+}
+
+export function traceToSteps(trace: SignalResolutionTrace): TraceStep[] {
+  return trace.matchedRules.map((entry) => ({
+    ruleId: entry.ruleId,
+    matched: entry.matched,
+    value: entry.value,
+  }));
+}
+
+function evaluationReasonFromTrace(
+  trace: SignalResolutionTrace,
+  rules: SignalRule[],
+): Reason {
+  if (trace.outcome === "no_match") {
+    return "NO_MATCH";
+  }
+  if (trace.outcome === "disagreement") {
+    return "CONFLICT";
+  }
+
+  const matchedIds = new Set(
+    trace.matchedRules
+      .filter((entry) => entry.matched && entry.value !== null)
+      .map((entry) => entry.ruleId),
+  );
+
+  for (const rule of rules) {
+    if (matchedIds.has(rule.id) && isBucketExpression(rule.expression)) {
+      return "SPLIT";
+    }
+  }
+
+  return "TARGETING_MATCH";
 }
 
 export async function resolveSignal(
@@ -62,7 +120,7 @@ export async function resolveSignal(
     }
   }
 
-  let outcome: SignalResolutionOutcome;
+  let outcome: SignalResolutionTrace["outcome"];
   let value: unknown;
 
   if (matchedValues.length === 0) {
@@ -88,38 +146,25 @@ export async function resolveSignal(
   };
 }
 
-function isBucketExpression(expr: SignalRule["expression"]): boolean {
-  return "bucket" in expr;
-}
-
-function evaluationReasonFromTrace(
-  trace: SignalResolutionTrace,
-  rules: SignalRule[],
-): FlagEvaluationReason {
-  if (trace.outcome === "no_match" || trace.outcome === "disagreement") {
-    return "DEFAULT";
-  }
-
-  const matchedIds = new Set(
-    trace.matchedRules
-      .filter((entry) => entry.matched && entry.value !== null)
-      .map((entry) => entry.ruleId),
-  );
-
-  for (const rule of rules) {
-    if (matchedIds.has(rule.id) && isBucketExpression(rule.expression)) {
-      return "SPLIT";
-    }
-  }
-
-  return "TARGETING_MATCH";
-}
-
 export async function evaluateFlagRuleset(
   ruleset: SignalRuleset,
-  context: FlagEvaluationContext,
-): Promise<SignalResolveResult & { reason: FlagEvaluationReason }> {
+  context: FlagEvaluationContext | Context = {},
+): Promise<SignalResolveResult & { reason: Reason }> {
   const normalized = normalizeEvaluationContext(context);
+  if (requiresBucketingKey(ruleset.rules) && !hasBucketingKey(normalized)) {
+    return {
+      value: ruleset.default,
+      reason: "NO_KEY",
+      trace: {
+        signalName: ruleset.name,
+        default: ruleset.default,
+        matchedRules: [],
+        outcome: "no_match",
+        value: ruleset.default,
+      },
+    };
+  }
+
   const { attrResolver, listResolver } = createResolversFromContext(normalized);
   const result = await resolveSignal(ruleset, attrResolver, listResolver);
 
@@ -131,9 +176,24 @@ export async function evaluateFlagRuleset(
 
 export function evaluateFlagRulesetSync(
   ruleset: SignalRuleset,
-  context: FlagEvaluationContext,
-): SignalResolveResult & { reason: FlagEvaluationReason } {
-  const attributes = flattenContextAttributes(normalizeEvaluationContext(context));
+  context: FlagEvaluationContext | Context = {},
+): SignalResolveResult & { reason: Reason } {
+  const normalized = normalizeEvaluationContext(context);
+  if (requiresBucketingKey(ruleset.rules) && !hasBucketingKey(normalized)) {
+    return {
+      value: ruleset.default,
+      reason: "NO_KEY",
+      trace: {
+        signalName: ruleset.name,
+        default: ruleset.default,
+        matchedRules: [],
+        outcome: "no_match",
+        value: ruleset.default,
+      },
+    };
+  }
+
+  const attributes = flattenContextAttributes(normalized);
   const matchedRules: SignalResolutionTrace["matchedRules"] = [];
   const matchedValues: unknown[] = [];
 
@@ -155,7 +215,7 @@ export function evaluateFlagRulesetSync(
     }
   }
 
-  let outcome: SignalResolutionOutcome;
+  let outcome: SignalResolutionTrace["outcome"];
   let value: unknown;
 
   if (matchedValues.length === 0) {
@@ -212,6 +272,6 @@ export function parseRegistrySignal(row: {
   };
 }
 
-function normalizeSignalType(type: string): SignalType | string {
+function normalizeSignalType(type: string): SignalRuleset["type"] | string {
   return type.toLowerCase();
 }
