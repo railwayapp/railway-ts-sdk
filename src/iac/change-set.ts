@@ -330,11 +330,14 @@ function diffTopLevelField({ previous, resource, field, changes }: { previous: R
 }
 
 function diffServiceDeploy({ previous, resource, changes }: { previous: ServiceNode; resource: ServiceNode; changes: RailwayChange[] }) {
-  const after = serviceDeployWithCurrentRegion(previous.deploy, resource.deploy);
-  const normalizedBefore = normalizeForDiff("deploy", previous.deploy);
+  const [before, after] = stripWriteOnlyRegistryCredentials(
+    previous.deploy,
+    serviceDeployWithCurrentRegion(previous.deploy, resource.deploy),
+  );
+  const normalizedBefore = normalizeForDiff("deploy", before);
   const normalizedAfter = normalizeForDiff("deploy", after);
   if (stableStringify(normalizedBefore) === stableStringify(normalizedAfter)) return;
-  changes.push(update(resource.address, "deploy", previous.deploy, after, summaryForField(resource, "deploy", normalizedBefore, normalizedAfter), changedLeafPaths(normalizedBefore, normalizedAfter, "deploy")));
+  changes.push(update(resource.address, "deploy", before, after, summaryForField(resource, "deploy", normalizedBefore, normalizedAfter), changedLeafPaths(normalizedBefore, normalizedAfter, "deploy")));
 }
 
 function serviceDeployWithCurrentRegion(previous: ServiceNode["deploy"], desired: ServiceNode["deploy"]): ServiceNode["deploy"] {
