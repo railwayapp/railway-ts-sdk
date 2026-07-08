@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { bucket, createRailwayContext, diffGraphs, environmentConfigToGraph, evaluateRailwayFile, github, graphToEnvironmentConfig, image, postgres, project, service, volume } from "../src/index.js";
 import { projectDefinitionToGraph } from "../src/iac/compiler.js";
 import { changeSetToEnvironmentPatch, RAILWAY_CHANGE_SET_VERSION, SUPPORTED_CHANGE_SET_VERSIONS, renderChangeSet, type SetVariableChange } from "../src/iac/change-set.js";
+import { runRailwayIac } from "../src/iac/runner.js";
 import { preserve } from "../src/iac/sdk.js";
 
 describe("Railway IaC", () => {
@@ -70,6 +71,17 @@ describe("Railway IaC", () => {
     }).services?.web?.deploy).toEqual({
       multiRegionConfig: { "us-east4": { numReplicas: 2 } },
     });
+  });
+
+  it("stamps runner responses with the SDK version", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "railway-iac-version-"));
+    const file = join(dir, "railway.ts");
+    await writeFile(file, `export default () => ({ name: "app", resources: [] });`);
+
+    const response = await runRailwayIac({ command: "evaluate", file });
+
+    // Unbundled runs fall back to the dev version; the tsup build injects the real one.
+    expect(response.sdkVersion).toBe("0.0.0-dev");
   });
 
   it("plans literal variable changes when current value is unknown", () => {

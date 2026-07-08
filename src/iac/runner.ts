@@ -6,6 +6,7 @@ import { evaluateRailwayProject, findRailwayFile } from "./project.js";
 import { renderRailwayGraphTypes } from "./typegen.js";
 import type { EnvironmentConfig } from "./schema.js";
 import type { RailwayAuthType } from "../core/config.js";
+import { SDK_VERSION } from "../core/version.js";
 import type { RailwayContextInput } from "./sdk.js";
 
 export interface RailwayIacRunnerRequest {
@@ -92,7 +93,10 @@ export interface RailwayIacApplyResponse extends Omit<RailwayIacStageResponse, "
   stagedPatchId?: string;
 }
 
-export type RailwayIacRunnerResponse = RailwayIacEvaluateResponse | RailwayIacTypegenResponse | RailwayIacCurrentResponse | RailwayIacPlanResponse | RailwayIacStageResponse | RailwayIacApplyResponse;
+export type RailwayIacRunnerResponse = (RailwayIacEvaluateResponse | RailwayIacTypegenResponse | RailwayIacCurrentResponse | RailwayIacPlanResponse | RailwayIacStageResponse | RailwayIacApplyResponse) & {
+  /** SDK version that produced this response; consumers use it to detect outdated runners. */
+  sdkVersion?: string;
+};
 
 type RunnerCommand = NonNullable<RailwayIacRunnerRequest["command"]>;
 
@@ -116,9 +120,9 @@ export async function runRailwayIac(request: RailwayIacRunnerRequest = {}): Prom
       graph: evaluated.graph,
       diagnostics: graphDiagnostics(evaluated.graph),
     };
-    return await runEvaluatedCommand(command, input);
+    return { sdkVersion: SDK_VERSION, ...(await runEvaluatedCommand(command, input)) };
   } catch (error) {
-    return errorResponse(command, file, error);
+    return { sdkVersion: SDK_VERSION, ...errorResponse(command, file, error) };
   }
 }
 

@@ -2,7 +2,7 @@
 // unbundled (vitest/tsx).
 declare const __RAILWAY_SDK_VERSION__: string | undefined;
 
-const SDK_VERSION =
+export const SDK_VERSION =
   typeof __RAILWAY_SDK_VERSION__ !== "undefined"
     ? __RAILWAY_SDK_VERSION__
     : "0.0.0-dev";
