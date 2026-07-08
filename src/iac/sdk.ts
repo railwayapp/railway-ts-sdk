@@ -292,24 +292,26 @@ function normalizeBuild(config: ServiceConfigInput): BuildConfig | undefined {
 
 function normalizeDeploy(config: ServiceConfigInput): DeployConfig | undefined {
   const preDeployCommand = config.preDeploy ?? config.preDeployCommand ?? config.run?.preDeploy;
+  const replicaConfig = normalizeReplicas(config.replicas, config.regions);
   return pruneEmpty({
     ...config.deploy,
     startCommand: config.start ?? config.startCommand ?? config.run?.command ?? config.deploy?.startCommand,
     preDeployCommand: Array.isArray(preDeployCommand) ? preDeployCommand : preDeployCommand ? [preDeployCommand] : config.deploy?.preDeployCommand,
     healthcheckPath: config.healthcheck ?? config.healthcheckPath ?? config.run?.healthcheck ?? config.deploy?.healthcheckPath,
     healthcheckTimeout: config.healthcheckTimeout ?? config.run?.healthcheckTimeout ?? config.deploy?.healthcheckTimeout,
-    multiRegionConfig: normalizeReplicas(config.replicas, config.regions) ?? config.deploy?.multiRegionConfig,
+    ...replicaConfig,
+    multiRegionConfig: replicaConfig?.multiRegionConfig ?? config.deploy?.multiRegionConfig,
   }) as DeployConfig | undefined;
 }
 
-function normalizeReplicas(replicas: ServiceConfigInput["replicas"], regions: ServiceConfigInput["regions"]): DeployConfig["multiRegionConfig"] | undefined {
-  if (typeof replicas === "number") return normalizeRegions({ "us-west2": replicas });
-  if (replicas) return normalizeRegions(replicas);
-  if (regions) return normalizeRegions(regions);
+function normalizeReplicas(replicas: ServiceConfigInput["replicas"], regions: ServiceConfigInput["regions"]): Pick<DeployConfig, "numReplicas" | "multiRegionConfig"> | undefined {
+  if (typeof replicas === "number") return { numReplicas: replicas };
+  if (replicas) return { multiRegionConfig: normalizeRegions(replicas) };
+  if (regions) return { multiRegionConfig: normalizeRegions(regions) };
   return undefined;
 }
 
-function normalizeRegions(regions: Record<string, RegionConfig>): DeployConfig["multiRegionConfig"] {
+function normalizeRegions(regions: Record<string, RegionConfig>): NonNullable<DeployConfig["multiRegionConfig"]> {
   return Object.fromEntries(
     Object.entries(regions).map(([region, value]) => [
       region,
@@ -317,7 +319,7 @@ function normalizeRegions(regions: Record<string, RegionConfig>): DeployConfig["
         ? { numReplicas: value }
         : (pruneEmpty({ numReplicas: value.count ?? value.replicas, stackerAssignment: value.stacker }) ?? {}),
     ]),
-  ) as DeployConfig["multiRegionConfig"];
+  ) as NonNullable<DeployConfig["multiRegionConfig"]>;
 }
 
 function normalizeNetworking(config: ServiceConfigInput): ServiceNetworking | undefined {

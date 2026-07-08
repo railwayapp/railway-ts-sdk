@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { bucket, createRailwayContext, diffGraphs, environmentConfigToGraph, evaluateRailwayFile, github, graphToEnvironmentConfig, image, postgres, project, service, volume } from "../src/index.js";
 import { projectDefinitionToGraph } from "../src/iac/compiler.js";
-import { RAILWAY_CHANGE_SET_VERSION, SUPPORTED_CHANGE_SET_VERSIONS, renderChangeSet, type SetVariableChange } from "../src/iac/change-set.js";
+import { changeSetToEnvironmentPatch, RAILWAY_CHANGE_SET_VERSION, SUPPORTED_CHANGE_SET_VERSIONS, renderChangeSet, type SetVariableChange } from "../src/iac/change-set.js";
 import { preserve } from "../src/iac/sdk.js";
 
 describe("Railway IaC", () => {
@@ -34,6 +34,41 @@ describe("Railway IaC", () => {
         project: { name: "app" },
         resources: [{ address: "service.web" }],
       },
+    });
+  });
+
+  it("treats numeric replicas as count-only without defaulting to us-west2", () => {
+    const graph = projectDefinitionToGraph(project("app", {
+      resources: [service("web", { replicas: 1 })],
+    }));
+
+    expect(graph.resources).toContainEqual(expect.objectContaining({
+      address: "service.web",
+      deploy: { numReplicas: 1 },
+    }));
+    expect(graphToEnvironmentConfig(graph).services?.web?.deploy).toEqual({
+      numReplicas: 1,
+    });
+  });
+
+  it("does not include a region change when applying count-only replica changes", () => {
+    const current = projectDefinitionToGraph(project("app", {
+      resources: [service("web", { deploy: { multiRegionConfig: { "us-east4": { numReplicas: 1 } } } })],
+    }));
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [service("web", { replicas: 2 })],
+    }));
+    const changeSet = diffGraphs({ current, desired });
+
+    expect(changeSet.changes).toMatchObject([
+      { kind: "resource.update", address: "service.web", field: "deploy" },
+    ]);
+    expect(changeSetToEnvironmentPatch({
+      currentGraph: current,
+      currentConfig: graphToEnvironmentConfig(current),
+      changeSet,
+    }).services?.web?.deploy).toEqual({
+      multiRegionConfig: { "us-east4": { numReplicas: 2 } },
     });
   });
 
