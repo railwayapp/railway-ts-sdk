@@ -414,15 +414,32 @@ function isMaskedRegistryCredentials(value: unknown): boolean {
 function stripWriteOnlyRegistryCredentials(before: unknown, after: unknown): [unknown, unknown] {
   const beforeCredentials = (before as { registryCredentials?: unknown } | undefined)?.registryCredentials;
   const afterCredentials = (after as { registryCredentials?: unknown } | undefined)?.registryCredentials;
-  const desiredManagesCredentials = afterCredentials != null && !isMaskedRegistryCredentials(afterCredentials);
-  const stripBoth = !desiredManagesCredentials || isMaskedRegistryCredentials(beforeCredentials);
-  const strip = (value: unknown, credentials: unknown) => {
-    if (credentials === undefined || value == null || typeof value !== "object") return value;
+  // Sentinel-valued fields in the desired config are echoes of a masked read: drop the
+  // field but keep any real sibling field so a partial credential update still plans.
+  const desiredCredentials = realCredentialFields(afterCredentials);
+  const withCredentials = (value: unknown, credentials: Record<string, unknown> | undefined) => {
+    if (value == null || typeof value !== "object") return value;
     const copy = { ...(value as Record<string, unknown>) };
-    delete copy.registryCredentials;
+    if (credentials === undefined) delete copy.registryCredentials;
+    else copy.registryCredentials = credentials;
     return Object.keys(copy).length === 0 ? undefined : copy;
   };
-  return stripBoth ? [strip(before, beforeCredentials), strip(after, afterCredentials)] : [before, after];
+  const desiredSide = afterCredentials === undefined ? after : withCredentials(after, desiredCredentials);
+  if (desiredCredentials !== undefined && !isMaskedRegistryCredentials(beforeCredentials)) {
+    return [before, desiredSide];
+  }
+  const strippedBefore = beforeCredentials === undefined ? before : withCredentials(before, undefined);
+  const strippedAfter = desiredCredentials === undefined ? desiredSide : withCredentials(desiredSide, undefined);
+  return [strippedBefore, strippedAfter];
+}
+
+// Remove sentinel-valued fields; undefined when nothing real remains.
+function realCredentialFields(credentials: unknown): Record<string, unknown> | undefined {
+  if (credentials == null || typeof credentials !== "object") return undefined;
+  const entries = Object.entries(credentials as Record<string, unknown>).filter(
+    ([, value]) => value != null && value !== MASKED_CREDENTIAL_VALUE,
+  );
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
 // Backboard owns requiredMountPath; it is represented in the graph by node.defaultMountPath and

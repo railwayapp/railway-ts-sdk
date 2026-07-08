@@ -364,6 +364,25 @@ describe("Railway IaC", () => {
       expect(rendered).not.toContain("old-password");
     });
 
+    it("keeps the real field when the desired config echoes one sentinel", () => {
+      const current = environmentConfigToGraph({
+        services: { web: { source: { image: "ghcr.io/acme/api:1.2.3" } } },
+      }, { projectName: "app" });
+      const desired = projectDefinitionToGraph(project("app", {
+        resources: [service("web", {
+          source: image("ghcr.io/acme/api:1.2.3"),
+          deploy: { registryCredentials: { username: "*****", password: PASSWORD } },
+        })],
+      }));
+
+      const changes = diffGraphs({ current, desired }).changes;
+      expect(changes).toMatchObject([
+        { kind: "resource.update", address: "service.web", field: "deploy" },
+      ]);
+      const change = changes[0] as { after?: unknown };
+      expect(change.after).toEqual({ registryCredentials: { password: PASSWORD } });
+    });
+
     it("excludes masked credentials from the change payload of unrelated deploy edits", () => {
       const current = environmentConfigToGraph({
         services: { web: {
