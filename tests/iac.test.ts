@@ -251,6 +251,110 @@ describe("Railway IaC", () => {
     expect(change?.details?.[0]).not.toContain("«hidden»");
   });
 
+  describe("write-only registry credentials", () => {
+    const PASSWORD = "hunter2-secret";
+    const desiredWithCredentials = () => projectDefinitionToGraph(project("app", {
+      resources: [service("web", {
+        source: image("ghcr.io/acme/api:1.2.3"),
+        deploy: { registryCredentials: { username: "robot", password: PASSWORD } },
+      })],
+    }));
+
+    it("plans the first apply when the environment has no credentials", () => {
+      const current = environmentConfigToGraph({
+        services: { web: { source: { image: "ghcr.io/acme/api:1.2.3" } } },
+      }, { projectName: "app" });
+
+      const changes = diffGraphs({ current, desired: desiredWithCredentials() }).changes;
+      expect(changes).toMatchObject([
+        { kind: "resource.update", address: "service.web", field: "deploy" },
+      ]);
+      // Plan output (details) must not leak the password even on first apply.
+      const change = changes[0] as { details?: string[] };
+      expect(JSON.stringify(change.details ?? [])).not.toContain(PASSWORD);
+    });
+
+    it("does not churn when the environment masks credentials with the sentinel", () => {
+      const current = environmentConfigToGraph({
+        services: { web: {
+          source: { image: "ghcr.io/acme/api:1.2.3" },
+          deploy: { registryCredentials: { username: "*****", password: "*****" } },
+        } },
+      }, { projectName: "app" });
+
+      expect(diffGraphs({ current, desired: desiredWithCredentials() }).changes).toEqual([]);
+    });
+
+    it("does not churn when a staged-patch read nulls credentials", () => {
+      const current = environmentConfigToGraph({
+        services: { web: {
+          source: { image: "ghcr.io/acme/api:1.2.3" },
+          deploy: { registryCredentials: null },
+        } },
+      }, { projectName: "app" });
+
+      expect(diffGraphs({ current, desired: desiredWithCredentials() }).changes).toEqual([]);
+    });
+
+    it("never plans credential removal when the desired config omits them", () => {
+      const current = environmentConfigToGraph({
+        services: { web: {
+          source: { image: "ghcr.io/acme/api:1.2.3" },
+          deploy: { registryCredentials: { username: "*****", password: "*****" } },
+        } },
+      }, { projectName: "app" });
+      const desired = projectDefinitionToGraph(project("app", {
+        resources: [service("web", { source: image("ghcr.io/acme/api:1.2.3") })],
+      }));
+
+      expect(diffGraphs({ current, desired }).changes).toEqual([]);
+    });
+
+    it("plans a rotation when the remote config was fetched decrypted", () => {
+      const current = environmentConfigToGraph({
+        services: { web: {
+          source: { image: "ghcr.io/acme/api:1.2.3" },
+          deploy: { registryCredentials: { username: "robot", password: "old-password" } },
+        } },
+      }, { projectName: "app" });
+
+      const changes = diffGraphs({ current, desired: desiredWithCredentials() }).changes;
+      expect(changes).toMatchObject([
+        { kind: "resource.update", address: "service.web", field: "deploy" },
+      ]);
+      const change = changes[0] as { summary?: string; details?: string[] };
+      const rendered = JSON.stringify([change.summary, change.details]);
+      expect(rendered).toContain("registryCredentials");
+      expect(rendered).not.toContain(PASSWORD);
+      expect(rendered).not.toContain("old-password");
+    });
+
+    it("excludes masked credentials from the change payload of unrelated deploy edits", () => {
+      const current = environmentConfigToGraph({
+        services: { web: {
+          source: { image: "ghcr.io/acme/api:1.2.3" },
+          deploy: {
+            startCommand: "old-start",
+            registryCredentials: { username: "*****", password: "*****" },
+          },
+        } },
+      }, { projectName: "app" });
+      const desired = projectDefinitionToGraph(project("app", {
+        resources: [service("web", {
+          source: image("ghcr.io/acme/api:1.2.3"),
+          deploy: { startCommand: "new-start", registryCredentials: { username: "robot", password: PASSWORD } },
+        })],
+      }));
+
+      const changes = diffGraphs({ current, desired }).changes;
+      expect(changes).toMatchObject([
+        { kind: "resource.update", address: "service.web", field: "deploy" },
+      ]);
+      const change = changes[0] as { before?: unknown; after?: unknown };
+      expect(JSON.stringify([change.before, change.after])).not.toContain("registryCredentials");
+    });
+  });
+
   it("refuses to manage a service still owned by railway.json/toml", () => {
     const current = environmentConfigToGraph({
       services: { web: { source: { repo: "r" }, configFile: "railway.json" } },
