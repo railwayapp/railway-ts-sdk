@@ -1,5 +1,5 @@
 import { composePatch, graphToEnvironmentConfig } from "./compiler.js";
-import type { DatabaseNode, GraphCompileOptions, RailwayGraph, ResourceAddress, ResourceNode, VariableValue, VolumeNode } from "./graph.js";
+import type { DatabaseNode, GraphCompileOptions, RailwayGraph, ResourceAddress, ResourceNode, ServiceNode, VariableValue, VolumeNode } from "./graph.js";
 import type { EnvironmentConfig } from "./schema.js";
 
 // Wire-contract version for the RailwayChangeSet exchanged with backboard.
@@ -123,6 +123,8 @@ export function diffGraphs({ current, desired, revealValues = false }: { current
     diffTopLevelField({ previous, resource, field: "build", changes });
     if (previous.type === "database" && resource.type === "database") {
       diffDatabaseDeploy({ previous, resource, changes });
+    } else if (previous.type === "service" && resource.type === "service") {
+      diffServiceDeploy({ previous, resource, changes });
     } else {
       diffTopLevelField({ previous, resource, field: "deploy", changes });
     }
@@ -324,6 +326,28 @@ function diffTopLevelField({ previous, resource, field, changes }: { previous: R
   const normalizedAfter = normalizeForDiff(field, after);
   if (stableStringify(normalizedBefore) === stableStringify(normalizedAfter)) return;
   changes.push(update(resource.address, field, before, after, summaryForField(resource, field, normalizedBefore, normalizedAfter), changedLeafPaths(normalizedBefore, normalizedAfter, field)));
+}
+
+function diffServiceDeploy({ previous, resource, changes }: { previous: ServiceNode; resource: ServiceNode; changes: RailwayChange[] }) {
+  const after = serviceDeployWithCurrentRegion(previous.deploy, resource.deploy);
+  const normalizedBefore = normalizeForDiff("deploy", previous.deploy);
+  const normalizedAfter = normalizeForDiff("deploy", after);
+  if (stableStringify(normalizedBefore) === stableStringify(normalizedAfter)) return;
+  changes.push(update(resource.address, "deploy", previous.deploy, after, summaryForField(resource, "deploy", normalizedBefore, normalizedAfter), changedLeafPaths(normalizedBefore, normalizedAfter, "deploy")));
+}
+
+function serviceDeployWithCurrentRegion(previous: ServiceNode["deploy"], desired: ServiceNode["deploy"]): ServiceNode["deploy"] {
+  if (desired?.numReplicas == null || desired.multiRegionConfig != null) return desired;
+  const currentRegion = singleDeployRegion(previous);
+  if (currentRegion == null) return desired;
+  const { numReplicas, ...rest } = desired;
+  return { ...rest, multiRegionConfig: { [currentRegion]: { numReplicas } } };
+}
+
+function singleDeployRegion(deploy: ServiceNode["deploy"]): string | undefined {
+  const regions = Object.entries(deploy?.multiRegionConfig ?? {}).filter(([, config]) => config != null);
+  if (regions.length !== 1) return undefined;
+  return regions[0]?.[0];
 }
 
 // A database realizes its mount path and (default) region through Backboard, not repo config:
