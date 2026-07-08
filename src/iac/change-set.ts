@@ -319,9 +319,10 @@ function diffVolumeAttachments({ previous, resource, changes }: { previous: Reso
 }
 
 function diffTopLevelField({ previous, resource, field, changes }: { previous: ResourceNode; resource: ResourceNode; field: string; changes: RailwayChange[] }) {
-  const before = (previous as unknown as Record<string, unknown>)[field];
-  const after = (resource as unknown as Record<string, unknown>)[field];
+  let before = (previous as unknown as Record<string, unknown>)[field];
+  let after = (resource as unknown as Record<string, unknown>)[field];
   if (field === "source" && previous.type === "database" && isEquivalentDatabaseSource(previous, after)) return;
+  if (field === "deploy") [before, after] = stripWriteOnlyRegistryCredentials(before, after);
   const normalizedBefore = normalizeForDiff(field, before);
   const normalizedAfter = normalizeForDiff(field, after);
   if (stableStringify(normalizedBefore) === stableStringify(normalizedAfter)) return;
@@ -329,11 +330,14 @@ function diffTopLevelField({ previous, resource, field, changes }: { previous: R
 }
 
 function diffServiceDeploy({ previous, resource, changes }: { previous: ServiceNode; resource: ServiceNode; changes: RailwayChange[] }) {
-  const after = serviceDeployWithCurrentRegion(previous.deploy, resource.deploy);
-  const normalizedBefore = normalizeForDiff("deploy", previous.deploy);
+  const [before, after] = stripWriteOnlyRegistryCredentials(
+    previous.deploy,
+    serviceDeployWithCurrentRegion(previous.deploy, resource.deploy),
+  );
+  const normalizedBefore = normalizeForDiff("deploy", before);
   const normalizedAfter = normalizeForDiff("deploy", after);
   if (stableStringify(normalizedBefore) === stableStringify(normalizedAfter)) return;
-  changes.push(update(resource.address, "deploy", previous.deploy, after, summaryForField(resource, "deploy", normalizedBefore, normalizedAfter), changedLeafPaths(normalizedBefore, normalizedAfter, "deploy")));
+  changes.push(update(resource.address, "deploy", before, after, summaryForField(resource, "deploy", normalizedBefore, normalizedAfter), changedLeafPaths(normalizedBefore, normalizedAfter, "deploy")));
 }
 
 function serviceDeployWithCurrentRegion(previous: ServiceNode["deploy"], desired: ServiceNode["deploy"]): ServiceNode["deploy"] {
@@ -369,24 +373,73 @@ function diffVolumeConfig({ previous, resource, changes }: { previous: VolumeNod
 }
 
 function diffDatabaseDeploy({ previous, resource, changes }: { previous: DatabaseNode; resource: DatabaseNode; changes: RailwayChange[] }) {
+  const [previousDeploy, resourceDeploy] = stripWriteOnlyRegistryCredentials(previous.deploy, resource.deploy);
   const previousRegion = databaseRegion(previous);
   const desiredRegion = databaseRegion(resource);
   if (desiredRegion !== undefined && desiredRegion !== previousRegion) {
     changes.push(update(
       resource.address,
       "deploy",
-      previous.deploy,
-      resource.deploy,
+      previousDeploy,
+      resourceDeploy,
       `Move database ${resource.name} to ${desiredRegion}`,
-      changedLeafPaths(normalizeDatabaseDeploy(previous.deploy), normalizeDatabaseDeploy(resource.deploy), "deploy"),
+      changedLeafPaths(normalizeDatabaseDeploy(previousDeploy), normalizeDatabaseDeploy(resourceDeploy), "deploy"),
       "destructive",
     ));
     return;
   }
-  const before = normalizeDatabaseDeploy(previous.deploy);
-  const after = normalizeDatabaseDeploy(resource.deploy);
+  const before = normalizeDatabaseDeploy(previousDeploy);
+  const after = normalizeDatabaseDeploy(resourceDeploy);
   if (stableStringify(before) === stableStringify(after)) return;
-  changes.push(update(resource.address, "deploy", previous.deploy, resource.deploy, summaryForField(resource, "deploy", before, after), changedLeafPaths(before, after, "deploy")));
+  changes.push(update(resource.address, "deploy", previousDeploy, resourceDeploy, summaryForField(resource, "deploy", before, after), changedLeafPaths(before, after, "deploy")));
+}
+
+// Registry credentials are write-only: Backboard masks them in config reads unless
+// variables are decrypted — a sentinel value ("*****") in Environment.config, or null in
+// staged-patch reads. A masked value proves credentials exist but not what they are, so:
+//   - remote masked + desired set   → assume applied; no drift (rotate with --decrypt-variables)
+//   - remote set    + desired unset → no removal churn (Backboard exempts credentials from nulling)
+//   - remote absent + desired set   → first apply still plans an update
+// Stripped values are also excluded from the emitted change payload, so a masked or
+// sentinel credential can never round-trip into a change set.
+const MASKED_CREDENTIAL_VALUE = "*****";
+
+function isMaskedRegistryCredentials(value: unknown): boolean {
+  if (value === null) return true;
+  if (value == null || typeof value !== "object") return false;
+  const credentials = value as { username?: unknown; password?: unknown };
+  return credentials.username === MASKED_CREDENTIAL_VALUE || credentials.password === MASKED_CREDENTIAL_VALUE;
+}
+
+function stripWriteOnlyRegistryCredentials(before: unknown, after: unknown): [unknown, unknown] {
+  const beforeCredentials = (before as { registryCredentials?: unknown } | undefined)?.registryCredentials;
+  const afterCredentials = (after as { registryCredentials?: unknown } | undefined)?.registryCredentials;
+  // Sentinel-valued fields in the desired config are echoes of a masked read: drop the
+  // field but keep any real sibling field so a partial credential update still plans.
+  const desiredCredentials = realCredentialFields(afterCredentials);
+  const withCredentials = (value: unknown, credentials: Record<string, unknown> | undefined) => {
+    if (value == null || typeof value !== "object") return value;
+    const copy = { ...(value as Record<string, unknown>) };
+    if (credentials === undefined) delete copy.registryCredentials;
+    else copy.registryCredentials = credentials;
+    return Object.keys(copy).length === 0 ? undefined : copy;
+  };
+  const desiredSide = afterCredentials === undefined ? after : withCredentials(after, desiredCredentials);
+  if (desiredCredentials !== undefined && !isMaskedRegistryCredentials(beforeCredentials)) {
+    return [before, desiredSide];
+  }
+  const strippedBefore = beforeCredentials === undefined ? before : withCredentials(before, undefined);
+  const strippedAfter = desiredCredentials === undefined ? desiredSide : withCredentials(desiredSide, undefined);
+  return [strippedBefore, strippedAfter];
+}
+
+// Remove sentinel-valued fields; undefined when nothing real remains.
+function realCredentialFields(credentials: unknown): Record<string, unknown> | undefined {
+  if (credentials == null || typeof credentials !== "object") return undefined;
+  const entries = Object.entries(credentials as Record<string, unknown>).filter(
+    ([, value]) => value != null && value !== MASKED_CREDENTIAL_VALUE,
+  );
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
 // Backboard owns requiredMountPath; it is represented in the graph by node.defaultMountPath and
@@ -432,6 +485,10 @@ function changedLeafPaths(before: unknown, after: unknown, prefix: string): stri
     .filter(key => key === "" || !changed.some(other => other !== key && other.startsWith(`${key}.`)))
     .map(key => {
       const path = key ? `${prefix}.${key}` : prefix;
+      // Credential values must never appear in plan output (terminals, CI logs)
+      if (path.includes("registryCredentials")) {
+        return `${friendlyPath(path)} (${REDACTED_VARIABLE_VALUE} → ${REDACTED_VARIABLE_VALUE})`;
+      }
       const beforeValue = beforeFlat[key];
       const afterValue = afterFlat[key];
       return `${friendlyPath(path)} (${formatDiffValue(beforeValue)} → ${formatDiffValue(afterValue)})`;
