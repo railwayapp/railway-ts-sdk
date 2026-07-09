@@ -227,6 +227,58 @@ describe("Railway IaC", () => {
     expect(diffGraphs({ current, desired }).changes).toEqual([]);
   });
 
+  it("never plans deletion of a database-realized volume", () => {
+    // postgres() authors no volume declaration, but the platform realizes one.
+    // Re-planning must not schedule the data volume for deletion.
+    const current = environmentConfigToGraph({
+      services: {
+        db: {
+          source: { image: "ghcr.io/railwayapp-templates/postgres-ssl:18" },
+          deploy: { requiredMountPath: "/var/lib/postgresql/data" },
+          volumeMounts: { "vol-1": { mountPath: "/var/lib/postgresql/data" } },
+        },
+      },
+      volumes: { "vol-1": { sizeMB: 50000, region: "us-west2" } },
+    }, {
+      projectName: "app",
+      serviceNamesById: { db: "db" },
+      volumeNamesById: { "vol-1": "postgres-volume" },
+    });
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [postgres("db")],
+    }));
+
+    const { changes, diagnostics } = diffGraphs({ current, desired });
+    expect(changes.filter(change => change.kind === "resource.delete")).toEqual([]);
+    expect(diagnostics).toEqual([]);
+  });
+
+  it("warns instead of deleting when a mounted volume vanishes from config", () => {
+    const current = environmentConfigToGraph({
+      services: {
+        web: {
+          source: { image: "ghcr.io/acme/api:1.2.3" },
+          volumeMounts: { "vol-1": { mountPath: "/data" } },
+        },
+      },
+      volumes: { "vol-1": { sizeMB: 1024, region: "us-west2" } },
+    }, {
+      projectName: "app",
+      serviceNamesById: { web: "web" },
+      volumeNamesById: { "vol-1": "data" },
+    });
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [service("web", { source: image("ghcr.io/acme/api:1.2.3") })],
+    }));
+
+    const { changes, diagnostics } = diffGraphs({ current, desired });
+    expect(changes.filter(change => change.kind === "resource.delete")).toEqual([]);
+    expect(diagnostics).toContainEqual(expect.objectContaining({
+      severity: "warning",
+      message: expect.stringContaining("never deleted"),
+    }));
+  });
+
   it("marks removing a service as a destructive delete", () => {
     const current = environmentConfigToGraph({
       services: { web: { source: { repo: "railwayapp/demo" } }, api: { source: { repo: "railwayapp/api" } } },
