@@ -391,7 +391,8 @@ function diffVolumeConfig({ previous, resource, changes }: { previous: VolumeNod
 }
 
 function diffDatabaseDeploy({ previous, resource, changes }: { previous: DatabaseNode; resource: DatabaseNode; changes: RailwayChange[] }) {
-  const [previousDeploy, resourceDeploy] = stripWriteOnlyRegistryCredentials(previous.deploy, resource.deploy);
+  let [previousDeploy, resourceDeploy] = stripWriteOnlyRegistryCredentials(previous.deploy, resource.deploy);
+  previousDeploy = dropPlatformStartCommand(previousDeploy, resourceDeploy);
   const previousRegion = databaseRegion(previous);
   const desiredRegion = databaseRegion(resource);
   if (desiredRegion !== undefined && desiredRegion !== previousRegion) {
@@ -410,6 +411,20 @@ function diffDatabaseDeploy({ previous, resource, changes }: { previous: Databas
   const after = normalizeDatabaseDeploy(resourceDeploy);
   if (stableStringify(before) === stableStringify(after)) return;
   changes.push(update(resource.address, "deploy", previousDeploy, resourceDeploy, summaryForField(resource, "deploy", before, after), changedLeafPaths(before, after, "deploy")));
+}
+
+// Database templates realize startCommand at deploy time (volume permission fixes,
+// auth flags like redis's --requirepass) and the authoring helpers never reproduce
+// it. Diffing it would plan an unset that strips those flags from a running
+// database, so a current-side startCommand is only diffed when the author wrote one.
+function dropPlatformStartCommand(previousDeploy: unknown, resourceDeploy: unknown): unknown {
+  const desired = (resourceDeploy as { startCommand?: unknown } | undefined)?.startCommand;
+  if (desired != null) return previousDeploy;
+  if (previousDeploy == null || typeof previousDeploy !== "object") return previousDeploy;
+  if (!("startCommand" in previousDeploy)) return previousDeploy;
+  const copy = { ...(previousDeploy as Record<string, unknown>) };
+  delete copy.startCommand;
+  return Object.keys(copy).length === 0 ? undefined : copy;
 }
 
 // Registry credentials are write-only: Backboard masks them in config reads unless
@@ -641,6 +656,9 @@ function normalizeForDiff(field: string, value: unknown): unknown {
     copy.multiRegionConfig = normalizeMultiRegionConfig(copy.multiRegionConfig);
     if (isDefaultMultiRegionConfig(copy.multiRegionConfig)) delete copy.multiRegionConfig;
     if (copy.multiRegionConfig != null && typeof copy.multiRegionConfig === "object" && !Array.isArray(copy.multiRegionConfig) && Object.keys(copy.multiRegionConfig).length === 0) delete copy.multiRegionConfig;
+    // The assignment above can leave the key holding undefined, making an
+    // otherwise-empty deploy compare unequal to an absent one
+    if (copy.multiRegionConfig === undefined) delete copy.multiRegionConfig;
   }
 
   return Object.keys(copy).length === 0 ? undefined : copy;

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { bucket, createRailwayContext, diffGraphs, environmentConfigToGraph, evaluateRailwayFile, github, graphToEnvironmentConfig, image, postgres, project, service, volume } from "../src/index.js";
+import { bucket, createRailwayContext, diffGraphs, environmentConfigToGraph, evaluateRailwayFile, github, graphToEnvironmentConfig, image, postgres, project, redis, service, volume } from "../src/index.js";
 import { projectDefinitionToGraph } from "../src/iac/compiler.js";
 import { changeSetToEnvironmentPatch, RAILWAY_CHANGE_SET_VERSION, SUPPORTED_CHANGE_SET_VERSIONS, renderChangeSet, type SetVariableChange } from "../src/iac/change-set.js";
 import { runRailwayIac } from "../src/iac/runner.js";
@@ -225,6 +225,42 @@ describe("Railway IaC", () => {
     const current = environmentConfigToGraph(graphToEnvironmentConfig(desired), { projectName: "app" });
 
     expect(diffGraphs({ current, desired }).changes).toEqual([]);
+  });
+
+  it("does not churn a template-realized database startCommand", () => {
+    // The redis template sets a startCommand (volume perms + --requirepass) that
+    // redis() never authors; planning its unset would strip auth from a live db.
+    const current = environmentConfigToGraph({
+      services: {
+        cache: {
+          source: { image: "ghcr.io/railwayapp-templates/redis:8" },
+          deploy: {
+            requiredMountPath: "/data",
+            startCommand:
+              '/bin/sh -c "exec docker-entrypoint.sh redis-server --requirepass $REDIS_PASSWORD"',
+          },
+        },
+      },
+    }, { projectName: "app", serviceNamesById: { cache: "cache" } });
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [redis("cache")],
+    }));
+
+    expect(diffGraphs({ current, desired }).changes).toEqual([]);
+  });
+
+  it("still diffs an authored database startCommand", () => {
+    const node = (start: string) => projectDefinitionToGraph(project("app", {
+      resources: [{
+        ...postgres("db"),
+        deploy: { startCommand: start },
+      }],
+    }));
+
+    const changes = diffGraphs({ current: node("old-start"), desired: node("new-start") }).changes;
+    expect(changes).toMatchObject([
+      { kind: "resource.update", address: "database.db", field: "deploy" },
+    ]);
   });
 
   it("never plans deletion of a database-realized volume", () => {
