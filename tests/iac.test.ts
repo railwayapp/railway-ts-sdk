@@ -249,6 +249,54 @@ describe("Railway IaC", () => {
     expect(diffGraphs({ current, desired }).changes).toEqual([]);
   });
 
+  it("hoists inline volume config onto the synthesized resource", () => {
+    // A volume declared only inside volumeMounts used to compile to a bare
+    // stub — its authored sizeMB/region silently dropped.
+    const graph = projectDefinitionToGraph(project("app", {
+      resources: [service("web", {
+        volumeMounts: { "/data": volume("data", { sizeMB: 4096, region: "europe-west4" }) },
+      })],
+    }));
+
+    const vol = graph.resources.find((r) => r.address === "volume.data") as { config?: unknown };
+    expect(vol?.config).toEqual({ sizeMB: 4096, region: "europe-west4" });
+    // The compile-time carrier must not leak into the wire graph
+    expect(JSON.stringify(graph)).not.toContain("volumeConfig");
+  });
+
+  it("does not churn platform-realized volume alert config", () => {
+    // Backboard serializes alert thresholds and allowOnlineResize on every
+    // volume; authored volume() declarations don't write them.
+    const current = environmentConfigToGraph({
+      services: {
+        web: {
+          source: { image: "ghcr.io/acme/api:1.2.3" },
+          volumeMounts: { "vol-1": { mountPath: "/data" } },
+        },
+      },
+      volumes: {
+        "vol-1": {
+          sizeMB: 1024,
+          region: "us-west2",
+          alerts: { usage: { "80": {}, "95": {}, "100": {} } },
+          allowOnlineResize: true,
+        },
+      },
+    }, {
+      projectName: "app",
+      serviceNamesById: { web: "web" },
+      volumeNamesById: { "vol-1": "data" },
+    });
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [service("web", {
+        source: image("ghcr.io/acme/api:1.2.3"),
+        volumeMounts: { "/data": volume("data", { sizeMB: 1024, region: "us-west2" }) },
+      })],
+    }));
+
+    expect(diffGraphs({ current, desired }).changes).toEqual([]);
+  });
+
   it("still diffs an authored database startCommand", () => {
     const node = (start: string) => projectDefinitionToGraph(project("app", {
       resources: [{

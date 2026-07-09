@@ -19,7 +19,14 @@ export function projectDefinitionToGraph(definition: ProjectDefinition): Railway
     for (const attachment of Object.values(resource.volumeAttachments ?? {})) {
       if (resourcesByAddress.has(attachment.volume)) continue;
       const volumeName = attachment.volume.split(".").slice(1).join(".");
-      resources.push({ address: attachment.volume as `volume.${string}`, type: "volume", name: volumeName });
+      // Inline-declared volumes arrive only through the attachment; hoist their
+      // authored config onto the synthesized resource or sizeMB/region are lost.
+      resources.push({
+        address: attachment.volume as `volume.${string}`,
+        type: "volume",
+        name: volumeName,
+        ...(attachment.volumeConfig ? { config: attachment.volumeConfig } : {}),
+      });
       resourcesByAddress.add(attachment.volume);
     }
   }
@@ -38,9 +45,20 @@ export function projectDefinitionToGraph(definition: ProjectDefinition): Railway
     version: RAILWAY_GRAPH_VERSION,
     project: { name: definition.name },
     environments: (definition.environments ?? []).map(name => ({ name })),
-    resources: resources.map(stripRuntimeHelpers),
+    resources: resources.map(stripRuntimeHelpers).map(dropAttachmentVolumeConfig),
     edges,
   };
+}
+
+// volumeConfig is a compile-time carrier (see the hoist above), not wire format.
+// Stripped on copies — the input nodes are the user's objects and may be recompiled.
+function dropAttachmentVolumeConfig(resource: ResourceNode): ResourceNode {
+  const attachments = (resource as ServiceNode).volumeAttachments;
+  if (!attachments) return resource;
+  const volumeAttachments = Object.fromEntries(
+    Object.entries(attachments).map(([name, { volumeConfig: _volumeConfig, ...attachment }]) => [name, attachment]),
+  ) as ServiceNode["volumeAttachments"];
+  return { ...resource, volumeAttachments } as ResourceNode;
 }
 
 function stripRuntimeHelpers<T>(value: T): T {

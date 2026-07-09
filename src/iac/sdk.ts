@@ -350,7 +350,11 @@ function normalizeVolumeMounts(volumeMounts: ServiceConfigInput["volumeMounts"])
   const attachments: NonNullable<ServiceNode["volumeAttachments"]> = {};
   for (const [key, value] of Object.entries(volumeMounts)) {
     if (value && typeof value === "object" && "type" in value && value.type === "volume") {
-      attachments[value.name] = { volume: value.address, mountPath: key };
+      attachments[value.name] = {
+        volume: value.address,
+        mountPath: key,
+        ...(value.config ? { volumeConfig: value.config } : {}),
+      };
       continue;
     }
     rawMounts[key] = value as VolumeMount | null;
