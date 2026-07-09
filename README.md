@@ -334,11 +334,17 @@ then an environment variable, then a default. Pass explicit values to override.
 
 | Option | Environment variable | Default |
 | --- | --- | --- |
-| `token` | `RAILWAY_API_TOKEN` | _(required)_ |
+| `token` | `RAILWAY_TOKEN` (project token, recommended), then `RAILWAY_API_TOKEN` | _(required)_ |
 | `environmentId` | `RAILWAY_ENVIRONMENT_ID` | _(required)_ |
 | `endpoint` | `RAILWAY_GRAPHQL_ENDPOINT` | `https://backboard.railway.com/graphql/v2` |
 | `fetch` | n/a | `globalThis.fetch` |
 | `verbose` | `RAILWAY_VERBOSE` | `false` |
+
+A token read from `RAILWAY_TOKEN` is treated as a [project token](https://docs.railway.com/integrations/api#project-token)
+(`authType: "project-token"`), which scopes access to one project/environment and
+lets feature flags infer their scope automatically. `RAILWAY_API_TOKEN` (bearer
+account/workspace token) is the fallback. Explicit tokens default to bearer; pass
+`authType: "project-token"` when supplying a project token explicitly.
 
 ```ts
 const sandbox = await Sandbox.create({

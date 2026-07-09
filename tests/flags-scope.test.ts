@@ -34,6 +34,15 @@ describe("resolveFlagsRegistryOwner", () => {
     vi.unstubAllEnvs();
   });
 
+  it("defers to Backboard when RAILWAY_TOKEN provides a project token", () => {
+    vi.stubEnv("RAILWAY_TOKEN", "project_token_value");
+    vi.stubEnv(RAILWAY_PROJECT_ID_ENV, "ignored");
+    expect(
+      resolveFlagsRegistryOwner({}, normalizeRailwayClientConfig()),
+    ).toBeUndefined();
+    vi.unstubAllEnvs();
+  });
+
   it("defers to Backboard for project tokens", () => {
     vi.stubEnv(RAILWAY_PROJECT_ID_ENV, "ignored");
     expect(

@@ -8,6 +8,7 @@ import type {
 
 /** Neutralizes ambient RAILWAY_* env vars so tests resolve config deterministically. */
 export function clearRailwayEnv(): void {
+  vi.stubEnv("RAILWAY_TOKEN", "");
   vi.stubEnv("RAILWAY_API_TOKEN", "");
   vi.stubEnv("RAILWAY_ENVIRONMENT_ID", "");
   vi.stubEnv("RAILWAY_GRAPHQL_ENDPOINT", "");
