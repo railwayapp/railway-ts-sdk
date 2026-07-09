@@ -150,6 +150,24 @@ export function diffGraphs({ current, desired, revealValues = false }: { current
 
   for (const resource of current.resources) {
     if (desiredByAddress.has(resource.address)) continue;
+    // Volumes hold data, and database volumes are realized by Backboard without ever
+    // appearing in authored config — a plan against a postgres() database would otherwise
+    // delete its volume on every apply. Never plan an implicit volume deletion; deleting
+    // data stays a dashboard operation. Warn when a still-mounted volume vanished from
+    // the config so the omission is visible.
+    if (resource.type === "volume") {
+      const mountedByPersistingService = current.edges.some(
+        edge => edge.type === "mount" && edge.to === resource.address && desiredByAddress.has(edge.from),
+      );
+      if (mountedByPersistingService) {
+        diagnostics.push({
+          severity: "warning",
+          path: `resources.${resource.address}`,
+          message: `Volume ${resource.name} exists on Railway but is not declared in the config. Volumes are never deleted by config apply; delete it from the dashboard if that is intended.`,
+        });
+      }
+      continue;
+    }
     changes.push({
       kind: "resource.delete",
       address: resource.address,
