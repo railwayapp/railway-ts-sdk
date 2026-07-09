@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { bucket, createRailwayContext, diffGraphs, environmentConfigToGraph, evaluateRailwayFile, github, graphToEnvironmentConfig, image, postgres, project, service, volume } from "../src/index.js";
+import { bucket, createRailwayContext, diffGraphs, environmentConfigToGraph, evaluateRailwayFile, github, graphToEnvironmentConfig, image, postgres, project, redis, service, volume } from "../src/index.js";
 import { projectDefinitionToGraph } from "../src/iac/compiler.js";
 import { changeSetToEnvironmentPatch, RAILWAY_CHANGE_SET_VERSION, SUPPORTED_CHANGE_SET_VERSIONS, renderChangeSet, type SetVariableChange } from "../src/iac/change-set.js";
 import { runRailwayIac } from "../src/iac/runner.js";
@@ -225,6 +225,90 @@ describe("Railway IaC", () => {
     const current = environmentConfigToGraph(graphToEnvironmentConfig(desired), { projectName: "app" });
 
     expect(diffGraphs({ current, desired }).changes).toEqual([]);
+  });
+
+  it("does not churn a template-realized database startCommand", () => {
+    // The redis template sets a startCommand (volume perms + --requirepass) that
+    // redis() never authors; planning its unset would strip auth from a live db.
+    const current = environmentConfigToGraph({
+      services: {
+        cache: {
+          source: { image: "ghcr.io/railwayapp-templates/redis:8" },
+          deploy: {
+            requiredMountPath: "/data",
+            startCommand:
+              '/bin/sh -c "exec docker-entrypoint.sh redis-server --requirepass $REDIS_PASSWORD"',
+          },
+        },
+      },
+    }, { projectName: "app", serviceNamesById: { cache: "cache" } });
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [redis("cache")],
+    }));
+
+    expect(diffGraphs({ current, desired }).changes).toEqual([]);
+  });
+
+  it("hoists inline volume config onto the synthesized resource", () => {
+    // A volume declared only inside volumeMounts used to compile to a bare
+    // stub — its authored sizeMB/region silently dropped.
+    const graph = projectDefinitionToGraph(project("app", {
+      resources: [service("web", {
+        volumeMounts: { "/data": volume("data", { sizeMB: 4096, region: "europe-west4" }) },
+      })],
+    }));
+
+    const vol = graph.resources.find((r) => r.address === "volume.data") as { config?: unknown };
+    expect(vol?.config).toEqual({ sizeMB: 4096, region: "europe-west4" });
+    // The compile-time carrier must not leak into the wire graph
+    expect(JSON.stringify(graph)).not.toContain("volumeConfig");
+  });
+
+  it("does not churn platform-realized volume alert config", () => {
+    // Backboard serializes alert thresholds and allowOnlineResize on every
+    // volume; authored volume() declarations don't write them.
+    const current = environmentConfigToGraph({
+      services: {
+        web: {
+          source: { image: "ghcr.io/acme/api:1.2.3" },
+          volumeMounts: { "vol-1": { mountPath: "/data" } },
+        },
+      },
+      volumes: {
+        "vol-1": {
+          sizeMB: 1024,
+          region: "us-west2",
+          alerts: { usage: { "80": {}, "95": {}, "100": {} } },
+          allowOnlineResize: true,
+        },
+      },
+    }, {
+      projectName: "app",
+      serviceNamesById: { web: "web" },
+      volumeNamesById: { "vol-1": "data" },
+    });
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [service("web", {
+        source: image("ghcr.io/acme/api:1.2.3"),
+        volumeMounts: { "/data": volume("data", { sizeMB: 1024, region: "us-west2" }) },
+      })],
+    }));
+
+    expect(diffGraphs({ current, desired }).changes).toEqual([]);
+  });
+
+  it("still diffs an authored database startCommand", () => {
+    const node = (start: string) => projectDefinitionToGraph(project("app", {
+      resources: [{
+        ...postgres("db"),
+        deploy: { startCommand: start },
+      }],
+    }));
+
+    const changes = diffGraphs({ current: node("old-start"), desired: node("new-start") }).changes;
+    expect(changes).toMatchObject([
+      { kind: "resource.update", address: "database.db", field: "deploy" },
+    ]);
   });
 
   it("never plans deletion of a database-realized volume", () => {

@@ -62,7 +62,9 @@ export interface ServiceNode extends GraphResourceBase {
   networking?: ServiceNetworking;
   variables?: Record<string, VariableValue>;
   volumeMounts?: Record<string, VolumeMount | null>;
-  volumeAttachments?: Record<string, { volume: ResourceAddress; mountPath: string; backupSchedules?: VolumeMount["backupSchedules"] }>;
+  // volumeConfig carries an inline-declared volume's config to the compiler, which
+  // hoists it onto the synthesized volume resource and strips it from the wire graph.
+  volumeAttachments?: Record<string, { volume: ResourceAddress; mountPath: string; backupSchedules?: VolumeMount["backupSchedules"]; volumeConfig?: VolumeConfig }>;
   configFile?: string;
   parentServiceId?: string;
   groupId?: string;

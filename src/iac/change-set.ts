@@ -378,20 +378,22 @@ function singleDeployRegion(deploy: ServiceNode["deploy"]): string | undefined {
 // region pin — so we never plan an accidental unmount or a churn "move to default region" for a
 // database that simply didn't pin one.
 function diffVolumeConfig({ previous, resource, changes }: { previous: VolumeNode; resource: VolumeNode; changes: RailwayChange[] }) {
-  const before = normalizeForDiff("config", previous.config);
+  const previousConfig = dropUnauthoredPlatformFields(previous.config, resource.config, ["alerts", "allowOnlineResize"]) as VolumeNode["config"];
+  const before = normalizeForDiff("config", previousConfig);
   const after = normalizeForDiff("config", resource.config);
   if (stableStringify(before) === stableStringify(after)) return;
-  const previousSize = previous.config?.sizeMB;
+  const previousSize = previousConfig?.sizeMB;
   const desiredSize = resource.config?.sizeMB;
-  const severity = previous.config?.region !== resource.config?.region || (typeof previousSize === "number" && typeof desiredSize === "number" && desiredSize < previousSize) ? "destructive" : "safe";
+  const severity = previousConfig?.region !== resource.config?.region || (typeof previousSize === "number" && typeof desiredSize === "number" && desiredSize < previousSize) ? "destructive" : "safe";
   const summary = typeof previousSize === "number" && typeof desiredSize === "number" && desiredSize > previousSize
     ? `Resize volume ${resource.name} from ${previousSize}MB to ${desiredSize}MB`
     : summaryForField(resource, "config", before, after);
-  changes.push(update(resource.address, "config", previous.config, resource.config, summary, changedLeafPaths(before, after, "config"), severity));
+  changes.push(update(resource.address, "config", previousConfig, resource.config, summary, changedLeafPaths(before, after, "config"), severity));
 }
 
 function diffDatabaseDeploy({ previous, resource, changes }: { previous: DatabaseNode; resource: DatabaseNode; changes: RailwayChange[] }) {
-  const [previousDeploy, resourceDeploy] = stripWriteOnlyRegistryCredentials(previous.deploy, resource.deploy);
+  let [previousDeploy, resourceDeploy] = stripWriteOnlyRegistryCredentials(previous.deploy, resource.deploy);
+  previousDeploy = dropPlatformStartCommand(previousDeploy, resourceDeploy);
   const previousRegion = databaseRegion(previous);
   const desiredRegion = databaseRegion(resource);
   if (desiredRegion !== undefined && desiredRegion !== previousRegion) {
@@ -410,6 +412,29 @@ function diffDatabaseDeploy({ previous, resource, changes }: { previous: Databas
   const after = normalizeDatabaseDeploy(resourceDeploy);
   if (stableStringify(before) === stableStringify(after)) return;
   changes.push(update(resource.address, "deploy", previousDeploy, resourceDeploy, summaryForField(resource, "deploy", before, after), changedLeafPaths(before, after, "deploy")));
+}
+
+// Fields Backboard realizes outside authored config (template start commands with
+// auth flags, volume alert thresholds, resize capability). Diffing them against a
+// config that never authored them plans unsets that strip live behavior — so a
+// current-side value is only diffed when the author wrote one.
+function dropUnauthoredPlatformFields(previousValue: unknown, desiredValue: unknown, fields: string[]): unknown {
+  if (previousValue == null || typeof previousValue !== "object") return previousValue;
+  const desired = (desiredValue ?? {}) as Record<string, unknown>;
+  const copy = { ...(previousValue as Record<string, unknown>) };
+  let changed = false;
+  for (const field of fields) {
+    if (field in copy && desired[field] == null) {
+      delete copy[field];
+      changed = true;
+    }
+  }
+  if (!changed) return previousValue;
+  return Object.keys(copy).length === 0 ? undefined : copy;
+}
+
+function dropPlatformStartCommand(previousDeploy: unknown, resourceDeploy: unknown): unknown {
+  return dropUnauthoredPlatformFields(previousDeploy, resourceDeploy, ["startCommand"]);
 }
 
 // Registry credentials are write-only: Backboard masks them in config reads unless
@@ -641,6 +666,9 @@ function normalizeForDiff(field: string, value: unknown): unknown {
     copy.multiRegionConfig = normalizeMultiRegionConfig(copy.multiRegionConfig);
     if (isDefaultMultiRegionConfig(copy.multiRegionConfig)) delete copy.multiRegionConfig;
     if (copy.multiRegionConfig != null && typeof copy.multiRegionConfig === "object" && !Array.isArray(copy.multiRegionConfig) && Object.keys(copy.multiRegionConfig).length === 0) delete copy.multiRegionConfig;
+    // The assignment above can leave the key holding undefined, making an
+    // otherwise-empty deploy compare unequal to an absent one
+    if (copy.multiRegionConfig === undefined) delete copy.multiRegionConfig;
   }
 
   return Object.keys(copy).length === 0 ? undefined : copy;
