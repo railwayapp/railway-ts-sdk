@@ -132,6 +132,11 @@ class FlagsReadSurface {
     return this.evaluateJson<T>(name, ctx, fallback).value;
   }
 
+  /** Untyped read — returns the resolved value as `unknown` (assert at the call site). */
+  get(name: string, ctx?: Context, fallback?: unknown): unknown {
+    return this.evaluate(name, ctx, fallback).value;
+  }
+
   evaluate(name: string, ctx?: Context, fallback?: unknown): Evaluation<unknown> {
     this.assertReady();
     return this.registry.evaluate(
@@ -269,6 +274,10 @@ class FlagsModule {
 
   getJson<T = Record<string, never>>(name: string, ctx?: Context, fallback?: T): T {
     return this.#defaultSurface().getJson<T>(name, ctx, fallback);
+  }
+
+  get(name: string, ctx?: Context, fallback?: unknown): unknown {
+    return this.#defaultSurface().get(name, ctx, fallback);
   }
 
   evaluate(name: string, ctx?: Context, fallback?: unknown): Evaluation<unknown> {
