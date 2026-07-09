@@ -90,8 +90,48 @@ describe("configuration", () => {
     }).catch(error => error);
 
     expect(error).toBeInstanceOf(RailwayAuthError);
-    expect(error).toMatchObject({ variable: "RAILWAY_API_TOKEN" });
+    expect(error).toMatchObject({
+      variable: "RAILWAY_TOKEN (project token) or RAILWAY_API_TOKEN",
+    });
     expect(mock.calls).toHaveLength(0);
+  });
+
+  it("prefers RAILWAY_TOKEN (project token) over RAILWAY_API_TOKEN", async () => {
+    vi.stubEnv("RAILWAY_TOKEN", "project_token_value");
+    vi.stubEnv("RAILWAY_API_TOKEN", "api_token_value");
+    vi.stubEnv("RAILWAY_ENVIRONMENT_ID", "env_environment");
+    const mock = createFetchMock([{ data: { sandboxCreate: sandboxInfo() } }]);
+
+    await Sandbox.create({ fetch: mock.fetch });
+
+    expect(header(mock.calls[0]?.init, "project-access-token")).toBe(
+      "project_token_value",
+    );
+    expect(header(mock.calls[0]?.init, "Authorization")).toBeNull();
+  });
+
+  it("keeps bearer auth for explicit tokens and RAILWAY_API_TOKEN", async () => {
+    vi.stubEnv("RAILWAY_API_TOKEN", "api_token_value");
+    vi.stubEnv("RAILWAY_ENVIRONMENT_ID", "env_environment");
+    const mock = createFetchMock([{ data: { sandboxCreate: sandboxInfo() } }]);
+
+    await Sandbox.create({ fetch: mock.fetch });
+
+    expect(header(mock.calls[0]?.init, "Authorization")).toBe(
+      "Bearer api_token_value",
+    );
+  });
+
+  it("lets an explicit authType override the RAILWAY_TOKEN default", async () => {
+    vi.stubEnv("RAILWAY_TOKEN", "some_token");
+    vi.stubEnv("RAILWAY_ENVIRONMENT_ID", "env_environment");
+    const mock = createFetchMock([{ data: { sandboxCreate: sandboxInfo() } }]);
+
+    await Sandbox.create({ authType: "bearer", fetch: mock.fetch });
+
+    expect(header(mock.calls[0]?.init, "Authorization")).toBe(
+      "Bearer some_token",
+    );
   });
 
   it("throws RailwayAuthError when the environment id is missing", async () => {

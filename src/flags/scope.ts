@@ -8,9 +8,9 @@ export class FlagsScopeError extends RailwayError {
   constructor() {
     super(
       "Could not resolve feature flag scope. Use one of:\n" +
-        "  • scope: { workspaceId: \"...\" } for workspace-scoped flags\n" +
+        "  • set RAILWAY_TOKEN to a Railway project token (recommended — project scope is automatic)\n" +
         "  • scope: { projectId: \"...\" } or set RAILWAY_PROJECT_ID for project-scoped flags\n" +
-        "  • authType: \"project-token\" with a Railway project token (automatic project scope)",
+        "  • scope: { workspaceId: \"...\" } for workspace-scoped flags",
     );
   }
 }

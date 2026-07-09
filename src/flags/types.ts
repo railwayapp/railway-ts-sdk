@@ -131,9 +131,13 @@ export type FlagsScope =
   | { projectId: string; workspaceId?: never };
 
 export interface FlagsInitOptions {
-  /** Override token for off-platform/local dev. Defaults to `RAILWAY_API_TOKEN`. */
+  /**
+   * Override token for off-platform/local dev. By default the SDK reads
+   * `RAILWAY_TOKEN` (project token, recommended) and falls back to
+   * `RAILWAY_API_TOKEN` (bearer account/workspace token).
+   */
   token?: string;
-  /** Flag scope. Omit on Railway to use `RAILWAY_PROJECT_ID`; use a project token for automatic project scope. */
+  /** Flag scope. Omit with a project token (scope is inferred) or on Railway with `RAILWAY_PROJECT_ID`. */
   scope?: FlagsScope;
   /** Disable background polling after the initial load. */
   refresh?: false;
@@ -141,7 +145,11 @@ export interface FlagsInitOptions {
   timeoutMs?: number;
   /** Reject `init()` when the first registry sync fails. */
   required?: true;
-  /** Auth header mode. Use `project-token` when passing a Railway project token. */
+  /**
+   * Auth header mode. Tokens read from `RAILWAY_TOKEN` default to
+   * `project-token`; explicit tokens and `RAILWAY_API_TOKEN` default to
+   * `bearer`. Set this only when passing a project token explicitly.
+   */
   authType?: RailwayAuthType;
   endpoint?: string;
   fetch?: typeof fetch;

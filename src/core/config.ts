@@ -4,7 +4,8 @@ import { createLogger, type Logger } from "./logger.js";
 export const DEFAULT_RAILWAY_GRAPHQL_ENDPOINT =
   "https://backboard.railway.com/graphql/v2";
 
-const RAILWAY_TOKEN_ENV = "RAILWAY_API_TOKEN";
+const RAILWAY_PROJECT_TOKEN_ENV = "RAILWAY_TOKEN";
+const RAILWAY_API_TOKEN_ENV = "RAILWAY_API_TOKEN";
 const RAILWAY_ENVIRONMENT_ENV = "RAILWAY_ENVIRONMENT_ID";
 const RAILWAY_ENDPOINT_ENV = "RAILWAY_GRAPHQL_ENDPOINT";
 const RAILWAY_TCP_PROXY_WS_ENV = "RAILWAY_TCP_PROXY_WS_ENDPOINT";
@@ -66,8 +67,13 @@ export interface NormalizedRailwayClientConfig {
 export function normalizeRailwayClientConfig(
   config: RailwayClientConfig = {},
 ): NormalizedRailwayClientConfig {
-  const token = firstNonEmpty(config.token, readEnv(RAILWAY_TOKEN_ENV));
-  if (!token) throw new RailwayAuthError(RAILWAY_TOKEN_ENV);
+  const resolved = resolveToken(config);
+  if (!resolved) {
+    throw new RailwayAuthError(
+      `${RAILWAY_PROJECT_TOKEN_ENV} (project token) or ${RAILWAY_API_TOKEN_ENV}`,
+    );
+  }
+  const { token, defaultAuthType } = resolved;
 
   const fetchImpl = config.fetch ?? globalThis.fetch;
   if (!fetchImpl) {
@@ -88,7 +94,7 @@ export function normalizeRailwayClientConfig(
   const verbose = config.verbose ?? isTruthyEnv(readEnv(RAILWAY_VERBOSE_ENV));
   const normalized: NormalizedRailwayClientConfig = {
     token,
-    authType: config.authType ?? "bearer",
+    authType: config.authType ?? defaultAuthType,
     endpoint,
     fetch: fetchImpl,
     webSocketImpl: config.webSocketImpl,
@@ -99,6 +105,30 @@ export function normalizeRailwayClientConfig(
     `config resolved: endpoint=${endpoint} authType=${normalized.authType}`,
   );
   return normalized;
+}
+
+/**
+ * Token resolution order: explicit config → `RAILWAY_TOKEN` (project token,
+ * the recommended on-platform credential) → `RAILWAY_API_TOKEN` (bearer
+ * account/workspace token, last resort). A token sourced from `RAILWAY_TOKEN`
+ * defaults `authType` to `project-token`; everything else defaults to
+ * `bearer`. An explicit `authType` always wins.
+ */
+function resolveToken(
+  config: RailwayClientConfig,
+): { token: string; defaultAuthType: RailwayAuthType } | undefined {
+  const explicit = firstNonEmpty(config.token);
+  if (explicit) return { token: explicit, defaultAuthType: "bearer" };
+
+  const projectToken = firstNonEmpty(readEnv(RAILWAY_PROJECT_TOKEN_ENV));
+  if (projectToken) {
+    return { token: projectToken, defaultAuthType: "project-token" };
+  }
+
+  const apiToken = firstNonEmpty(readEnv(RAILWAY_API_TOKEN_ENV));
+  if (apiToken) return { token: apiToken, defaultAuthType: "bearer" };
+
+  return undefined;
 }
 
 /**
