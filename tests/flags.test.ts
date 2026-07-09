@@ -193,6 +193,7 @@ describe("flags module", () => {
 
     expect(flags.getBoolean("checkout-v2", { plan: "enterprise" })).toBe(true);
     expect(flags.getBoolean("checkout-v2", { plan: "free" })).toBe(false);
+    expect(flags.get("checkout-v2", { plan: "enterprise" })).toBe(true);
     expect(flags.evaluateBoolean("checkout-v2", { plan: "free" }).reason).toBe("NO_MATCH");
     expect(flags.list()).toEqual(["checkout-v2"]);
     expect(flags.synced).toBe(true);
