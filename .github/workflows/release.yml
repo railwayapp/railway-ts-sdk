@@ -67,7 +67,7 @@ jobs:
         run: mise run package-check
 
       - name: Use npm with Trusted Publisher support
-        run: npm install -g npm@latest
+        run: npm install -g npm@11
 
       - name: Publish to npm
         run: npm publish --access public
