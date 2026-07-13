@@ -348,10 +348,11 @@ function diffTopLevelField({ previous, resource, field, changes }: { previous: R
 }
 
 function diffServiceDeploy({ previous, resource, changes }: { previous: ServiceNode; resource: ServiceNode; changes: RailwayChange[] }) {
-  const [before, after] = stripWriteOnlyRegistryCredentials(
-    previous.deploy,
-    serviceDeployWithCurrentRegion(previous.deploy, resource.deploy),
-  );
+  const desiredDeploy = serviceDeployWithCurrentRegion(previous.deploy, resource.deploy);
+  const switchingFromImageToGitHub = previous.source?.type === "image" && resource.source?.type === "github";
+  const [before, after] = switchingFromImageToGitHub && previous.deploy?.registryCredentials !== undefined
+    ? [withoutRegistryCredentials(previous.deploy), { ...(desiredDeploy ?? {}), registryCredentials: null }]
+    : stripWriteOnlyRegistryCredentials(previous.deploy, desiredDeploy);
   const normalizedBefore = normalizeForDiff("deploy", before);
   const normalizedAfter = normalizeForDiff("deploy", after);
   if (stableStringify(normalizedBefore) === stableStringify(normalizedAfter)) return;
@@ -468,12 +469,25 @@ function stripWriteOnlyRegistryCredentials(before: unknown, after: unknown): [un
     return Object.keys(copy).length === 0 ? undefined : copy;
   };
   const desiredSide = afterCredentials === undefined ? after : withCredentials(after, desiredCredentials);
+  // A mixed sentinel/real object can only come from editing a pulled config.
+  // Keep the real fields even though the remote side is masked; otherwise a
+  // partial rotation is silently treated as already applied.
+  if (desiredCredentials !== undefined && isMaskedRegistryCredentials(afterCredentials)) {
+    return [withCredentials(before, undefined), desiredSide];
+  }
   if (desiredCredentials !== undefined && !isMaskedRegistryCredentials(beforeCredentials)) {
     return [before, desiredSide];
   }
   const strippedBefore = beforeCredentials === undefined ? before : withCredentials(before, undefined);
   const strippedAfter = desiredCredentials === undefined ? desiredSide : withCredentials(desiredSide, undefined);
   return [strippedBefore, strippedAfter];
+}
+
+function withoutRegistryCredentials(deploy: unknown): unknown {
+  if (deploy == null || typeof deploy !== "object") return deploy;
+  const copy = { ...(deploy as Record<string, unknown>) };
+  delete copy.registryCredentials;
+  return Object.keys(copy).length === 0 ? undefined : copy;
 }
 
 // Remove sentinel-valued fields; undefined when nothing real remains.

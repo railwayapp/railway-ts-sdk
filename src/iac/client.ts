@@ -19,6 +19,7 @@ export interface CurrentEnvironmentResult {
   serviceNamesById: Record<string, string>;
   volumeNamesById: Record<string, string>;
   bucketNamesById: Record<string, string>;
+  bucketGroupIdsById: Record<string, string>;
   customDomainsByServiceId: Record<string, Record<string, { port?: number }>>;
 }
 
@@ -54,7 +55,7 @@ export interface ChangeSetApplyResult {
 
 export interface ProjectService { id: string; name: string }
 export interface ProjectVolume { id: string; name?: string | null; serviceId?: string | null }
-export interface ProjectBucket { id: string; name: string }
+export interface ProjectBucket { id: string; name: string; groupId?: string | null }
 
 export interface EnsuredGraphResources {
   serviceIdsByName: Record<string, string>;
@@ -90,6 +91,7 @@ export class IacClient {
       serviceNamesById: Object.fromEntries(services.map(service => [service.id, service.name])),
       volumeNamesById: Object.fromEntries(volumes.flatMap(volume => volume.name ? [[volume.id, volume.name] as const] : [])),
       bucketNamesById: Object.fromEntries(buckets.map(bucket => [bucket.id, bucket.name])),
+      bucketGroupIdsById: Object.fromEntries(buckets.flatMap(bucket => bucket.groupId ? [[bucket.id, bucket.groupId] as const] : [])),
       customDomainsByServiceId,
       ...(data.environment.configEtag ? { configEtag: data.environment.configEtag } : {}),
     };
@@ -125,7 +127,7 @@ export class IacClient {
 
   async getProjectBuckets(projectId: string): Promise<ProjectBucket[]> {
     const data = await gql<{ project: { buckets: { edges: Array<{ node: ProjectBucket }> } } }, { projectId: string }>(this.#config, `query IacProjectBuckets($projectId: String!) {
-      project(id: $projectId) { buckets(first: 1000) { edges { node { id name } } } }
+      project(id: $projectId) { buckets(first: 1000) { edges { node { id name groupId } } } }
     }`, { projectId });
     return data.project.buckets.edges.map(edge => edge.node);
   }
@@ -134,7 +136,7 @@ export class IacClient {
     const entries = await Promise.all(services.map(async service => {
       const data = await gql<{ domains: { customDomains: Array<{ domain: string; targetPort?: number | null }> } }, { projectId: string; environmentId: string; serviceId: string }>(this.#config, `query IacServiceDomains($projectId: String!, $environmentId: String!, $serviceId: String!) {
         domains(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId) { customDomains { domain targetPort } }
-      }`, { projectId, environmentId, serviceId: service.id }).catch(() => ({ domains: { customDomains: [] } }));
+      }`, { projectId, environmentId, serviceId: service.id });
       return [service.id, Object.fromEntries(data.domains.customDomains.map(domain => [domain.domain, domain.targetPort == null ? {} : { port: domain.targetPort }]))] as const;
     }));
     return Object.fromEntries(entries.filter(([, domains]) => Object.keys(domains).length > 0));
