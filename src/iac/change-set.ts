@@ -349,8 +349,8 @@ function diffTopLevelField({ previous, resource, field, changes }: { previous: R
 
 function diffServiceDeploy({ previous, resource, changes }: { previous: ServiceNode; resource: ServiceNode; changes: RailwayChange[] }) {
   const desiredDeploy = serviceDeployWithCurrentRegion(previous.deploy, resource.deploy);
-  const switchingFromImageToGitHub = previous.source?.type === "image" && resource.source?.type === "github";
-  const [before, after] = switchingFromImageToGitHub && previous.deploy?.registryCredentials !== undefined
+  const switchingAwayFromImage = previous.source?.type === "image" && resource.source?.type !== "image";
+  const [before, after] = switchingAwayFromImage && previous.deploy?.registryCredentials !== undefined
     ? [withoutRegistryCredentials(previous.deploy), { ...(desiredDeploy ?? {}), registryCredentials: null }]
     : stripWriteOnlyRegistryCredentials(previous.deploy, desiredDeploy);
   const normalizedBefore = normalizeForDiff("deploy", before);

@@ -578,6 +578,27 @@ describe("Railway IaC", () => {
       ]);
     });
 
+    it("clears credentials when an image source is removed", () => {
+      const current = environmentConfigToGraph({
+        services: { web: {
+          source: { image: "ghcr.io/acme/api:1.2.3" },
+          deploy: { registryCredentials: { username: "*****", password: "*****" } },
+        } },
+      }, { projectName: "app" });
+      const desired = projectDefinitionToGraph(project("app", {
+        resources: [service("web")],
+      }));
+
+      expect(diffGraphs({ current, desired }).changes).toContainEqual(
+        expect.objectContaining({
+          kind: "resource.update",
+          address: "service.web",
+          field: "deploy",
+          after: { registryCredentials: null },
+        }),
+      );
+    });
+
     it("excludes masked credentials from the change payload of unrelated deploy edits", () => {
       const current = environmentConfigToGraph({
         services: { web: {
