@@ -102,6 +102,7 @@ export function diffGraphs({ current, desired, revealValues = false }: { current
       continue;
     }
     if (!previous) {
+      diagnoseUnsupportedCustomDomains({ resource, diagnostics });
       changes.push({
         kind: "resource.create",
         address: resource.address,
@@ -129,7 +130,7 @@ export function diffGraphs({ current, desired, revealValues = false }: { current
       diffTopLevelField({ previous, resource, field: "deploy", changes });
     }
     diffTopLevelField({ previous, resource, field: "groupId", changes });
-    diffNetworking({ previous, resource, changes });
+    diffNetworking({ previous, resource, changes, diagnostics });
     // Volume lifecycle is not part of v0 authoring. Never plan an accidental unmount just
     // because imported config omitted a Railway-owned volume id.
     if (previous.type === "bucket" && resource.type === "bucket" && bucketRegion(previous) !== bucketRegion(resource)) {
@@ -299,30 +300,36 @@ function diffVariables({ previous, resource, changes, resourcesByAddress, reveal
   }
 }
 
-function diffNetworking({ previous, resource, changes }: { previous: ResourceNode; resource: ResourceNode; changes: RailwayChange[] }) {
+function diffNetworking({ previous, resource, changes, diagnostics }: { previous: ResourceNode; resource: ResourceNode; changes: RailwayChange[]; diagnostics: ChangeDiagnostic[] }) {
   const before = "networking" in previous ? previous.networking : undefined;
   const after = "networking" in resource ? resource.networking : undefined;
   const beforeDomains = before?.customDomains ?? {};
-  const afterDomains = after?.customDomains ?? {};
-
-  for (const [domain, config] of Object.entries(afterDomains)) {
-    if (beforeDomains[domain]) continue;
-    changes.push({
-      kind: "domain.create",
-      address: resource.address,
-      domain,
-      ...(config?.port !== undefined && config.port !== null ? { targetPort: config.port } : {}),
-      path: `resources.${resource.address}.domains.${domain}`,
-      summary: `Create custom domain ${resource.name}.${domain}`,
-      severity: "safe",
-      deployEffect: "none",
-    });
-  }
+  diagnoseUnsupportedCustomDomains({ resource, diagnostics, existingDomains: beforeDomains });
 
   const normalizedBefore = normalizeForDiff("networking", { ...before, customDomains: undefined, serviceDomains: undefined });
   const normalizedAfter = normalizeForDiff("networking", { ...after, customDomains: undefined, serviceDomains: undefined });
   if (stableStringify(normalizedBefore) !== stableStringify(normalizedAfter)) {
-    changes.push(update(resource.address, "networking", before, after, `Update ${resource.name} networking`));
+    changes.push(update(resource.address, "networking", normalizedBefore, normalizedAfter, `Update ${resource.name} networking`));
+  }
+}
+
+function diagnoseUnsupportedCustomDomains({
+  resource,
+  diagnostics,
+  existingDomains = {},
+}: {
+  resource: ResourceNode;
+  diagnostics: ChangeDiagnostic[];
+  existingDomains?: Record<string, unknown>;
+}) {
+  const desiredDomains = ("networking" in resource ? resource.networking : undefined)?.customDomains ?? {};
+  for (const domain of Object.keys(desiredDomains)) {
+    if (existingDomains[domain]) continue;
+    diagnostics.push({
+      severity: "error",
+      path: `resources.${resource.address}.domains.${domain}`,
+      message: `Custom-domain registration is not supported by Railway configuration. Add ${domain} in the dashboard, then run railway config pull.`,
+    });
   }
 }
 
