@@ -266,6 +266,7 @@ function graphFromCurrentEnvironment(current: CurrentEnvironmentResult, desiredG
     serviceNamesById: current.serviceNamesById,
     volumeNamesById: current.volumeNamesById,
     bucketNamesById: current.bucketNamesById,
+    bucketGroupIdsById: current.bucketGroupIdsById,
     customDomainsByServiceId: current.customDomainsByServiceId,
   });
 }

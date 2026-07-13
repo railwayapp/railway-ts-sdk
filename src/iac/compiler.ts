@@ -133,7 +133,7 @@ export function graphToEnvironmentConfig(graph: RailwayGraph, options: GraphComp
 
 export function environmentConfigToGraph(
   config: EnvironmentConfig,
-  options: { projectName?: string; serviceNamesById?: Record<string, string>; volumeNamesById?: Record<string, string>; bucketNamesById?: Record<string, string>; customDomainsByServiceId?: Record<string, Record<string, { port?: number }>> } = {},
+  options: { projectName?: string; serviceNamesById?: Record<string, string>; volumeNamesById?: Record<string, string>; bucketNamesById?: Record<string, string>; bucketGroupIdsById?: Record<string, string>; customDomainsByServiceId?: Record<string, Record<string, { port?: number }>> } = {},
 ): RailwayGraph {
   const resources: ResourceNode[] = [];
   const groupNamesById = Object.fromEntries(
@@ -207,7 +207,7 @@ export function environmentConfigToGraph(
   for (const [bucketId, bucketConfig] of Object.entries(config.buckets ?? {})) {
     if (bucketConfig == null || bucketConfig.isDeleted) continue;
     const name = options.bucketNamesById?.[bucketId] ?? bucketId;
-    const groupId = (bucketConfig as { groupId?: string | null }).groupId;
+    const groupId = options.bucketGroupIdsById?.[bucketId] ?? (bucketConfig as { groupId?: string | null }).groupId;
     resources.push({
       address: resourceAddress("bucket", name) as `bucket.${string}`,
       type: "bucket",
