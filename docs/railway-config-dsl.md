@@ -302,13 +302,16 @@ service("web", {
 
 ### Domains
 
+Custom domains are import-only for now. Register the domain in the Railway
+dashboard, then run `railway config pull`; the generated service uses:
+
 ```ts
 service("web", {
   domains: ["app.example.com"],
 });
 ```
 
-Port variant:
+A domain with an explicit target port pulls as:
 
 ```ts
 service("web", {
@@ -316,7 +319,9 @@ service("web", {
 });
 ```
 
-String domains currently default to port `8080`.
+Adding an unregistered domain to source produces a plan diagnostic instead of
+silently attempting product registration. String domains render with port
+`8080`, the current imported default.
 
 ### TCP proxies
 
@@ -500,6 +505,10 @@ const backend = group("Backend", { color: "blue" });
 ```
 
 When passed resources, `group()` returns the group plus those resources with group membership attached, so `resources: [group("Backend", [api, worker])]` is valid.
+
+Volumes cannot be grouped independently because the canvas places a volume with
+its attached service. `group()` rejects volume nodes at compile time and runtime;
+group the attached service instead.
 
 ## Variables and references
 

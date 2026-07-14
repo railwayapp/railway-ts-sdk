@@ -4,6 +4,8 @@ import type {
   BucketNode,
   DatabaseNode,
   GroupNode,
+  GroupableResourceInput,
+  GroupableResourceNode,
   ProjectDefinition,
   ProjectResourceInput,
   ResourceNode,
@@ -224,17 +226,21 @@ export function bucket(name: string, config: BucketConfig = {}): BucketNode {
   return { address: resourceAddress("bucket", name) as `bucket.${string}`, type: "bucket", name, config };
 }
 
-export function group(name: string, resources: ProjectResourceInput[], options?: Omit<GroupNode, "address" | "type" | "name">): ResourceNode[];
+export function group(name: string, resources: GroupableResourceInput[], options?: Omit<GroupNode, "address" | "type" | "name">): GroupableResourceNode[];
 export function group(name: string, options?: Omit<GroupNode, "address" | "type" | "name">): GroupNode;
 export function group(
   name: string,
-  resourcesOrOptions: ProjectResourceInput[] | Omit<GroupNode, "address" | "type" | "name"> = {},
+  resourcesOrOptions: GroupableResourceInput[] | Omit<GroupNode, "address" | "type" | "name"> = {},
   maybeOptions: Omit<GroupNode, "address" | "type" | "name"> = {},
-): GroupNode | ResourceNode[] {
-  const resources = Array.isArray(resourcesOrOptions) ? resourcesOrOptions.flat() : undefined;
+): GroupNode | GroupableResourceNode[] {
+  const resources = Array.isArray(resourcesOrOptions) ? resourcesOrOptions.flat(Infinity) as GroupableResourceNode[] : undefined;
   const options = Array.isArray(resourcesOrOptions) ? maybeOptions : resourcesOrOptions;
   const node: GroupNode = { address: resourceAddress("group", name) as `group.${string}`, type: "group", name, ...options };
   if (!resources) return node;
+  const volume = (resources as ResourceNode[]).find(resource => resource.type === "volume");
+  if (volume) {
+    throw new Error(`Volume "${volume.name}" cannot be grouped independently; group its attached service instead.`);
+  }
   return [node, ...resources.map(resource => ({ ...resource, groupId: name }))];
 }
 

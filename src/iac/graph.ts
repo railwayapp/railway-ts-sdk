@@ -117,6 +117,8 @@ export interface Edge {
   key?: string;
 }
 
+export type GroupableResourceNode = Exclude<ResourceNode, VolumeNode>;
+export type GroupableResourceInput = GroupableResourceNode | GroupableResourceNode[];
 export type ProjectResourceInput = ResourceNode | ResourceNode[];
 
 export interface ProjectDefinition {

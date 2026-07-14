@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { bucket, createRailwayContext, diffGraphs, environmentConfigToGraph, evaluateRailwayFile, github, graphToEnvironmentConfig, image, postgres, project, redis, service, volume } from "../src/index.js";
+import { bucket, createRailwayContext, diffGraphs, environmentConfigToGraph, evaluateRailwayFile, github, graphToEnvironmentConfig, group, image, postgres, project, redis, service, volume } from "../src/index.js";
 import { projectDefinitionToGraph } from "../src/iac/compiler.js";
 import { changeSetToEnvironmentPatch, RAILWAY_CHANGE_SET_VERSION, SUPPORTED_CHANGE_SET_VERSIONS, renderChangeSet, type SetVariableChange } from "../src/iac/change-set.js";
 import { runRailwayIac } from "../src/iac/runner.js";
@@ -205,6 +205,43 @@ describe("Railway IaC", () => {
     }));
 
     expect(diffGraphs({ current, desired }).changes).toEqual([]);
+  });
+
+  it("rejects independently grouped volumes", () => {
+    expect(() => {
+      // @ts-expect-error Volumes inherit placement from their attached service.
+      group("Storage", [volume("data")]);
+    }).toThrow('Volume "data" cannot be grouped independently');
+  });
+
+  it("diagnoses unsupported custom-domain registration", () => {
+    const current = environmentConfigToGraph({ services: {} }, { projectName: "app" });
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [service("web", { domains: ["app.example.com"] })],
+    }));
+
+    const result = diffGraphs({ current, desired });
+    expect(result.changes).not.toContainEqual(expect.objectContaining({ kind: "domain.create" }));
+    expect(result.diagnostics).toContainEqual(expect.objectContaining({
+      severity: "error",
+      path: "resources.service.web.domains.app.example.com",
+      message: expect.stringContaining("not supported"),
+    }));
+  });
+
+  it("keeps existing custom domains plan-clean", () => {
+    const current = environmentConfigToGraph(
+      { services: { web: {} } },
+      {
+        projectName: "app",
+        customDomainsByServiceId: { web: { "app.example.com": {} } },
+      },
+    );
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [service("web", { domains: ["app.example.com"] })],
+    }));
+
+    expect(diffGraphs({ current, desired })).toMatchObject({ changes: [], diagnostics: [] });
   });
 
   it("typechecks known bucket regions", () => {
