@@ -184,6 +184,28 @@ await fork.exec("npm test"); // sees the installed deps, isolated from base
 `Sandbox.create(source)` is the same operation in static form. Pass `idleTimeoutMinutes` to
 override the fork's idle timeout. The source must be `RUNNING`.
 
+## Regions
+
+Pass `region` to run a sandbox in a specific Railway region. The returned sandbox exposes
+the logical region selected by the platform.
+
+```ts
+const sandbox = await Sandbox.create({ region: "us-east4-eqdc4a" });
+console.log(sandbox.region);
+```
+
+Region selection works for blank sandboxes, templates, saved checkpoints, and forks.
+Blockstore-backed disks can boot in a different region from their source:
+
+```ts
+const remoteFork = await sandbox.fork({ region: "europe-west4-drams3a" });
+const localFork = await sandbox.fork({ region: sandbox.region });
+```
+
+Omitting `region` uses the platform default, including for forks; it does not implicitly
+inherit the source sandbox's region. Region identifiers are strings validated by Railway,
+so the SDK does not keep a fixed region enum.
+
 ## Network isolation
 
 By default a sandbox is `ISOLATED`: it has public NAT egress but cannot reach the rest of

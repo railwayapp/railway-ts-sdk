@@ -126,6 +126,9 @@ export class SandboxEngine {
     if (options.networkIsolation !== undefined) {
       input.networkIsolation = options.networkIsolation;
     }
+    if (options.region !== undefined) {
+      input.region = options.region;
+    }
     if (options.env !== undefined) {
       input.variables = options.env;
     }
@@ -453,6 +456,7 @@ function creationLine(
     `env=${input.environmentId}`,
     `idleTimeout=${input.idleTimeoutMinutes ?? "none"}`,
     `network=${input.networkIsolation ?? "default"}`,
+    `region=${input.region ?? "default"}`,
     `envKeys=[${envKeys.join(",")}]`,
   ];
   if (input.sourceSandboxId) parts.push(`source=${input.sourceSandboxId}`);
