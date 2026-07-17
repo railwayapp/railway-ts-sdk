@@ -668,6 +668,8 @@ describe("Railway IaC", () => {
     expect(() => image("ubuntu:24.04", { autoUpdates: { type: "patch" } })).not.toThrow();
     expect(() => image("docker.io/library/ubuntu:24.04", { autoUpdates: { type: "patch" } })).not.toThrow();
     expect(() => image("ghcr.io/acme/api:1", { autoUpdates: { type: "patch" } })).not.toThrow();
+    expect(() => image("GHCR.IO/acme/api:1", { autoUpdates: { type: "patch" } })).not.toThrow();
+    expect(() => image("", { autoUpdates: { type: "patch" } })).toThrow(/Docker Hub and GHCR/);
   });
 
   it("preserves stale auto updates on non-image sources without planning drift", () => {

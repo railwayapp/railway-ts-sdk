@@ -144,8 +144,10 @@ export function image(imageName: string, options: Pick<SourceConfig, "rootDirect
 }
 
 function supportsImageAutoUpdates(imageName: string): boolean {
-  if (!imageName.includes("/")) return true;
-  const registry = imageName.split("/", 1)[0] ?? "";
+  const normalized = imageName.trim().toLowerCase();
+  if (normalized === "") return false;
+  if (!normalized.includes("/")) return true;
+  const registry = normalized.split("/", 1)[0] ?? "";
   return (!registry.includes(".") && !registry.includes(":") && registry !== "localhost") || registry === "docker.io" || registry === "ghcr.io";
 }
 

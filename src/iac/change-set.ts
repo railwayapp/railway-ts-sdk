@@ -496,8 +496,10 @@ function stripWriteOnlyRegistryCredentials(before: unknown, after: unknown): [un
 
 function sourceSupportsAutoUpdates(source: ServiceNode["source"]): boolean {
   if (source?.type !== "image" || !source.image) return false;
-  if (!source.image.includes("/")) return true;
-  const registry = source.image.split("/", 1)[0] ?? "";
+  const normalized = source.image.trim().toLowerCase();
+  if (normalized === "") return false;
+  if (!normalized.includes("/")) return true;
+  const registry = normalized.split("/", 1)[0] ?? "";
   return ((!registry.includes(".") && !registry.includes(":") && registry !== "localhost") || registry === "docker.io" || registry === "ghcr.io");
 }
 
