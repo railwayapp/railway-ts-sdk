@@ -136,12 +136,32 @@ export function environmentConfigToGraph(
   options: { projectName?: string; serviceNamesById?: Record<string, string>; volumeNamesById?: Record<string, string>; bucketNamesById?: Record<string, string>; bucketGroupIdsById?: Record<string, string>; customDomainsByServiceId?: Record<string, Record<string, { port?: number }>> } = {},
 ): RailwayGraph {
   const resources: ResourceNode[] = [];
+  const groups = config.groups ?? {};
   const groupNamesById = Object.fromEntries(
-    Object.entries(config.groups ?? {}).map(([groupId, groupConfig]) => [groupId, groupConfig?.name ?? groupId]),
+    Object.entries(groups).map(([groupId, groupConfig]) => [groupId, groupConfig?.name ?? groupId]),
   );
+  // Canvas groups are project-scoped, while an imported graph is environment-scoped.
+  // Include only groups referenced by resources in this environment (plus their parent
+  // chain), otherwise groups created in another environment leak into pull as empty
+  // groups and a subsequent apply proposes deleting them.
+  const referencedGroupIds = new Set<string>();
+  for (const service of Object.values(config.services ?? {})) {
+    if (service?.groupId) referencedGroupIds.add(service.groupId);
+  }
+  for (const [bucketId, bucketConfig] of Object.entries(config.buckets ?? {})) {
+    const groupId = options.bucketGroupIdsById?.[bucketId] ?? (bucketConfig as { groupId?: string | null } | null)?.groupId;
+    if (groupId) referencedGroupIds.add(groupId);
+  }
+  for (const groupId of [...referencedGroupIds]) {
+    let parentGroupId = (groups[groupId] as { groupId?: string | null } | null | undefined)?.groupId;
+    while (parentGroupId && !referencedGroupIds.has(parentGroupId)) {
+      referencedGroupIds.add(parentGroupId);
+      parentGroupId = (groups[parentGroupId] as { groupId?: string | null } | null | undefined)?.groupId;
+    }
+  }
 
-  for (const [groupId, groupConfig] of Object.entries(config.groups ?? {})) {
-    if (groupConfig == null || groupConfig.isDeleted) continue;
+  for (const [groupId, groupConfig] of Object.entries(groups)) {
+    if (groupConfig == null || groupConfig.isDeleted || !referencedGroupIds.has(groupId)) continue;
     const name = groupConfig.name ?? groupId;
     const parentGroupId = (groupConfig as { groupId?: string | null }).groupId;
     resources.push(pruneEmpty({
