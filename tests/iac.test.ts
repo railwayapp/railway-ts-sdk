@@ -694,6 +694,25 @@ describe("Railway IaC", () => {
     }));
   });
 
+  it("omits project canvas groups unreferenced by the imported environment", () => {
+    const graph = environmentConfigToGraph({
+      groups: {
+        production: { name: "Production" },
+        test: { name: "Test-only Sandbox" },
+      },
+      services: {
+        web: { source: { image: "nginx:latest" }, groupId: "production" },
+      },
+    }, { projectName: "app", serviceNamesById: { web: "web" } });
+
+    expect(graph.resources).toContainEqual(expect.objectContaining({
+      address: "group.Production",
+    }));
+    expect(graph.resources).not.toContainEqual(expect.objectContaining({
+      address: "group.Test-only Sandbox",
+    }));
+  });
+
   it("flags a bucket region change as an immutable-region error", () => {
     const current = environmentConfigToGraph({ buckets: { assets: { region: "sjc" } } }, { projectName: "app" });
     const desired = projectDefinitionToGraph(project("app", { resources: [bucket("assets", { region: "ams" })] }));
