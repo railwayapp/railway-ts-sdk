@@ -662,6 +662,25 @@ describe("Railway IaC", () => {
     });
   });
 
+  it("rejects auto updates outside Docker Hub and GHCR image sources", () => {
+    expect(() => github("acme/api", { autoUpdates: { type: "patch" } } as never)).toThrow(/Docker image sources/);
+    expect(() => image("registry.example.com/acme/api:1", { autoUpdates: { type: "patch" } })).toThrow(/Docker Hub and GHCR/);
+    expect(() => image("ubuntu:24.04", { autoUpdates: { type: "patch" } })).not.toThrow();
+    expect(() => image("docker.io/library/ubuntu:24.04", { autoUpdates: { type: "patch" } })).not.toThrow();
+    expect(() => image("ghcr.io/acme/api:1", { autoUpdates: { type: "patch" } })).not.toThrow();
+  });
+
+  it("preserves stale auto updates on non-image sources without planning drift", () => {
+    const current = environmentConfigToGraph({
+      services: { web: { source: { repo: "acme/api", branch: "main", autoUpdates: { type: "patch", schedule: [] } } } },
+    }, { projectName: "app", serviceNamesById: { web: "web" } });
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [service("web", { source: github("acme/api") })],
+    }));
+
+    expect(diffGraphs({ current, desired }).changes).toEqual([]);
+  });
+
   it("refuses to manage a service still owned by railway.json/toml", () => {
     const current = environmentConfigToGraph({
       services: { web: { source: { repo: "r" }, configFile: "railway.json" } },

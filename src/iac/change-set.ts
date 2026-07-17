@@ -347,6 +347,10 @@ function diffTopLevelField({ previous, resource, field, changes }: { previous: R
   let before = (previous as unknown as Record<string, unknown>)[field];
   let after = (resource as unknown as Record<string, unknown>)[field];
   if (field === "source" && previous.type === "database" && isEquivalentDatabaseSource(previous, after)) return;
+  if (field === "source" && resource.type === "service" && !sourceSupportsAutoUpdates(resource.source)) {
+    before = withoutAutoUpdates(before);
+    after = withoutAutoUpdates(after);
+  }
   if (field === "deploy") [before, after] = stripWriteOnlyRegistryCredentials(before, after);
   const normalizedBefore = normalizeForDiff(field, before);
   const normalizedAfter = normalizeForDiff(field, after);
@@ -488,6 +492,20 @@ function stripWriteOnlyRegistryCredentials(before: unknown, after: unknown): [un
   const strippedBefore = beforeCredentials === undefined ? before : withCredentials(before, undefined);
   const strippedAfter = desiredCredentials === undefined ? desiredSide : withCredentials(desiredSide, undefined);
   return [strippedBefore, strippedAfter];
+}
+
+function sourceSupportsAutoUpdates(source: ServiceNode["source"]): boolean {
+  if (source?.type !== "image" || !source.image) return false;
+  if (!source.image.includes("/")) return true;
+  const registry = source.image.split("/", 1)[0] ?? "";
+  return ((!registry.includes(".") && !registry.includes(":") && registry !== "localhost") || registry === "docker.io" || registry === "ghcr.io");
+}
+
+function withoutAutoUpdates(source: unknown): unknown {
+  if (source == null || typeof source !== "object") return source;
+  const copy = { ...(source as Record<string, unknown>) };
+  delete copy.autoUpdates;
+  return Object.keys(copy).length === 0 ? undefined : copy;
 }
 
 function withoutRegistryCredentials(deploy: unknown): unknown {

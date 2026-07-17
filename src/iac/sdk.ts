@@ -129,12 +129,24 @@ export type SharedVariableRef = { readonly [name: string]: VariableValue } & { r
 export type ReferencableServiceNode<K extends string = RailwayProvidedVariable | string> = ServiceNode & { readonly env: ServiceVariableRef<K> };
 export type ReferencableDatabaseNode<E extends DatabaseNode["engine"]> = DatabaseNode & { readonly env: ServiceVariableRef<DatabaseVariable<E>> };
 
-export function github(repo: string, options: Omit<SourceConfig, "type" | "repo" | "image"> = {}): SourceConfig {
+export function github(repo: string, options: Omit<SourceConfig, "type" | "repo" | "image" | "autoUpdates"> = {}): SourceConfig {
+  if ((options as { autoUpdates?: unknown }).autoUpdates !== undefined) {
+    throw new Error("Image auto updates are only supported for Docker image sources.");
+  }
   return { type: "github", repo, branch: options.branch ?? "main", ...options };
 }
 
 export function image(imageName: string, options: Pick<SourceConfig, "rootDirectory" | "autoUpdates"> = {}): SourceConfig {
+  if (options.autoUpdates !== undefined && !supportsImageAutoUpdates(imageName)) {
+    throw new Error("Image auto updates are only supported for Docker Hub and GHCR images.");
+  }
   return { type: "image", image: imageName, ...options };
+}
+
+function supportsImageAutoUpdates(imageName: string): boolean {
+  if (!imageName.includes("/")) return true;
+  const registry = imageName.split("/", 1)[0] ?? "";
+  return (!registry.includes(".") && !registry.includes(":") && registry !== "localhost") || registry === "docker.io" || registry === "ghcr.io";
 }
 
 export function template(templateName: string, options: Omit<SourceConfig, "type" | "template"> = {}): SourceConfig {
