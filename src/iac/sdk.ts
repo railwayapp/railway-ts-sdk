@@ -251,10 +251,6 @@ export function group(
   const options = Array.isArray(resourcesOrOptions) ? maybeOptions : resourcesOrOptions;
   const node: GroupNode = { address: resourceAddress("group", name) as `group.${string}`, type: "group", name, ...options };
   if (!resources) return node;
-  const volume = (resources as ResourceNode[]).find(resource => resource.type === "volume");
-  if (volume) {
-    throw new Error(`Volume "${volume.name}" cannot be grouped independently; group its attached service instead.`);
-  }
   return [node, ...resources.map(resource => ({ ...resource, groupId: name }))];
 }
 

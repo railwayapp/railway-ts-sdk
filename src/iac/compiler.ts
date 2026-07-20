@@ -133,7 +133,7 @@ export function graphToEnvironmentConfig(graph: RailwayGraph, options: GraphComp
 
 export function environmentConfigToGraph(
   config: EnvironmentConfig,
-  options: { projectName?: string; serviceNamesById?: Record<string, string>; volumeNamesById?: Record<string, string>; bucketNamesById?: Record<string, string>; bucketGroupIdsById?: Record<string, string>; customDomainsByServiceId?: Record<string, Record<string, { port?: number }>> } = {},
+  options: { projectName?: string; serviceNamesById?: Record<string, string>; volumeNamesById?: Record<string, string>; volumeGroupIdsById?: Record<string, string>; bucketNamesById?: Record<string, string>; bucketGroupIdsById?: Record<string, string>; customDomainsByServiceId?: Record<string, Record<string, { port?: number }>> } = {},
 ): RailwayGraph {
   const resources: ResourceNode[] = [];
   const groups = config.groups ?? {};
@@ -147,6 +147,9 @@ export function environmentConfigToGraph(
   const referencedGroupIds = new Set<string>();
   for (const service of Object.values(config.services ?? {})) {
     if (service?.groupId) referencedGroupIds.add(service.groupId);
+  }
+  for (const groupId of Object.values(options.volumeGroupIdsById ?? {})) {
+    referencedGroupIds.add(groupId);
   }
   for (const [bucketId, bucketConfig] of Object.entries(config.buckets ?? {})) {
     const groupId = options.bucketGroupIdsById?.[bucketId] ?? (bucketConfig as { groupId?: string | null } | null)?.groupId;
@@ -216,11 +219,13 @@ export function environmentConfigToGraph(
   for (const [volumeId, volumeConfig] of Object.entries(config.volumes ?? {})) {
     if (volumeConfig == null || volumeConfig.isDeleted) continue;
     const name = options.volumeNamesById?.[volumeId] ?? volumeId;
+    const groupId = options.volumeGroupIdsById?.[volumeId];
     resources.push({
       address: resourceAddress("volume", name) as `volume.${string}`,
       type: "volume",
       name,
       config: volumeConfig,
+      ...(groupId ? { groupId: groupNamesById[groupId] ?? groupId } : {}),
     });
   }
 

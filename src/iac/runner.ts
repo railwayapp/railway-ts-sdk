@@ -265,6 +265,7 @@ function graphFromCurrentEnvironment(current: CurrentEnvironmentResult, desiredG
     projectName: current.projectName ?? desiredGraph.project.name,
     serviceNamesById: current.serviceNamesById,
     volumeNamesById: current.volumeNamesById,
+    volumeGroupIdsById: current.volumeGroupIdsById,
     bucketNamesById: current.bucketNamesById,
     bucketGroupIdsById: current.bucketGroupIdsById,
     customDomainsByServiceId: current.customDomainsByServiceId,

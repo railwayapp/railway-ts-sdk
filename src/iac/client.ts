@@ -18,6 +18,7 @@ export interface CurrentEnvironmentResult {
   configEtag?: string | undefined;
   serviceNamesById: Record<string, string>;
   volumeNamesById: Record<string, string>;
+  volumeGroupIdsById: Record<string, string>;
   bucketNamesById: Record<string, string>;
   bucketGroupIdsById: Record<string, string>;
   customDomainsByServiceId: Record<string, Record<string, { port?: number }>>;
@@ -72,9 +73,9 @@ export class IacClient {
 
   async getCurrentEnvironment(environmentId: string, options: { decryptVariables?: boolean } = {}): Promise<CurrentEnvironmentResult> {
     const data = await gql<{
-      environment: { id: string; name?: string; projectId?: string; config: EnvironmentConfig; configEtag?: string };
+      environment: { id: string; name?: string; projectId?: string; config: EnvironmentConfig; configEtag?: string; canvasGroupRefs?: Record<string, string> };
     }, { environmentId: string; decryptVariables: boolean }>(this.#config, `query IacEnvironmentConfig($environmentId: String!, $decryptVariables: Boolean) {
-      environment(id: $environmentId) { id name projectId config(decryptVariables: $decryptVariables) configEtag }
+      environment(id: $environmentId) { id name projectId config(decryptVariables: $decryptVariables) configEtag canvasGroupRefs }
     }`, { environmentId, decryptVariables: options.decryptVariables ?? false });
 
     const projectName = data.environment.projectId ? await this.getProjectName(data.environment.projectId) : undefined;
@@ -90,6 +91,10 @@ export class IacClient {
       config: data.environment.config ?? {},
       serviceNamesById: Object.fromEntries(services.map(service => [service.id, service.name])),
       volumeNamesById: Object.fromEntries(volumes.flatMap(volume => volume.name ? [[volume.id, volume.name] as const] : [])),
+      volumeGroupIdsById: Object.fromEntries(volumes.flatMap(volume => {
+        const groupId = data.environment.canvasGroupRefs?.[volume.id];
+        return groupId ? [[volume.id, groupId] as const] : [];
+      })),
       bucketNamesById: Object.fromEntries(buckets.map(bucket => [bucket.id, bucket.name])),
       bucketGroupIdsById: Object.fromEntries(buckets.flatMap(bucket => bucket.groupId ? [[bucket.id, bucket.groupId] as const] : [])),
       customDomainsByServiceId,

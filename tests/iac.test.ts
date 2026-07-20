@@ -207,11 +207,12 @@ describe("Railway IaC", () => {
     expect(diffGraphs({ current, desired }).changes).toEqual([]);
   });
 
-  it("rejects independently grouped volumes", () => {
-    expect(() => {
-      // @ts-expect-error Volumes inherit placement from their attached service.
-      group("Storage", [volume("data")]);
-    }).toThrow('Volume "data" cannot be grouped independently');
+  it("supports independently grouped volumes", () => {
+    const resources = group("Storage", [volume("data")]);
+    expect(resources).toContainEqual(expect.objectContaining({
+      address: "volume.data",
+      groupId: "Storage",
+    }));
   });
 
   it("diagnoses unsupported custom-domain registration", () => {
@@ -694,6 +695,25 @@ describe("Railway IaC", () => {
     const { changes, diagnostics } = diffGraphs({ current, desired });
     expect(diagnostics).toContainEqual(expect.objectContaining({ severity: "error", message: expect.stringContaining("railway.json") }));
     expect(changes).toEqual([]);
+  });
+
+  it("restores volume group membership from environment canvas state", () => {
+    const graph = environmentConfigToGraph(
+      {
+        groups: { "group-id": { name: "Storage" } },
+        volumes: { "volume-id": { region: "us-west2", sizeMB: 1024 } },
+      },
+      {
+        projectName: "app",
+        volumeNamesById: { "volume-id": "data" },
+        volumeGroupIdsById: { "volume-id": "group-id" },
+      },
+    );
+
+    expect(graph.resources).toContainEqual(expect.objectContaining({
+      address: "volume.data",
+      groupId: "Storage",
+    }));
   });
 
   it("restores bucket group membership from project canvas state", () => {
