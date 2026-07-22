@@ -49,6 +49,8 @@ export type TemplateSource = CompiledTemplate | NamedTemplateRef;
 export interface SandboxCreationOptions {
   idleTimeoutMinutes?: number;
   networkIsolation?: SandboxNetworkIsolation;
+  /** Region where the sandbox should run. Uses the platform default when omitted. */
+  region?: string;
   /** Runtime env baked into the sandbox, available to every command. Values may use Railway references (e.g. `${{shared.FOO}}`). */
   env?: Record<string, string>;
 }

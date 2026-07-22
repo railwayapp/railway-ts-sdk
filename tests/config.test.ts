@@ -201,6 +201,14 @@ describe("verbose logging", () => {
     );
   });
 
+  it("includes the requested region in verbose create progress", async () => {
+    await createSandbox({ region: "us-east4-eqdc4a", verbose: true });
+
+    expect(logged()).toContainEqual(
+      expect.stringContaining("region=us-east4-eqdc4a"),
+    );
+  });
+
   it("is enabled by RAILWAY_VERBOSE=1", async () => {
     vi.stubEnv("RAILWAY_VERBOSE", "1");
 

@@ -102,6 +102,30 @@ describe("Sandbox.create", () => {
     });
   });
 
+  it("passes region into the create input and reads it back", async () => {
+    const mock = createFetchMock([
+      {
+        data: {
+          sandboxCreate: sandboxInfo({ region: "us-east4-eqdc4a" }),
+        },
+      },
+    ]);
+
+    const sandbox = await Sandbox.create({
+      ...auth,
+      region: "us-east4-eqdc4a",
+      fetch: mock.fetch,
+    });
+
+    expect(sandbox.region).toBe("us-east4-eqdc4a");
+    expect(mock.calls[0]?.body.variables).toEqual({
+      input: {
+        environmentId: "environment_123",
+        region: "us-east4-eqdc4a",
+      },
+    });
+  });
+
   it("passes env (incl. Railway references) into the create input verbatim", async () => {
     const mock = createFetchMock([{ data: { sandboxCreate: sandboxInfo() } }]);
 
@@ -492,6 +516,35 @@ describe("Sandbox.create(template)", () => {
     });
   });
 
+  it("places the sandbox created from a template in the requested region", async () => {
+    const mock = createFetchMock([
+      { data: { sandboxTemplateBuild: buildInfo({ status: "READY" }) } },
+      {
+        data: {
+          sandboxCreate: sandboxInfo({ region: "europe-west4-drams3a" }),
+        },
+      },
+    ]);
+
+    await Sandbox.create(Sandbox.template().run("true"), {
+      ...auth,
+      region: "europe-west4-drams3a",
+      fetch: mock.fetch,
+    });
+
+    expect(mock.calls[0]?.body.variables).toEqual({
+      environmentId: "environment_123",
+      input: { instructions: ["true"] },
+    });
+    expect(mock.calls[1]?.body.variables).toEqual({
+      input: {
+        environmentId: "environment_123",
+        template: { instructions: ["true"] },
+        region: "europe-west4-drams3a",
+      },
+    });
+  });
+
   it("skips the build for an env-only template, creating directly", async () => {
     const mock = createFetchMock([{ data: { sandboxCreate: sandboxInfo() } }]);
 
@@ -526,6 +579,7 @@ describe("Sandbox.create(name)", () => {
     await Sandbox.create("my-checkpoint", {
       ...auth,
       idleTimeoutMinutes: 10,
+      region: "asia-southeast1-eqsg3a",
       env: { FOO: "bar" },
       fetch: mock.fetch,
     });
@@ -535,6 +589,7 @@ describe("Sandbox.create(name)", () => {
         environmentId: "environment_123",
         template: { name: "my-checkpoint" },
         idleTimeoutMinutes: 10,
+        region: "asia-southeast1-eqsg3a",
         variables: { FOO: "bar" },
       },
     });
@@ -697,6 +752,19 @@ describe("sandbox.fork", () => {
     });
   });
 
+  it("places a fork in the requested region", async () => {
+    const { sandbox, calls } = await createThenQueue(forkResponse);
+    await sandbox.fork({ region: "us-east4-eqdc4a" });
+
+    expect(calls[1]?.body.variables).toEqual({
+      input: {
+        environmentId: "environment_123",
+        sourceSandboxId: "sandbox_123",
+        region: "us-east4-eqdc4a",
+      },
+    });
+  });
+
   it("delegates Sandbox.create(source) to fork, reusing the source engine", async () => {
     // No fetch on the create(source) call: it must reuse the source's engine.
     const { sandbox: source, calls } = await createThenQueue(forkResponse);
@@ -704,6 +772,19 @@ describe("sandbox.fork", () => {
 
     expect(forked.id).toBe("forked_123");
     expectForkMutation(calls[1]);
+  });
+
+  it("passes region through Sandbox.create(source, options)", async () => {
+    const { sandbox: source, calls } = await createThenQueue(forkResponse);
+    await Sandbox.create(source, { region: "europe-west4-drams3a" });
+
+    expect(calls[1]?.body.variables).toEqual({
+      input: {
+        environmentId: "environment_123",
+        sourceSandboxId: "sandbox_123",
+        region: "europe-west4-drams3a",
+      },
+    });
   });
 });
 

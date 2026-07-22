@@ -44,31 +44,37 @@ export type AccessRule = {
 };
 
 export type ActiveFeatureFlag =
+  | 'AGENT_BYOK'
+  | 'AGENT_VM'
   | 'CHAT_SANDBOX'
   | 'DEBUG_SMART_DIAGNOSIS'
   | 'IN_DASHBOARD_SUPPORT'
   | 'MAGIC_CONFIG'
-  | 'POSTGRES_PGBOUNCER'
   | 'PRIORITY_BOARDING'
   | 'PROJECT_SANDBOXES';
 
 export type ActivePlatformFlag =
   | 'ALERT_SUS_USERS_CRON_KILLSWITCH'
   | 'BAN_APPEAL_FORM'
+  | 'BUILD_DEPLOY_QUEUE_V2'
+  | 'CANVAS_CROSS_ENV_GUARD_ENFORCE'
   | 'CHAT_SANDBOX'
+  | 'CLICKHOUSE_WORKSPACE_LIMIT_ENFORCE'
+  | 'CS_MCP'
   | 'CTRD_IMAGE_STORE_ROLLOUT'
   | 'DEMO_PERCENTAGE_ROLLOUT'
-  | 'HA_STATIC_EGRESS_SELF_SERVICE'
-  | 'INLINE_NOTIFICATION_PROCESSING'
   | 'IN_DASHBOARD_SUPPORT'
-  | 'KAFKA_DEPLOYMENT_STATUS_CHANGES'
+  | 'KAFKA_EPHEMERAL_ENVIRONMENT_UPDATES'
   | 'NEW_STRIPE_WEBHOOK_VERSION_ROLLOUT'
   | 'OAUTH_DCR_KILLSWITCH'
-  | 'RADAR_AUTO_EVALUATE'
+  | 'REMOVE_DEPLOYMENT_COMPACT'
   | 'SERVICEINSTANCE_DATALOADER_FOR_STATIC_URL'
   | 'SPLIT_USAGE_QUERIES'
   | 'STRIPE_METERS_NEW_ACCOUNTS'
   | 'STRIPE_METERS_SHADOW_ENABLED'
+  | 'TEMPORAL_CLOUD_DEPLOYS'
+  | 'TEMPORAL_CLOUD_DEPLOY_REMOVALS'
+  | 'TEMPORAL_CLOUD_VOLUME_BACKUPS'
   | 'UPDATED_VM_QUERIES';
 
 export type ActiveProjectFeatureFlag =
@@ -80,7 +86,6 @@ export type ActiveServiceFeatureFlag =
   | 'PLACEHOLDER'
   | 'SKIPPED_BUILDS'
   | 'USE_EXPRESS_DEPLOY'
-  | 'USE_HA_STATIC_EGRESS'
   | 'USE_VM_RUNTIME';
 
 export type AdoptionInfo = Node & {
@@ -112,6 +117,21 @@ export type AdoptionInfo = Node & {
   workspace: Workspace;
 };
 
+export type AgentUsageLimitSetInput = {
+  hardLimitCents: Scalars['Int']['input'];
+  softLimitCents?: InputMaybe<Scalars['Int']['input']>;
+  workspaceId: Scalars['String']['input'];
+};
+
+export type AgentUsageSummary = {
+  __typename?: 'AgentUsageSummary';
+  billingPeriodEnd: Scalars['DateTime']['output'];
+  hardLimitCents?: Maybe<Scalars['Int']['output']>;
+  softLimitCents?: Maybe<Scalars['Int']['output']>;
+  totalUsedCents: Scalars['Int']['output'];
+  usageRemaining?: Maybe<Scalars['Float']['output']>;
+};
+
 /** The aggregated usage of a single measurement. */
 export type AggregatedUsage = {
   __typename?: 'AggregatedUsage';
@@ -132,6 +152,7 @@ export type AllDomains = {
 export type ApiToken = Node & {
   __typename?: 'ApiToken';
   displayToken: Scalars['String']['output'];
+  expiresAt?: Maybe<Scalars['DateTime']['output']>;
   id: Scalars['ID']['output'];
   name: Scalars['String']['output'];
   workspaceId?: Maybe<Scalars['String']['output']>;
@@ -214,9 +235,22 @@ export type BillingPeriod = {
   start: Scalars['DateTime']['output'];
 };
 
+export type BotScopeBindingInfo = {
+  __typename?: 'BotScopeBindingInfo';
+  canRemove: Scalars['Boolean']['output'];
+  id: Scalars['String']['output'];
+  platform: Scalars['String']['output'];
+  scopeId: Scalars['String']['output'];
+  scopeName?: Maybe<Scalars['String']['output']>;
+  scopeType: Scalars['String']['output'];
+  workspaceId: Scalars['String']['output'];
+  workspaceName: Scalars['String']['output'];
+};
+
 export type Bucket = Node & {
   __typename?: 'Bucket';
   createdAt: Scalars['DateTime']['output'];
+  groupId?: Maybe<Scalars['String']['output']>;
   id: Scalars['ID']['output'];
   name: Scalars['String']['output'];
   project: Project;
@@ -399,6 +433,14 @@ export type ComplianceAgreementsInfo = {
   hasDPA: Scalars['Boolean']['output'];
 };
 
+export type ConnectedServiceInstance = {
+  __typename?: 'ConnectedServiceInstance';
+  environmentId: Scalars['String']['output'];
+  projectId: Scalars['String']['output'];
+  serviceId: Scalars['String']['output'];
+  serviceName?: Maybe<Scalars['String']['output']>;
+};
+
 export type Container = Node & {
   __typename?: 'Container';
   createdAt: Scalars['DateTime']['output'];
@@ -451,6 +493,7 @@ export type CustomDomain = Domain & {
   edgeId?: Maybe<Scalars['String']['output']>;
   environmentId: Scalars['String']['output'];
   id: Scalars['ID']['output'];
+  isRailwayDomain: Scalars['Boolean']['output'];
   projectId?: Maybe<Scalars['String']['output']>;
   serviceId: Scalars['String']['output'];
   status: CustomDomainStatus;
@@ -685,7 +728,13 @@ export type DeploymentEvent = Node & {
 
 export type DeploymentEventPayload = {
   __typename?: 'DeploymentEventPayload';
+  attempt?: Maybe<Scalars['Int']['output']>;
+  detail?: Maybe<Scalars['String']['output']>;
+  durationMs?: Maybe<Scalars['Int']['output']>;
   error?: Maybe<Scalars['String']['output']>;
+  maxAttempts?: Maybe<Scalars['Int']['output']>;
+  reason?: Maybe<Scalars['String']['output']>;
+  skipped?: Maybe<Scalars['Boolean']['output']>;
 };
 
 export type DeploymentEventStep =
@@ -935,6 +984,8 @@ export type Environment = Node & {
   __typename?: 'Environment';
   canAccess: Scalars['Boolean']['output'];
   config: Scalars['EnvironmentConfig']['output'];
+  /** Opaque snapshot token of the environment's IaC-relevant config. Echo it back as baseConfigEtag on environmentApplyChangeSet for optimistic concurrency. */
+  configEtag: Scalars['String']['output'];
   createdAt: Scalars['DateTime']['output'];
   deletedAt?: Maybe<Scalars['DateTime']['output']>;
   deploymentTriggers: EnvironmentDeploymentTriggersConnection;
@@ -1304,6 +1355,18 @@ export type GitHubSshKey = {
   title: Scalars['String']['output'];
 };
 
+export type Group = Node & {
+  __typename?: 'Group';
+  color?: Maybe<Scalars['String']['output']>;
+  groupId?: Maybe<Scalars['String']['output']>;
+  icon?: Maybe<Scalars['String']['output']>;
+  id: Scalars['ID']['output'];
+  isCollapsed?: Maybe<Scalars['Boolean']['output']>;
+  name?: Maybe<Scalars['String']['output']>;
+  project: Project;
+  projectId: Scalars['String']['output'];
+};
+
 export type HerokuApp = {
   __typename?: 'HerokuApp';
   id: Scalars['String']['output'];
@@ -1647,12 +1710,16 @@ export type MonitorThresholdConfig = {
 
 export type Mutation = {
   __typename?: 'Mutation';
+  /** Set agent usage limit for a workspace */
+  agentUsageLimitSet: Scalars['Boolean']['output'];
   /** Creates a new API token. */
   apiTokenCreate: Scalars['String']['output'];
   /** Deletes an API token. */
   apiTokenDelete: Scalars['Boolean']['output'];
   /** Sets the base environment override for a deployment trigger. */
   baseEnvironmentOverride: Scalars['Boolean']['output'];
+  /** Remove a Railway agent chat binding. Requires admin on the binding's workspace. */
+  botScopeBindingRemove: Scalars['Boolean']['output'];
   /** Create a bucket in a project */
   bucketCreate: Bucket;
   /** Reset the credentials for a bucket in an environment */
@@ -1669,6 +1736,8 @@ export type Mutation = {
   customDomainCreate: CustomDomain;
   /** Deletes a custom domain. */
   customDomainDelete: Scalars['Boolean']['output'];
+  /** Issues a new certificate */
+  customDomainIssueCertificate: Scalars['Boolean']['output'];
   /** Updates a custom domain. */
   customDomainUpdate: Scalars['Boolean']['output'];
   /** Create a free plan subscription for a customer */
@@ -1889,6 +1958,16 @@ export type Mutation = {
   providerAuthRemove: Scalars['Boolean']['output'];
   /** Purges the CDN cache for a service. Bumps the edge config's purge epoch so every edge node treats prior cached entries as stale on next request. Idempotent; returns true even if CDN is disabled for the service. */
   purgeServiceCache: Scalars['Boolean']['output'];
+  /** Create a DNS record for a Railway domain */
+  railwayDomainDnsRecordCreate: RailwayDomainDnsRecord;
+  /** Delete a DNS record for a Railway domain */
+  railwayDomainDnsRecordDelete: Scalars['Boolean']['output'];
+  /** Update a DNS record for a Railway domain */
+  railwayDomainDnsRecordUpdate: RailwayDomainDnsRecord;
+  /** Delegate the domain's authoritative nameservers to an external DNS provider, or reset to Railway defaults by passing an empty list. */
+  railwayDomainNameserversSet: RailwayDomainNameservers;
+  /** Update a Railway domain's settings */
+  railwayDomainUpdate: RailwayDomain;
   /** Generates a new set of recovery codes for the authenticated user. */
   recoveryCodeGenerate: RecoveryCodes;
   /** Validates a recovery code. */
@@ -1958,10 +2037,26 @@ export type Mutation = {
   setupAgentEventTrack: Scalars['Boolean']['output'];
   /** Configure a shared variable. */
   sharedVariableConfigure: Variable;
+  /** Register a new signal for an owner scope. */
+  signalCreate: Signal;
+  /** Change a signal's canonical default (production floor). */
+  signalDefaultSet: Signal;
+  /** Delete a signal and its audit log. */
+  signalDelete: Signal;
+  /** Replace a signal's type and default, clearing all rules. Destructive — intended for CLI --force re-type. */
+  signalReplace: Signal;
+  /** Restore a signal to the snapshot captured before a change (reads prevState from the target change row). */
+  signalRollback: Signal;
+  /** Attach or replace a rule on a signal. Matching rules must agree at resolution time or the default is returned. */
+  signalRuleSet: Signal;
+  /** Remove a rule from a signal. */
+  signalRuleUnset: Signal;
   /** Creates a new SSH public key. When workspaceId is provided (or omitted under a workspace-scoped API token, in which case it defaults to the token's workspace), the key is owned by the workspace and can be used by anyone authenticating as that workspace via native SSH; requires workspace ADMIN access. Otherwise the key is owned by the authenticated user. */
   sshPublicKeyCreate: SshPublicKey;
   /** Deletes an SSH public key. */
   sshPublicKeyDelete: Scalars['Boolean']['output'];
+  /** Approve an SSH signup: register the offered SSH key on the authenticated account so the agent is recognized. */
+  sshSignupApprove: Scalars['Boolean']['output'];
   /**
    * Creates a new TCP proxy for a service instance.
    * @deprecated Use staged changes and apply them. Creating a TCP proxy with this endpoint requires you to redeploy the service for it to be active.
@@ -1988,6 +2083,8 @@ export type Mutation = {
   templateServiceSourceEject: Scalars['Boolean']['output'];
   /** Unpublishes a template. */
   templateUnpublish: Scalars['Boolean']['output'];
+  /** Sets the default size (in MB) for a volume mount in a template's config. New volumes created when the template is deployed are provisioned at this size, clamped to the deployer's plan maximum. Pass sizeMB: null to clear the pre-size and fall back to the plan default. Editing a template requires maintainer access. */
+  templateVolumeUpdate: Template;
   /** Create a new trusted domain for this workspace */
   trustedDomainCreate: TrustedDomain;
   /** Delete a trusted domain */
@@ -2083,6 +2180,11 @@ export type Mutation = {
 };
 
 
+export type MutationAgentUsageLimitSetArgs = {
+  input: AgentUsageLimitSetInput;
+};
+
+
 export type MutationApiTokenCreateArgs = {
   input: ApiTokenCreateInput;
 };
@@ -2099,6 +2201,11 @@ export type MutationBaseEnvironmentOverrideArgs = {
 };
 
 
+export type MutationBotScopeBindingRemoveArgs = {
+  id: Scalars['String']['input'];
+};
+
+
 export type MutationBucketCreateArgs = {
   input: BucketCreateInput;
 };
@@ -2108,6 +2215,7 @@ export type MutationBucketCredentialsResetArgs = {
   bucketId: Scalars['String']['input'];
   environmentId: Scalars['String']['input'];
   projectId: Scalars['String']['input'];
+  redeployDependents?: InputMaybe<Scalars['Boolean']['input']>;
 };
 
 
@@ -2139,6 +2247,11 @@ export type MutationCustomDomainCreateArgs = {
 
 
 export type MutationCustomDomainDeleteArgs = {
+  id: Scalars['String']['input'];
+};
+
+
+export type MutationCustomDomainIssueCertificateArgs = {
   id: Scalars['String']['input'];
 };
 
@@ -2272,6 +2385,7 @@ export type MutationEnableServiceCdnArgs = {
 
 
 export type MutationEnvironmentApplyChangeSetArgs = {
+  baseConfigEtag?: InputMaybe<Scalars['String']['input']>;
   commitMessage?: InputMaybe<Scalars['String']['input']>;
   environmentId: Scalars['String']['input'];
   input: Scalars['JSON']['input'];
@@ -2665,6 +2779,31 @@ export type MutationPurgeServiceCacheArgs = {
 };
 
 
+export type MutationRailwayDomainDnsRecordCreateArgs = {
+  input: RailwayDomainDnsRecordCreateInput;
+};
+
+
+export type MutationRailwayDomainDnsRecordDeleteArgs = {
+  input: RailwayDomainDnsRecordDeleteInput;
+};
+
+
+export type MutationRailwayDomainDnsRecordUpdateArgs = {
+  input: RailwayDomainDnsRecordUpdateInput;
+};
+
+
+export type MutationRailwayDomainNameserversSetArgs = {
+  input: RailwayDomainNameserversSetInput;
+};
+
+
+export type MutationRailwayDomainUpdateArgs = {
+  input: RailwayDomainUpdateInput;
+};
+
+
 export type MutationRecoveryCodeValidateArgs = {
   input: RecoveryCodeValidateInput;
 };
@@ -2848,6 +2987,41 @@ export type MutationSharedVariableConfigureArgs = {
 };
 
 
+export type MutationSignalCreateArgs = {
+  input: SignalCreateInput;
+};
+
+
+export type MutationSignalDefaultSetArgs = {
+  input: SignalDefaultSetInput;
+};
+
+
+export type MutationSignalDeleteArgs = {
+  input: SignalDeleteInput;
+};
+
+
+export type MutationSignalReplaceArgs = {
+  input: SignalReplaceInput;
+};
+
+
+export type MutationSignalRollbackArgs = {
+  input: SignalRollbackInput;
+};
+
+
+export type MutationSignalRuleSetArgs = {
+  input: SignalRuleSetInput;
+};
+
+
+export type MutationSignalRuleUnsetArgs = {
+  input: SignalRuleUnsetInput;
+};
+
+
 export type MutationSshPublicKeyCreateArgs = {
   input: SshPublicKeyCreateInput;
 };
@@ -2855,6 +3029,11 @@ export type MutationSshPublicKeyCreateArgs = {
 
 export type MutationSshPublicKeyDeleteArgs = {
   id: Scalars['String']['input'];
+};
+
+
+export type MutationSshSignupApproveArgs = {
+  code: Scalars['String']['input'];
 };
 
 
@@ -2907,6 +3086,14 @@ export type MutationTemplateServiceSourceEjectArgs = {
 
 export type MutationTemplateUnpublishArgs = {
   id: Scalars['String']['input'];
+};
+
+
+export type MutationTemplateVolumeUpdateArgs = {
+  serviceId: Scalars['String']['input'];
+  sizeMB?: InputMaybe<Scalars['Int']['input']>;
+  templateId: Scalars['String']['input'];
+  volumeId: Scalars['String']['input'];
 };
 
 
@@ -3130,6 +3317,75 @@ export type MutationWorkspaceUserRemoveArgs = {
   input: WorkspaceUserRemoveInput;
   workspaceId: Scalars['String']['input'];
 };
+
+/** The direction of a network flow relative to the service */
+export type NetworkFlowDirection =
+  | 'egress'
+  | 'ingress';
+
+/** The layer 4 protocol of a network flow */
+export type NetworkFlowL4Protocol =
+  | 'icmp'
+  | 'icmpv6'
+  | 'tcp'
+  | 'udp'
+  | 'unknown';
+
+/** A single network flow log entry */
+export type NetworkFlowLog = {
+  __typename?: 'NetworkFlowLog';
+  /** Number of bytes transferred */
+  byteCount: Scalars['Int']['output'];
+  /** When the flow capture ended (ISO timestamp) */
+  captureEnd: Scalars['String']['output'];
+  /** When the flow capture started (ISO timestamp) */
+  captureStart: Scalars['String']['output'];
+  /** The deployment ID */
+  deploymentId: Scalars['String']['output'];
+  /** The deployment instance ID */
+  deploymentInstanceId: Scalars['String']['output'];
+  /** Traffic direction (ingress or egress) */
+  direction: NetworkFlowDirection;
+  /** If packets were dropped, the reason */
+  dropCause?: Maybe<Scalars['String']['output']>;
+  /** Destination IP address */
+  dstAddr: Scalars['String']['output'];
+  /** Destination port number */
+  dstPort: Scalars['Int']['output'];
+  /** Unique identifier for the flow */
+  flowId: Scalars['String']['output'];
+  /** Whether the flow is partial or complete */
+  flowState: NetworkFlowState;
+  /** Layer 4 latency in milliseconds */
+  l4LatencyMs: Scalars['Float']['output'];
+  /** Layer 4 protocol (TCP, UDP, ICMP, etc) */
+  l4Protocol: NetworkFlowL4Protocol;
+  /** Number of packets transferred */
+  packetCount: Scalars['Int']['output'];
+  /** Type of peer (service, internet, DNS, etc) */
+  peerKind: NetworkFlowPeerKind;
+  /** Service instance ID of the peer (for service-to-service flows) */
+  peerServiceId?: Maybe<Scalars['String']['output']>;
+  /** The service ID this flow belongs to */
+  serviceId: Scalars['String']['output'];
+  /** Source IP address */
+  srcAddr: Scalars['String']['output'];
+  /** Source port number */
+  srcPort: Scalars['Int']['output'];
+};
+
+/** The type of peer in a network flow */
+export type NetworkFlowPeerKind =
+  | 'edge_proxy'
+  | 'internet'
+  | 'local_dns'
+  | 'service'
+  | 'unknown';
+
+/** The state of a network flow */
+export type NetworkFlowState =
+  | 'complete'
+  | 'partial';
 
 export type Node = {
   id: Scalars['ID']['output'];
@@ -3385,26 +3641,32 @@ export type Plan =
 export type PlanLimitOverride = Node & {
   __typename?: 'PlanLimitOverride';
   config: Scalars['SubscriptionPlanLimit']['output'];
+  expiresAt?: Maybe<Scalars['DateTime']['output']>;
   id: Scalars['ID']['output'];
 };
 
 export type PlatformFeatureFlag =
   | 'ALERT_SUS_USERS_CRON_KILLSWITCH'
   | 'BAN_APPEAL_FORM'
+  | 'BUILD_DEPLOY_QUEUE_V2'
+  | 'CANVAS_CROSS_ENV_GUARD_ENFORCE'
   | 'CHAT_SANDBOX'
+  | 'CLICKHOUSE_WORKSPACE_LIMIT_ENFORCE'
+  | 'CS_MCP'
   | 'CTRD_IMAGE_STORE_ROLLOUT'
   | 'DEMO_PERCENTAGE_ROLLOUT'
-  | 'HA_STATIC_EGRESS_SELF_SERVICE'
-  | 'INLINE_NOTIFICATION_PROCESSING'
   | 'IN_DASHBOARD_SUPPORT'
-  | 'KAFKA_DEPLOYMENT_STATUS_CHANGES'
+  | 'KAFKA_EPHEMERAL_ENVIRONMENT_UPDATES'
   | 'NEW_STRIPE_WEBHOOK_VERSION_ROLLOUT'
   | 'OAUTH_DCR_KILLSWITCH'
-  | 'RADAR_AUTO_EVALUATE'
+  | 'REMOVE_DEPLOYMENT_COMPACT'
   | 'SERVICEINSTANCE_DATALOADER_FOR_STATIC_URL'
   | 'SPLIT_USAGE_QUERIES'
   | 'STRIPE_METERS_NEW_ACCOUNTS'
   | 'STRIPE_METERS_SHADOW_ENABLED'
+  | 'TEMPORAL_CLOUD_DEPLOYS'
+  | 'TEMPORAL_CLOUD_DEPLOY_REMOVALS'
+  | 'TEMPORAL_CLOUD_VOLUME_BACKUPS'
   | 'UPDATED_VM_QUERIES';
 
 export type PlatformFeatureFlagStatus = {
@@ -3794,6 +4056,7 @@ export type ProjectGroupsConnection = {
 export type ProjectGroupsConnectionEdge = {
   __typename?: 'ProjectGroupsConnectionEdge';
   cursor: Scalars['String']['output'];
+  node: Group;
 };
 
 export type ProjectInvitation = {
@@ -4080,6 +4343,8 @@ export type Query = {
   __typename?: 'Query';
   /** Get all volume instances for a given volume */
   adminVolumeInstancesForVolume: Array<VolumeInstance>;
+  /** Get unified AI usage for a workspace */
+  agentUsage: AgentUsageSummary;
   /** Returns the platform feature flags enabled for the current user */
   allPlatformFeatureFlags: Array<PlatformFeatureFlagStatus>;
   /** Introspect the current API token and its accessible workspaces. */
@@ -4092,6 +4357,8 @@ export type Query = {
   auditLogEventTypeInfo: Array<AuditLogEventTypeInfo>;
   /** Gets audit logs for a workspace. */
   auditLogs: QueryAuditLogsConnection;
+  /** Railway agent chat bindings (Slack/Discord scope → workspace) across the caller's workspaces. */
+  botScopeBindings: Array<BotScopeBindingInfo>;
   /** Get the S3-compatible credentials for a bucket */
   bucketInstanceDetails?: Maybe<BucketInstanceDetails>;
   /** Get the S3-compatible credentials for a bucket */
@@ -4116,6 +4383,8 @@ export type Query = {
   deploymentInstanceExecutions: QueryDeploymentInstanceExecutionsConnection;
   /** Fetch logs for a deployment */
   deploymentLogs: Array<Log>;
+  /** Shell and exec sessions running on this deployment's VM that you can reconnect to. Null if the deployment has no running VM. */
+  deploymentSessions?: Maybe<QueryDeploymentSessionsConnection>;
   /** Find a single DeploymentSnapshot */
   deploymentSnapshot?: Maybe<DeploymentSnapshot>;
   /** All deployment triggers. */
@@ -4137,6 +4406,8 @@ export type Query = {
   egressGateways: Array<EgressGateway>;
   /** Find a single environment */
   environment: Environment;
+  /** Whether any service in the environment is on legacy static egress (not HA). Used to surface the HA migration banner. */
+  environmentHasLegacyStaticEgress: Scalars['Boolean']['output'];
   /** Fetch logs for a project environment. Build logs are excluded unless a snapshot ID is explicitly provided in the filter */
   environmentLogs: Array<Log>;
   /** Get a single environment patch by ID */
@@ -4197,6 +4468,8 @@ export type Query = {
   me: User;
   /** Get metrics for a project, environment, and service */
   metrics: Array<MetricsResult>;
+  /** Fetch individual network flow logs for an environment */
+  networkFlowLogs: Array<NetworkFlowLog>;
   /** Gets notification deliveries for the authenticated user */
   notificationDeliveries: QueryNotificationDeliveriesConnection;
   /** Gets a notification delivery by ID for the authenticated user */
@@ -4255,6 +4528,14 @@ export type Query = {
   projectsByIds: Array<Project>;
   /** Get public Railway stats. */
   publicStats: PublicStats;
+  /** Get a Railway domain by ID */
+  railwayDomain: RailwayDomain;
+  /** Get a Railway domain by its domain name within a workspace */
+  railwayDomainByName: RailwayDomain;
+  /** List DNS records for a Railway domain */
+  railwayDomainDnsRecords: Array<RailwayDomainDnsRecord>;
+  /** Get Railway domains for a workspace */
+  railwayDomains: Array<RailwayDomain>;
   /** Gets the ReferralInfo for the authenticated user. */
   referralInfo: ReferralInfo;
   /** List available regions */
@@ -4287,8 +4568,18 @@ export type Query = {
   serviceInstanceLimits: Scalars['ServiceInstanceLimit']['output'];
   /** Gets all sessions for authenticated user. */
   sessions: QuerySessionsConnection;
+  /** Fetch a single signal by owner scope and name. */
+  signal?: Maybe<Signal>;
+  /** Recent audit log entries for a signal. */
+  signalChanges: Array<SignalChange>;
+  /** Evaluate a signal against an evaluation context (pure resolution; does not mutate registry state). */
+  signalEvaluate: SignalEvaluation;
+  /** List signals registered for an owner scope. */
+  signals: Array<Signal>;
   /** Gets SSH public keys. If workspaceId is provided, returns the keys owned by that workspace (requires workspace MEMBER access). Under a workspace-scoped API token, workspaceId defaults to the token's workspace when omitted; otherwise returns the authenticated user's personal keys. */
   sshPublicKeys: QuerySshPublicKeysConnection;
+  /** Details for an SSH signup confirm page: the SSH key fingerprint to verify before binding it to the account. */
+  sshSignupInfo: SshSignupInfo;
   /** All TCP proxies for a service instance */
   tcpProxies: Array<TcpProxy>;
   /**
@@ -4362,6 +4653,11 @@ export type Query = {
 
 export type QueryAdminVolumeInstancesForVolumeArgs = {
   volumeId: Scalars['String']['input'];
+};
+
+
+export type QueryAgentUsageArgs = {
+  workspaceId: Scalars['String']['input'];
 };
 
 
@@ -4471,6 +4767,15 @@ export type QueryDeploymentLogsArgs = {
 };
 
 
+export type QueryDeploymentSessionsArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
+  before?: InputMaybe<Scalars['String']['input']>;
+  deploymentId: Scalars['String']['input'];
+  first?: InputMaybe<Scalars['Int']['input']>;
+  last?: InputMaybe<Scalars['Int']['input']>;
+};
+
+
 export type QueryDeploymentSnapshotArgs = {
   deploymentId: Scalars['String']['input'];
 };
@@ -4530,6 +4835,11 @@ export type QueryEgressGatewaysArgs = {
 export type QueryEnvironmentArgs = {
   id: Scalars['String']['input'];
   projectId?: InputMaybe<Scalars['String']['input']>;
+};
+
+
+export type QueryEnvironmentHasLegacyStaticEgressArgs = {
+  environmentId: Scalars['String']['input'];
 };
 
 
@@ -4729,6 +5039,19 @@ export type QueryMetricsArgs = {
 };
 
 
+export type QueryNetworkFlowLogsArgs = {
+  afterDate?: InputMaybe<Scalars['String']['input']>;
+  afterLimit?: InputMaybe<Scalars['Int']['input']>;
+  anchorDate?: InputMaybe<Scalars['String']['input']>;
+  beforeDate?: InputMaybe<Scalars['String']['input']>;
+  beforeLimit?: InputMaybe<Scalars['Int']['input']>;
+  deploymentInstanceId?: InputMaybe<Scalars['String']['input']>;
+  environmentId: Scalars['String']['input'];
+  filter?: InputMaybe<Scalars['String']['input']>;
+  serviceId?: InputMaybe<Scalars['String']['input']>;
+};
+
+
 export type QueryNotificationDeliveriesArgs = {
   after?: InputMaybe<Scalars['String']['input']>;
   before?: InputMaybe<Scalars['String']['input']>;
@@ -4883,6 +5206,29 @@ export type QueryProjectsByIdsArgs = {
 };
 
 
+export type QueryRailwayDomainArgs = {
+  id: Scalars['String']['input'];
+};
+
+
+export type QueryRailwayDomainByNameArgs = {
+  domain: Scalars['String']['input'];
+  workspaceId: Scalars['String']['input'];
+};
+
+
+export type QueryRailwayDomainDnsRecordsArgs = {
+  domain: Scalars['String']['input'];
+  workspaceId: Scalars['String']['input'];
+};
+
+
+export type QueryRailwayDomainsArgs = {
+  status?: InputMaybe<RailwayDomainStatus>;
+  workspaceId: Scalars['String']['input'];
+};
+
+
 export type QueryReferralInfoArgs = {
   workspaceId: Scalars['String']['input'];
 };
@@ -4983,12 +5329,42 @@ export type QuerySessionsArgs = {
 };
 
 
+export type QuerySignalArgs = {
+  name: Scalars['String']['input'];
+  owner?: InputMaybe<Scalars['String']['input']>;
+};
+
+
+export type QuerySignalChangesArgs = {
+  limit?: InputMaybe<Scalars['Int']['input']>;
+  name: Scalars['String']['input'];
+  owner?: InputMaybe<Scalars['String']['input']>;
+};
+
+
+export type QuerySignalEvaluateArgs = {
+  context: Scalars['JSON']['input'];
+  name: Scalars['String']['input'];
+  owner?: InputMaybe<Scalars['String']['input']>;
+};
+
+
+export type QuerySignalsArgs = {
+  owner?: InputMaybe<Scalars['String']['input']>;
+};
+
+
 export type QuerySshPublicKeysArgs = {
   after?: InputMaybe<Scalars['String']['input']>;
   before?: InputMaybe<Scalars['String']['input']>;
   first?: InputMaybe<Scalars['Int']['input']>;
   last?: InputMaybe<Scalars['Int']['input']>;
   workspaceId?: InputMaybe<Scalars['String']['input']>;
+};
+
+
+export type QuerySshSignupInfoArgs = {
+  code: Scalars['String']['input'];
 };
 
 
@@ -5208,6 +5584,18 @@ export type QueryDeploymentInstanceExecutionsConnectionEdge = {
   __typename?: 'QueryDeploymentInstanceExecutionsConnectionEdge';
   cursor: Scalars['String']['output'];
   node: DeploymentInstanceExecution;
+};
+
+export type QueryDeploymentSessionsConnection = {
+  __typename?: 'QueryDeploymentSessionsConnection';
+  edges: Array<QueryDeploymentSessionsConnectionEdge>;
+  pageInfo: PageInfo;
+};
+
+export type QueryDeploymentSessionsConnectionEdge = {
+  __typename?: 'QueryDeploymentSessionsConnectionEdge';
+  cursor: Scalars['String']['output'];
+  node: SandboxSession;
 };
 
 export type QueryDeploymentTriggersConnection = {
@@ -5486,6 +5874,97 @@ export type QueryWorkspaceTemplatesConnectionEdge = {
   node: Template;
 };
 
+export type RailwayDomain = {
+  __typename?: 'RailwayDomain';
+  autoRenewEnabled: Scalars['Boolean']['output'];
+  connectedServiceInstances: Array<ConnectedServiceInstance>;
+  createdAt: Scalars['DateTime']['output'];
+  domain: Scalars['String']['output'];
+  id: Scalars['ID']['output'];
+  /** Authoritative nameservers currently delegated for this domain at the registrar. */
+  nameservers: RailwayDomainNameservers;
+  nextBillingDate?: Maybe<Scalars['DateTime']['output']>;
+  purchasePrice: Scalars['Int']['output'];
+  registrationYears: Scalars['Int']['output'];
+  renewalPrice: Scalars['Int']['output'];
+  status: RailwayDomainStatus;
+  workspaceId: Scalars['String']['output'];
+  workspaceName?: Maybe<Scalars['String']['output']>;
+};
+
+export type RailwayDomainDnsRecord = {
+  __typename?: 'RailwayDomainDnsRecord';
+  answer: Scalars['String']['output'];
+  domainName: Scalars['String']['output'];
+  fqdn: Scalars['String']['output'];
+  host: Scalars['String']['output'];
+  id: Scalars['Int']['output'];
+  priority?: Maybe<Scalars['Int']['output']>;
+  ttl: Scalars['Int']['output'];
+  type: RailwayDomainDnsRecordType;
+};
+
+export type RailwayDomainDnsRecordCreateInput = {
+  answer: Scalars['String']['input'];
+  domain: Scalars['String']['input'];
+  host: Scalars['String']['input'];
+  priority?: InputMaybe<Scalars['Int']['input']>;
+  ttl?: InputMaybe<Scalars['Int']['input']>;
+  type: RailwayDomainDnsRecordType;
+  workspaceId: Scalars['String']['input'];
+};
+
+export type RailwayDomainDnsRecordDeleteInput = {
+  domain: Scalars['String']['input'];
+  recordId: Scalars['Int']['input'];
+  workspaceId: Scalars['String']['input'];
+};
+
+export type RailwayDomainDnsRecordType =
+  | 'A'
+  | 'AAAA'
+  | 'ANAME'
+  | 'CNAME'
+  | 'MX'
+  | 'NS'
+  | 'SRV'
+  | 'TXT';
+
+export type RailwayDomainDnsRecordUpdateInput = {
+  answer: Scalars['String']['input'];
+  domain: Scalars['String']['input'];
+  host: Scalars['String']['input'];
+  priority?: InputMaybe<Scalars['Int']['input']>;
+  recordId: Scalars['Int']['input'];
+  ttl?: InputMaybe<Scalars['Int']['input']>;
+  type: RailwayDomainDnsRecordType;
+  workspaceId: Scalars['String']['input'];
+};
+
+export type RailwayDomainNameservers = {
+  __typename?: 'RailwayDomainNameservers';
+  /** True when the domain is delegated to Name.com's nameservers (Railway-managed DNS). */
+  isDefault: Scalars['Boolean']['output'];
+  nameservers: Array<Scalars['String']['output']>;
+};
+
+export type RailwayDomainNameserversSetInput = {
+  id: Scalars['String']['input'];
+  /** Hostnames of the nameservers to delegate to (2-13). Pass an empty list to reset to Name.com's account-level defaults for this domain. */
+  nameservers: Array<Scalars['String']['input']>;
+};
+
+export type RailwayDomainStatus =
+  | 'ACTIVE'
+  | 'EXPIRED'
+  | 'PURCHASING'
+  | 'REFUNDED';
+
+export type RailwayDomainUpdateInput = {
+  autoRenewEnabled?: InputMaybe<Scalars['Boolean']['input']>;
+  id: Scalars['String']['input'];
+};
+
 export type RecoveryCodeValidateInput = {
   code: Scalars['String']['input'];
   twoFactorLinkingKey?: InputMaybe<Scalars['String']['input']>;
@@ -5602,6 +6081,11 @@ export type RestartPolicyType =
   | 'NEVER'
   | 'ON_FAILURE';
 
+export type SshSignupInfo = {
+  __typename?: 'SSHSignupInfo';
+  fingerprint: Scalars['String']['output'];
+};
+
 export type Sandbox = {
   __typename?: 'Sandbox';
   createdAt: Scalars['DateTime']['output'];
@@ -5628,6 +6112,8 @@ export type SandboxCreateInput = {
   idleTimeoutMinutes?: InputMaybe<Scalars['Int']['input']>;
   /** Network access for the sandbox. Defaults to ISOLATED (no private network access). */
   networkIsolation?: InputMaybe<SandboxNetworkIsolation>;
+  /** Region to place the sandbox in (e.g. us-west2, us-east4-eqdc4a). Defaults to the platform default region when omitted. */
+  region?: InputMaybe<Scalars['String']['input']>;
   /** Fork an existing running sandbox in this environment. Mutually exclusive with template. */
   sourceSandboxId?: InputMaybe<Scalars['String']['input']>;
   template?: InputMaybe<SandboxTemplateInput>;
@@ -5656,9 +6142,11 @@ export type SandboxSession = {
   __typename?: 'SandboxSession';
   /** Whether a client is currently connected. */
   attached: Scalars['Boolean']['output'];
-  /** The exec command; empty for an interactive shell. */
+  /** The command being run; empty for an interactive shell. */
   command: Scalars['String']['output'];
   createdAt?: Maybe<Scalars['DateTime']['output']>;
+  /** For an interactive shell, whether a foreground program currently holds the terminal. Null otherwise, or when the runtime can't report it. */
+  foregroundActive?: Maybe<Scalars['Boolean']['output']>;
   kind: SandboxSessionKind;
   /** Stable session name; reconnect/attach by this. */
   name: Scalars['String']['output'];
@@ -5720,10 +6208,13 @@ export type Service = Node & {
   /** @deprecated Use environment.deployments for properly scoped access control */
   deployments: ServiceDeploymentsConnection;
   featureFlags: Array<ActiveServiceFeatureFlag>;
+  groupId?: Maybe<Scalars['String']['output']>;
   /** Whether this service has hidden registry credentials from a template. When true, the credentials are stored in the template and used during deployment. */
   hasHiddenRegistryCredentialsFromTemplate: Scalars['Boolean']['output'];
   icon?: Maybe<Scalars['String']['output']>;
   id: Scalars['ID']['output'];
+  /** Whether this service has an active restriction that limits its capabilities. */
+  isRestricted: Scalars['Boolean']['output'];
   name: Scalars['String']['output'];
   project: Project;
   projectId: Scalars['String']['output'];
@@ -6044,6 +6535,104 @@ export type ShellTokenInput = {
   serviceId?: InputMaybe<Scalars['String']['input']>;
 };
 
+export type Signal = Node & {
+  __typename?: 'Signal';
+  createdAt: Scalars['DateTime']['output'];
+  createdBy?: Maybe<Scalars['String']['output']>;
+  default: Scalars['JSON']['output'];
+  id: Scalars['ID']['output'];
+  name: Scalars['String']['output'];
+  owner: Scalars['String']['output'];
+  rules: Scalars['JSON']['output'];
+  type: SignalType;
+  updatedAt: Scalars['DateTime']['output'];
+  version: Scalars['BigInt']['output'];
+  writableBy: Array<Scalars['String']['output']>;
+};
+
+export type SignalChange = Node & {
+  __typename?: 'SignalChange';
+  authorId?: Maybe<Scalars['String']['output']>;
+  createdAt: Scalars['DateTime']['output'];
+  id: Scalars['ID']['output'];
+  kind: SignalChangeKind;
+  payload: Scalars['JSON']['output'];
+  prevState: Scalars['JSON']['output'];
+  seq: Scalars['BigInt']['output'];
+  signalId: Scalars['String']['output'];
+};
+
+export type SignalChangeKind =
+  | 'default_changed'
+  | 'replaced'
+  | 'rollback'
+  | 'set'
+  | 'unset';
+
+export type SignalCreateInput = {
+  default: Scalars['JSON']['input'];
+  name: Scalars['String']['input'];
+  owner: Scalars['String']['input'];
+  type: SignalType;
+  writableBy?: InputMaybe<Array<Scalars['String']['input']>>;
+};
+
+export type SignalDefaultSetInput = {
+  default: Scalars['JSON']['input'];
+  name: Scalars['String']['input'];
+  owner: Scalars['String']['input'];
+};
+
+export type SignalDeleteInput = {
+  name: Scalars['String']['input'];
+  owner: Scalars['String']['input'];
+};
+
+export type SignalEvaluation = {
+  __typename?: 'SignalEvaluation';
+  reason: SignalEvaluationReason;
+  trace: Scalars['JSON']['output'];
+  value: Scalars['JSON']['output'];
+};
+
+export type SignalEvaluationReason =
+  | 'DEFAULT'
+  | 'SPLIT'
+  | 'TARGETING_MATCH';
+
+export type SignalReplaceInput = {
+  default: Scalars['JSON']['input'];
+  name: Scalars['String']['input'];
+  owner: Scalars['String']['input'];
+  type: SignalType;
+};
+
+export type SignalRollbackInput = {
+  name: Scalars['String']['input'];
+  owner: Scalars['String']['input'];
+  seq: Scalars['BigInt']['input'];
+};
+
+export type SignalRuleSetInput = {
+  expression: Scalars['JSON']['input'];
+  name: Scalars['String']['input'];
+  owner: Scalars['String']['input'];
+  ruleId: Scalars['String']['input'];
+  value: Scalars['JSON']['input'];
+};
+
+export type SignalRuleUnsetInput = {
+  name: Scalars['String']['input'];
+  owner: Scalars['String']['input'];
+  ruleId: Scalars['String']['input'];
+};
+
+export type SignalType =
+  | 'bool'
+  | 'json'
+  | 'number'
+  | 'string';
+
 export type SimilarTemplate = {
   __typename?: 'SimilarTemplate';
   code: Scalars['String']['output'];
@@ -6116,6 +6705,8 @@ export type Subscription = {
   environmentStagedPatch: EnvironmentPatch;
   /** Stream HTTP logs for a deployment */
   httpLogs: Array<HttpLog>;
+  /** Stream network flow logs for an environment */
+  networkFlowLogs: Array<NetworkFlowLog>;
   /** Subscribe to notification delivery updates (created and resolved) for the authenticated user */
   notificationDeliveryUpdated: NotificationDeliveryUpdate;
   /**
@@ -6181,6 +6772,19 @@ export type SubscriptionHttpLogsArgs = {
   beforeLimit?: InputMaybe<Scalars['Int']['input']>;
   deploymentId: Scalars['String']['input'];
   filter?: InputMaybe<Scalars['String']['input']>;
+};
+
+
+export type SubscriptionNetworkFlowLogsArgs = {
+  afterDate?: InputMaybe<Scalars['String']['input']>;
+  afterLimit?: InputMaybe<Scalars['Int']['input']>;
+  anchorDate?: InputMaybe<Scalars['String']['input']>;
+  beforeDate?: InputMaybe<Scalars['String']['input']>;
+  beforeLimit?: InputMaybe<Scalars['Int']['input']>;
+  deploymentInstanceId?: InputMaybe<Scalars['String']['input']>;
+  environmentId: Scalars['String']['input'];
+  filter?: InputMaybe<Scalars['String']['input']>;
+  serviceId?: InputMaybe<Scalars['String']['input']>;
 };
 
 
