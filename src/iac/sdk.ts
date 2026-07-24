@@ -70,6 +70,16 @@ export function createRailwayContext(input: RailwayContextInput = {}): RailwayCo
 
 export type RegionConfig = number | { count?: number; replicas?: number; stacker?: string | null };
 
+/**
+ * Per-container resource limits. Compiles to `deploy.limitOverride.containers`
+ * and mirrors the platform fields verbatim — no unit conversion.
+ */
+export interface ServiceLimits {
+  cpu?: number;
+  memoryBytes?: number;
+  diskBytes?: number;
+}
+
 export interface IntentServiceConfig {
   source?: SourceConfig | Omit<SourceConfig, "type">;
   root?: string;
@@ -86,6 +96,7 @@ export interface IntentServiceConfig {
   healthcheckTimeout?: number;
   replicas?: number | Record<string, RegionConfig>;
   regions?: Record<string, RegionConfig>;
+  limits?: ServiceLimits;
   networking?: ServiceNetworking;
   domains?: Array<string | { domain: string; port?: number }>;
   tcp?: Array<string | number>;
@@ -188,6 +199,7 @@ export function fn<const Env extends Record<string, string | VariableConfig | Va
 
 export interface DatabaseConfig {
   region?: string;
+  limits?: ServiceLimits;
 }
 
 export function postgres(name: string, config: DatabaseConfig = {}): ReferencableDatabaseNode<"postgres"> {
@@ -214,9 +226,14 @@ export function mongo(name: string, config: DatabaseConfig = {}): ReferencableDa
 export function database<E extends DatabaseNode["engine"]>(
   name: string,
   engine: E,
-  options: { image: string; output?: string; defaultMountPath?: string; region?: string },
+  options: { image: string; output?: string; defaultMountPath?: string; region?: string; limits?: ServiceLimits },
 ): ReferencableDatabaseNode<E> {
   const output = options.output ?? "DATABASE_URL";
+  const limitOverride = normalizeLimits(options.limits);
+  const deploy = pruneEmpty({
+    ...(options.region ? { multiRegionConfig: { [options.region]: { numReplicas: 1 } } } : {}),
+    ...(limitOverride ? { limitOverride } : {}),
+  });
   const node = {
     address: resourceAddress("database", name) as `database.${string}`,
     type: "database",
@@ -227,7 +244,7 @@ export function database<E extends DatabaseNode["engine"]>(
     output,
     defaultMountPath: options.defaultMountPath,
     source: image(options.image),
-    ...(options.region ? { deploy: { multiRegionConfig: { [options.region]: { numReplicas: 1 } } } } : {}),
+    ...(deploy ? { deploy } : {}),
   } as DatabaseNode;
   return withVariableRefs(node) as ReferencableDatabaseNode<E>;
 }
@@ -315,9 +332,16 @@ function normalizeDeploy(config: ServiceConfigInput): DeployConfig | undefined {
     preDeployCommand: Array.isArray(preDeployCommand) ? preDeployCommand : preDeployCommand ? [preDeployCommand] : config.deploy?.preDeployCommand,
     healthcheckPath: config.healthcheck ?? config.healthcheckPath ?? config.run?.healthcheck ?? config.deploy?.healthcheckPath,
     healthcheckTimeout: config.healthcheckTimeout ?? config.run?.healthcheckTimeout ?? config.deploy?.healthcheckTimeout,
+    limitOverride: normalizeLimits(config.limits) ?? config.deploy?.limitOverride,
     ...replicaConfig,
     multiRegionConfig: replicaConfig?.multiRegionConfig ?? config.deploy?.multiRegionConfig,
   }) as DeployConfig | undefined;
+}
+
+function normalizeLimits(limits: ServiceLimits | undefined): DeployConfig["limitOverride"] | undefined {
+  if (!limits) return undefined;
+  const containers = pruneEmpty({ ...limits });
+  return containers ? { containers } : undefined;
 }
 
 function normalizeReplicas(replicas: ServiceConfigInput["replicas"], regions: ServiceConfigInput["regions"]): Pick<DeployConfig, "numReplicas" | "multiRegionConfig"> | undefined {
