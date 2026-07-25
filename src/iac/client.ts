@@ -54,6 +54,21 @@ export interface ChangeSetApplyResult {
   stagedPatchId?: string | null;
 }
 
+export type WorkflowStatus = "Complete" | "Error" | "NotFound" | "Running";
+export interface WorkflowResult {
+  status: WorkflowStatus;
+  error?: string | null;
+}
+
+export interface WaitForWorkflowOptions {
+  timeoutMs?: number;
+  intervalMs?: number;
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+const defaultSleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+
 export interface ProjectService { id: string; name: string }
 export interface ProjectVolume { id: string; name?: string | null; serviceId?: string | null }
 export interface ProjectBucket { id: string; name: string; groupId?: string | null }
@@ -169,7 +184,7 @@ export class IacClient {
       }
     }
 
-    const bucketIdsByName = await this.ensureGraphBuckets({ projectId, graph });
+    const bucketIdsByName = await this.ensureGraphBuckets({ projectId, environmentId, graph });
     return { serviceIdsByName, volumeIdsByServiceName, bucketIdsByName };
   }
 
@@ -206,6 +221,27 @@ export class IacClient {
     }
   }
 
+  async getWorkflowStatus(workflowId: string): Promise<WorkflowResult> {
+    const data = await gql<{ workflowStatus: WorkflowResult }, { workflowId: string }>(this.#config, `query IacWorkflowStatus($workflowId: String!) {
+      workflowStatus(workflowId: $workflowId) { status error }
+    }`, { workflowId });
+    return data.workflowStatus;
+  }
+
+  // environmentApplyChangeSet returns as soon as the patch is staged and the
+  // commit workflow is queued; the commit itself runs asynchronously and can
+  // fail afterwards (an invalid value anywhere in the patch rejects the whole
+  // commit). Poll to a terminal state so callers can tell "staged" from "applied".
+  async waitForWorkflow(workflowId: string, { timeoutMs = 120_000, intervalMs = 2_000, now = () => Date.now(), sleep = defaultSleep }: WaitForWorkflowOptions = {}): Promise<WorkflowResult> {
+    const deadline = now() + timeoutMs;
+    for (;;) {
+      const result = await this.getWorkflowStatus(workflowId);
+      if (result.status !== "Running") return result;
+      if (now() >= deadline) return { status: "Running", error: `Timed out after ${timeoutMs}ms waiting for workflow ${workflowId}.` };
+      await sleep(intervalMs);
+    }
+  }
+
   async commitStagedPatch({ environmentId, message, skipDeploys }: { environmentId: string; message?: string; skipDeploys?: boolean }): Promise<string> {
     const variables: { environmentId: string; message?: string; skipDeploys?: boolean } = { environmentId };
     if (message !== undefined) variables.message = message;
@@ -216,19 +252,23 @@ export class IacClient {
     return data.environmentPatchCommitStaged;
   }
 
-  private async ensureGraphBuckets({ projectId, graph }: { projectId: string; graph: RailwayGraph }): Promise<Record<string, string>> {
+  private async ensureGraphBuckets({ projectId, environmentId, graph }: { projectId: string; environmentId: string; graph: RailwayGraph }): Promise<Record<string, string>> {
     const existing = await this.getProjectBuckets(projectId);
     const idsByName = Object.fromEntries(existing.map(bucket => [bucket.name, bucket.id]));
     for (const resource of graph.resources) {
       if (resource.type !== "bucket" || idsByName[resource.name]) continue;
-      const bucket = await this.createBucketForResource({ projectId, name: resource.name });
+      const bucket = await this.createBucketForResource({ projectId, environmentId, name: resource.name });
       idsByName[resource.name] = bucket.id;
     }
     return idsByName;
   }
 
-  private async createBucketForResource({ projectId, name }: { projectId: string; name?: string }): Promise<ProjectBucket> {
-    const input: BucketCreateInput = { projectId, environmentId: null };
+  // environmentId deploys the bucket into the target environment. Creating with a
+  // null environmentId leaves a project-level row that never deploys, is invisible
+  // to `railway bucket list`, and permanently holds the name (there is no bucket
+  // delete API), so a retry can never create the bucket it was asked for.
+  private async createBucketForResource({ projectId, environmentId, name }: { projectId: string; environmentId: string; name?: string }): Promise<ProjectBucket> {
+    const input: BucketCreateInput = { projectId, environmentId };
     if (name !== undefined) input.name = name;
     const data = await gql<{ bucketCreate: ProjectBucket }, { input: BucketCreateInput }>(this.#config, `mutation IacBucketCreate($input: BucketCreateInput!) {
       bucketCreate(input: $input) { id name }
