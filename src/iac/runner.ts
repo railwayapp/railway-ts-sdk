@@ -1,6 +1,6 @@
 import { diffGraphs, renderChangeSet, type RailwayChangeSet } from "./change-set.js";
 import { environmentConfigToGraph } from "./compiler.js";
-import { IacClient, type ChangeSetApplyResult, type ChangeSetPreviewResult, type CurrentEnvironmentResult } from "./client.js";
+import { IacClient, type ChangeSetApplyResult, type ChangeSetPreviewResult, type CurrentEnvironmentResult, type WorkflowResult } from "./client.js";
 import { validateGraph, type RailwayGraph } from "./graph.js";
 import { evaluateRailwayProject, findRailwayFile } from "./project.js";
 import { renderRailwayGraphTypes } from "./typegen.js";
@@ -89,6 +89,8 @@ export interface RailwayIacStageResponse extends Omit<RailwayIacPlanResponse, "c
 export interface RailwayIacApplyResponse extends Omit<RailwayIacStageResponse, "command"> {
   command: "apply";
   applyResult?: ChangeSetApplyResult;
+  /** Terminal state of the commit workflow. Absent when the apply staged nothing. */
+  workflow?: WorkflowResult;
   deploymentId?: string;
   stagedPatchId?: string;
 }
@@ -241,10 +243,28 @@ async function applyRailwayIac(input: EvaluatedCommandInput): Promise<RailwayIac
     ...(planned.currentEnvironment?.configEtag ? { baseEtag: planned.currentEnvironment.configEtag } : {}),
   });
 
+  // The mutation returns once the patch is staged and the commit workflow is
+  // queued. Without waiting for that workflow, a commit the server rejects
+  // outright still reports every change as "applied" with no diagnostics — the
+  // CLI prints ✓ and the environment is unchanged.
+  const workflow = applyResult.deploymentId ? await client.waitForWorkflow(applyResult.deploymentId) : undefined;
+  const workflowDiagnostics: RailwayIacRunnerDiagnostic[] = workflow && workflow.status !== "Complete"
+    ? [{
+        severity: "error",
+        path: "apply.workflow",
+        message: workflow.status === "Running"
+          ? `Timed out waiting for the commit to finish (workflow ${applyResult.deploymentId}). The changes may still be applying; re-run plan to check.`
+          : `Railway rejected the commit (${workflow.status})${workflow.error ? `: ${workflow.error}` : ""}. No changes were applied.`,
+      }]
+    : [];
+
   return {
     ...planned,
+    ok: planned.ok && workflowDiagnostics.length === 0,
     command: "apply",
     applyResult,
+    ...(workflow ? { workflow } : {}),
+    diagnostics: [...planned.diagnostics, ...workflowDiagnostics],
     ...(applyResult.deploymentId ? { deploymentId: applyResult.deploymentId } : {}),
     ...(applyResult.stagedPatchId ? { stagedPatchId: applyResult.stagedPatchId } : {}),
   };
