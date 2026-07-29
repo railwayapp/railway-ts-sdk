@@ -271,4 +271,29 @@ describe("exec", () => {
     socket.serverExit(0);
     await expect(handle).resolves.toMatchObject({ exitCode: 0 });
   });
+
+  // A close without an exit frame leaves the command outcome unknown.
+  it("rejects when the socket closes without an exit frame", async () => {
+    const { handle, socket } = await execSocket("echo hi");
+
+    socket.serverClose(1006, "no such instance");
+
+    await expect(handle).rejects.toThrow(
+      /closed before the command reported an exit/i,
+    );
+  });
+
+  it("carries the close code and any partial output on an interrupted exec", async () => {
+    const { handle, socket } = await execSocket("long-running");
+
+    socket.serverStdout("partial\n");
+    await tick();
+    socket.serverClose(1011, "instance gone");
+
+    await expect(handle).rejects.toMatchObject({
+      name: "ExecInterruptedError",
+      closeCode: 1011,
+      stdout: "partial\n",
+    });
+  });
 });

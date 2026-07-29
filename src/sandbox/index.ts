@@ -1,5 +1,6 @@
 export { Sandbox } from "./sandbox.js";
 export {
+  ExecInterruptedError,
   SandboxFailedError,
   SandboxFileNotFoundError,
   SandboxFilesError,
