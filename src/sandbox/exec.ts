@@ -5,6 +5,7 @@ import {
   type ExecWsConnection,
 } from "../core/exec-ws-client.js";
 import { requestGraphQL } from "../core/graphql-client.js";
+import { ExecInterruptedError } from "./errors.js";
 import {
   RailwayGenerateShellTokenDocument,
   type RailwayGenerateShellTokenMutation,
@@ -315,8 +316,20 @@ async function runExec(
         exitCode = code;
         settle({ exitCode, stdout, stderr, truncated: false, timedOut });
       },
-      onClose: () =>
-        settle({ exitCode, stdout, stderr, truncated: false, timedOut }),
+      onClose: info => {
+        if (control.detached || timedOut) {
+          settle({ exitCode, stdout, stderr, truncated: false, timedOut });
+          return;
+        }
+        settle({
+          error: new ExecInterruptedError({
+            closeCode: info.code,
+            reason: info.reason,
+            stdout,
+            stderr,
+          }),
+        });
+      },
     },
   });
   control.connection = connection;

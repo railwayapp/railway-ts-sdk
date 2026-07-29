@@ -1,5 +1,28 @@
-import { RailwayError } from "../core/errors.js";
+import { RailwayConnectionError, RailwayError } from "../core/errors.js";
 import type { SandboxStatus } from "./types.js";
+
+/** The socket closed before the command reported an exit, usually because the sandbox was already gone or died mid-exec. */
+export class ExecInterruptedError extends RailwayConnectionError {
+  readonly stdout: string;
+  readonly stderr: string;
+
+  constructor(args: {
+    closeCode: number;
+    reason: string;
+    stdout: string;
+    stderr: string;
+  }) {
+    super({
+      message:
+        `The exec session closed before the command reported an exit ` +
+        `(code ${args.closeCode}${args.reason ? `: ${args.reason}` : ""}). ` +
+        `The command's outcome is unknown; the sandbox may have been destroyed.`,
+      closeCode: args.closeCode,
+    });
+    this.stdout = args.stdout;
+    this.stderr = args.stderr;
+  }
+}
 
 export class SandboxNotFoundError extends RailwayError {
   readonly id: string;

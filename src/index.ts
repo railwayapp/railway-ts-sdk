@@ -78,6 +78,7 @@ export {
 } from "./iac/index.js";
 export {
   ExecHandle,
+  ExecInterruptedError,
   Sandbox,
   SandboxFailedError,
   SandboxFileNotFoundError,
