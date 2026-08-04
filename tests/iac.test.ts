@@ -438,6 +438,24 @@ describe("Railway IaC", () => {
     expect(varChanges).toEqual([]);
   });
 
+  it("never plans a change for a preserveExisting variable, even when the authored value differs", () => {
+    const current = environmentConfigToGraph({
+      services: { web: { source: { repo: "r" }, variables: { SECRET: { value: "existing" } } } },
+    }, { projectName: "app" });
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [service("web", {
+        source: github("r"),
+        env: {
+          SECRET: { value: "different", preserveExisting: true },
+          TOKEN: { type: "literal", value: "changed", preserveExisting: true },
+        },
+      })],
+    }));
+
+    const varChanges = diffGraphs({ current, desired }).changes.filter(change => change.kind.startsWith("variable"));
+    expect(varChanges).toEqual([]);
+  });
+
   it("redacts variable values in plan output but keeps them in the change", () => {
     const SECRET = "sk-super-secret-value-123";
     const current = environmentConfigToGraph({ services: { web: { source: { repo: "r" } } } }, { projectName: "app" });

@@ -673,7 +673,9 @@ function isEquivalentDatabaseSource(previous: ResourceNode, after: unknown): boo
 }
 
 function isPreservedVariable(value: VariableValue | undefined): boolean {
-  return value?.type === "preserve";
+  return value?.type === "preserve" ||
+    (value?.type === 'literal' && !!value.preserveExisting) ||
+    (value?.type === 'raw' && !!value.value.preserveExisting);
 }
 
 function isUnknownCurrentVariable(value: VariableValue | undefined): boolean {
