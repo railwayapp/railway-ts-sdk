@@ -43,6 +43,67 @@ describe("IaC apply — configEtag handshake", () => {
     expect(variablesOf(mock.calls[0]).baseConfigEtag).toBeUndefined();
   });
 
+  it("polls asynchronous applies until the durable workflow completes", async () => {
+    vi.useFakeTimers();
+    const mock = createFetchMock([
+      {
+        data: {
+          environmentApplyChangeSet: {
+            ...applyOk.data.environmentApplyChangeSet,
+            id: "iac-change-set/e1/abc",
+            status: "applying",
+            deploymentId: "iac-change-set/e1/abc",
+          },
+        },
+      },
+      {
+        data: {
+          environmentChangeSetApply: {
+            ...applyOk.data.environmentApplyChangeSet,
+            id: "iac-change-set/e1/abc",
+            status: "applying",
+          },
+        },
+      },
+      {
+        data: {
+          environmentChangeSetApply: {
+            ...applyOk.data.environmentApplyChangeSet,
+            id: "iac-change-set/e1/abc",
+          },
+        },
+      },
+    ]);
+
+    const largeChangeSet: RailwayChangeSet = {
+      version: 1,
+      diagnostics: [],
+      changes: Array.from({ length: 500 }, (_, index) => ({
+        kind: "resource.update" as const,
+        address: `service.worker-${index}` as `service.${string}`,
+        field: "deploy.numReplicas",
+        path: `service.worker-${index}.deploy.numReplicas`,
+        summary: `Scale worker-${index}`,
+        severity: "safe" as const,
+        deployEffect: "deploy" as const,
+        before: 1,
+        after: 2,
+      })),
+    };
+    const result = client(mock.fetch).applyChangeSet({
+      environmentId: "e1",
+      changeSet: largeChangeSet,
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    await expect(result).resolves.toMatchObject({ status: "applied" });
+    expect(mock.calls).toHaveLength(3);
+    expect(
+      (variablesOf(mock.calls[0]).input as RailwayChangeSet).changes,
+    ).toHaveLength(500);
+    vi.useRealTimers();
+  });
+
   it("maps a STALE_ENVIRONMENT_BASE rejection to StaleEnvironmentError", async () => {
     const mock = createFetchMock([
       { errors: [{ message: "stale", extensions: { code: "STALE_ENVIRONMENT_BASE" } }] },
