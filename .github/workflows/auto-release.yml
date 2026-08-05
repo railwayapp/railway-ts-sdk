@@ -144,5 +144,6 @@ jobs:
       - name: Dispatch release workflow
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.auto-release.outputs.tag }}
         run: gh workflow run release.yml --ref main -f tag="$TAG"
