@@ -197,13 +197,36 @@ export class IacClient {
       const data = await gql<{ environmentApplyChangeSet: ChangeSetApplyResult }, typeof variables>(this.#config, `mutation IacApplyChangeSet($environmentId: String!, $input: JSON!, $commitMessage: String, $baseConfigEtag: String) {
         environmentApplyChangeSet(environmentId: $environmentId, input: $input, commitMessage: $commitMessage, baseConfigEtag: $baseConfigEtag) { id status deploymentId stagedPatchId diagnostics changes { kind path summary status outputs } }
       }`, variables);
-      return data.environmentApplyChangeSet;
+      if (data.environmentApplyChangeSet.status !== "applying") {
+        return data.environmentApplyChangeSet;
+      }
+      return await this.waitForChangeSetApply({
+        environmentId,
+        id: data.environmentApplyChangeSet.id,
+      });
     } catch (error) {
       if (isStaleBaseError(error)) {
         throw new StaleEnvironmentError("The environment changed since this plan was computed. Re-run plan and review the changes before applying.", { cause: error });
       }
       throw error;
     }
+  }
+
+  async waitForChangeSetApply({ environmentId, id }: { environmentId: string; id: string }): Promise<ChangeSetApplyResult> {
+    const deadline = Date.now() + 2 * 60 * 60 * 1000;
+    while (Date.now() < deadline) {
+      const data = await gql<
+        { environmentChangeSetApply: ChangeSetApplyResult },
+        { environmentId: string; id: string }
+      >(this.#config, `query IacChangeSetApplyStatus($environmentId: String!, $id: String!) {
+        environmentChangeSetApply(environmentId: $environmentId, id: $id) { id status deploymentId stagedPatchId diagnostics changes { kind path summary status outputs } }
+      }`, { environmentId, id });
+      if (data.environmentChangeSetApply.status !== "applying") {
+        return data.environmentChangeSetApply;
+      }
+      await new Promise(resolve => setTimeout(resolve, 1_000));
+    }
+    throw new Error(`Timed out waiting for Railway ChangeSet apply ${id}`);
   }
 
   async commitStagedPatch({ environmentId, message, skipDeploys }: { environmentId: string; message?: string; skipDeploys?: boolean }): Promise<string> {
