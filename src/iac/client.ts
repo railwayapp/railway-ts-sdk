@@ -188,14 +188,14 @@ export class IacClient {
   }
 
   async applyChangeSet({ environmentId, changeSet, commitMessage, baseEtag }: { environmentId: string; changeSet: RailwayChangeSet; commitMessage?: string; baseEtag?: string }): Promise<ChangeSetApplyResult> {
-    const variables: { environmentId: string; input: RailwayChangeSet; commitMessage?: string; baseConfigEtag?: string } = { environmentId, input: changeSet };
+    const variables: { environmentId: string; input: RailwayChangeSet; commitMessage?: string; baseConfigEtag?: string; waitForCompletion: boolean } = { environmentId, input: changeSet, waitForCompletion: false };
     if (commitMessage !== undefined) variables.commitMessage = commitMessage;
     // Optimistic concurrency: the server rejects the apply if the environment moved
     // since this plan's base. Omitted etag (older server/client) skips the check.
     if (baseEtag !== undefined) variables.baseConfigEtag = baseEtag;
     try {
-      const data = await gql<{ environmentApplyChangeSet: ChangeSetApplyResult }, typeof variables>(this.#config, `mutation IacApplyChangeSet($environmentId: String!, $input: JSON!, $commitMessage: String, $baseConfigEtag: String) {
-        environmentApplyChangeSet(environmentId: $environmentId, input: $input, commitMessage: $commitMessage, baseConfigEtag: $baseConfigEtag) { id status deploymentId stagedPatchId diagnostics changes { kind path summary status outputs } }
+      const data = await gql<{ environmentApplyChangeSet: ChangeSetApplyResult }, typeof variables>(this.#config, `mutation IacApplyChangeSet($environmentId: String!, $input: JSON!, $commitMessage: String, $baseConfigEtag: String, $waitForCompletion: Boolean) {
+        environmentApplyChangeSet(environmentId: $environmentId, input: $input, commitMessage: $commitMessage, baseConfigEtag: $baseConfigEtag, waitForCompletion: $waitForCompletion) { id status deploymentId stagedPatchId diagnostics changes { kind path summary status outputs } }
       }`, variables);
       if (data.environmentApplyChangeSet.status !== "applying") {
         return data.environmentApplyChangeSet;
