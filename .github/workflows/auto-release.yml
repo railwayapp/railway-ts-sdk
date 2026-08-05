@@ -10,10 +10,8 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  actions: read
-  checks: read
+  actions: write
   contents: write
-  id-token: write
   pull-requests: read
 
 jobs:
@@ -139,8 +137,12 @@ jobs:
         run: git push --atomic origin main "v${{ steps.bump.outputs.version }}"
 
   publish:
-    name: Publish release
+    name: Trigger release
     needs: auto-release
-    uses: ./.github/workflows/release.yml
-    with:
-      tag: ${{ needs.auto-release.outputs.tag }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch release workflow
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.auto-release.outputs.tag }}
+        run: gh workflow run release.yml --ref main -f tag="$TAG"
