@@ -33,6 +33,7 @@ describe("IaC apply — configEtag handshake", () => {
     await client(mock.fetch).applyChangeSet({ environmentId: "e1", changeSet, baseEtag: "etag-xyz" });
 
     expect(variablesOf(mock.calls[0]).baseConfigEtag).toBe("etag-xyz");
+    expect(variablesOf(mock.calls[0]).waitForCompletion).toBe(false);
   });
 
   it("omits baseConfigEtag when no base etag is provided (backward compatible)", async () => {
