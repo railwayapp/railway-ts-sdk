@@ -6,33 +6,33 @@ on:
     branches: [main]
 
 concurrency:
-  group: auto-release
+  group: release-bump
   cancel-in-progress: false
 
 permissions:
   actions: read
   checks: read
-  contents: read
+  contents: write
+  id-token: write
   pull-requests: read
 
 jobs:
   auto-release:
     name: Auto Release
-    # Temporarily disabled while releases are paused.
     if: |
-      false &&
       github.event.pull_request.merged == true &&
       (contains(github.event.pull_request.labels.*.name, 'release/patch') ||
        contains(github.event.pull_request.labels.*.name, 'release/minor') ||
        contains(github.event.pull_request.labels.*.name, 'release/major'))
     runs-on: ubuntu-latest
+    outputs:
+      tag: v${{ steps.bump.outputs.version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
-          token: ${{ secrets.RELEASE_TOKEN }}
 
       - name: Wait for batch window
         run: sleep 120
@@ -47,50 +47,28 @@ jobs:
           echo "Main SHA: $MAIN_SHA"
 
           for i in {1..20}; do
-            CHECKS=$(gh api repos/${{ github.repository }}/commits/$MAIN_SHA/check-runs --jq '{
-              total: .total_count,
-              completed: [.check_runs[] | select(.status == "completed")] | length,
-              success: [.check_runs[] | select(.conclusion == "success" or .conclusion == "skipped")] | length,
-              failure: [.check_runs[] | select(.conclusion == "failure" or .conclusion == "cancelled" or .conclusion == "timed_out" or .conclusion == "action_required")] | length
-            }')
+            CI_RUN=$(gh run list --workflow ci.yml --branch main --commit "$MAIN_SHA" --event push \
+              --json databaseId,status,conclusion --limit 1 --jq '.[0] // {}')
+            STATUS=$(echo "$CI_RUN" | jq -r '.status // "pending"')
+            CONCLUSION=$(echo "$CI_RUN" | jq -r '.conclusion // ""')
 
-            TOTAL=$(echo "$CHECKS" | jq -r '.total')
-            COMPLETED=$(echo "$CHECKS" | jq -r '.completed')
-            SUCCESS=$(echo "$CHECKS" | jq -r '.success')
-            FAILURE=$(echo "$CHECKS" | jq -r '.failure')
+            echo "CI status: $STATUS ${CONCLUSION:+($CONCLUSION)}"
 
-            echo "CI checks: $COMPLETED/$TOTAL completed, $SUCCESS success/skipped, $FAILURE failure"
-
-            if [ "$FAILURE" -gt 0 ]; then
+            if [ "$STATUS" = "completed" ]; then
+              if [ "$CONCLUSION" = "success" ]; then
+                git reset --hard "$MAIN_SHA"
+                exit 0
+              fi
+              echo "CI completed with conclusion: $CONCLUSION"
               exit 1
-            fi
-
-            if [ "$TOTAL" -gt 0 ] && [ "$COMPLETED" -eq "$TOTAL" ]; then
-              break
             fi
 
             sleep 30
           done
-
-      - name: Check for running releases
-        id: check-release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          AUTO_RUNNING=$(gh api repos/${{ github.repository }}/actions/workflows/auto-release.yml/runs \
-            --jq '[.workflow_runs[] | select(.status == "in_progress" and .id != ${{ github.run_id }})] | length')
-          CREATE_RUNNING=$(gh api repos/${{ github.repository }}/actions/workflows/create-release.yml/runs \
-            --jq '[.workflow_runs[] | select(.status == "in_progress" or .status == "queued")] | length' 2>/dev/null || echo "0")
-
-          if [ "$AUTO_RUNNING" -gt 0 ] || [ "$CREATE_RUNNING" -gt 0 ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
+          echo "Timed out waiting for CI on $MAIN_SHA"
+          exit 1
 
       - name: Determine release type
-        if: steps.check-release.outputs.skip != 'true'
         id: release-type
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -134,22 +112,18 @@ jobs:
           echo "bump=$BUMP" >> "$GITHUB_OUTPUT"
 
       - uses: jdx/mise-action@v2
-        if: steps.check-release.outputs.skip != 'true'
         with:
           cache: true
 
       - name: Install dependencies
-        if: steps.check-release.outputs.skip != 'true'
         run: mise run install
 
       - name: Configure git
-        if: steps.check-release.outputs.skip != 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Bump version and create tag
-        if: steps.check-release.outputs.skip != 'true'
         id: bump
         run: |
           set -euo pipefail
@@ -162,8 +136,11 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Push changes and tag
-        if: steps.check-release.outputs.skip != 'true'
-        run: |
-          git pull --rebase origin main
-          git push origin main
-          git push origin "v${{ steps.bump.outputs.version }}"
+        run: git push --atomic origin main "v${{ steps.bump.outputs.version }}"
+
+  publish:
+    name: Publish release
+    needs: auto-release
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.auto-release.outputs.tag }}
