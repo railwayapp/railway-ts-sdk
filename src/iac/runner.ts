@@ -1,6 +1,6 @@
-import { diffGraphs, renderChangeSet, type RailwayChangeSet } from "./change-set.js";
+import { diffGraphs, RailwayChange, renderChangeSet, type RailwayChangeSet } from "./change-set.js";
 import { environmentConfigToGraph } from "./compiler.js";
-import { IacClient, type ChangeSetApplyResult, type ChangeSetPreviewResult, type CurrentEnvironmentResult } from "./client.js";
+import { IacClient, type ChangeSetApplyResult, type ChangeSetPreviewResult, type CurrentEnvironmentResult, type DomainReconcileResult } from "./client.js";
 import { validateGraph, type RailwayGraph } from "./graph.js";
 import { evaluateRailwayProject, findRailwayFile } from "./project.js";
 import { renderRailwayGraphTypes } from "./typegen.js";
@@ -89,6 +89,7 @@ export interface RailwayIacStageResponse extends Omit<RailwayIacPlanResponse, "c
 export interface RailwayIacApplyResponse extends Omit<RailwayIacStageResponse, "command"> {
   command: "apply";
   applyResult?: ChangeSetApplyResult;
+  domainResults?: DomainReconcileResult[];
   deploymentId?: string;
   stagedPatchId?: string;
 }
@@ -231,20 +232,43 @@ async function applyRailwayIac(input: EvaluatedCommandInput): Promise<RailwayIac
     return { ...planned, command: "apply" };
   }
 
+  const domainChanges: RailwayChange[] = [];
+  const restChanges: RailwayChange[] = [];
+
+  for (const change of planned.changeSet.changes) {
+    if (change.kind.startsWith('domain.*')) {
+      domainChanges.push(change);
+    } else {
+      restChanges.push(change);
+    }
+  }
+
   const context = requireBackboardContext(input.request.backboard, "apply");
   const client = new IacClient(clientConfig(context));
   const applyResult = await client.applyChangeSet({
     environmentId: context.environmentId,
-    changeSet: planned.changeSet,
+    changeSet: {
+      ...planned.changeSet,
+      changes: restChanges,
+    },
     commitMessage: "Apply Railway configuration",
     // Base snapshot the plan was diffed against; backboard rejects a stale apply.
     ...(planned.currentEnvironment?.configEtag ? { baseEtag: planned.currentEnvironment.configEtag } : {}),
   });
 
+  // Realize the plan's domain.* changes via the dedicated domain mutations after the change
+  // set has created/updated any referenced services.
+  const projectId = planned.currentEnvironment?.projectId;
+  const domainResults = projectId && domainChanges.length
+    ? await client.reconcileDomains({ projectId, environmentId: context.environmentId, changes: domainChanges })
+    : [];
+
   return {
     ...planned,
+    ok: planned.ok && !domainResults.some(v => v.status === 'failed'),
     command: "apply",
     applyResult,
+    ...(domainResults.length > 0 ? { domainResults } : {}),
     ...(applyResult.deploymentId ? { deploymentId: applyResult.deploymentId } : {}),
     ...(applyResult.stagedPatchId ? { stagedPatchId: applyResult.stagedPatchId } : {}),
   };

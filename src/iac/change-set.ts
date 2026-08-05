@@ -1,6 +1,6 @@
 import { composePatch, graphToEnvironmentConfig } from "./compiler.js";
 import type { DatabaseNode, GraphCompileOptions, RailwayGraph, ResourceAddress, ResourceNode, ServiceNode, VariableValue, VolumeNode } from "./graph.js";
-import type { EnvironmentConfig } from "./schema.js";
+import type { DomainConfig, EnvironmentConfig, ServiceNetworking } from "./schema.js";
 
 // Wire-contract version for the RailwayChangeSet exchanged with backboard.
 // v1 adds the optional base-config etag handshake on apply (compare-and-swap).
@@ -25,7 +25,9 @@ export type RailwayChange =
   | UpdateResourceChange
   | SetVariableChange
   | DeleteVariableChange
-  | CreateDomainChange;
+  | CreateDomainChange
+  | UpdateDomainChange
+  | DeleteDomainChange;
 
 export interface ChangeBase {
   kind: string;
@@ -72,11 +74,33 @@ export interface DeleteVariableChange extends ChangeBase {
   previous: VariableValue;
 }
 
+// Railway has two kinds of domains, provisioned by different mutations: `service`
+// domains are Railway subdomains (*.up.railway.app), `custom` domains are user-owned.
+// `domainType` tells apply which mutation family to use.
+export type DomainType = "custom" | "service";
+
 export interface CreateDomainChange extends ChangeBase {
   kind: "domain.create";
   address: ResourceAddress;
+  domainType: DomainType;
   domain: string;
   targetPort?: number;
+}
+
+export interface UpdateDomainChange extends ChangeBase {
+  kind: "domain.update";
+  address: ResourceAddress;
+  domainType: DomainType;
+  domain: string;
+  before?: number;
+  targetPort?: number;
+}
+
+export interface DeleteDomainChange extends ChangeBase {
+  kind: "domain.delete";
+  address: ResourceAddress;
+  domainType: DomainType;
+  domain: string;
 }
 
 export interface ChangeDiagnostic {
@@ -102,7 +126,6 @@ export function diffGraphs({ current, desired, revealValues = false }: { current
       continue;
     }
     if (!previous) {
-      diagnoseUnsupportedCustomDomains({ resource, diagnostics });
       changes.push({
         kind: "resource.create",
         address: resource.address,
@@ -112,6 +135,10 @@ export function diffGraphs({ current, desired, revealValues = false }: { current
         severity: "safe",
         deployEffect: resource.type === "service" || resource.type === "database" ? "deploy" : "none",
       });
+
+      const networking = "networking" in resource ? resource.networking : undefined;
+      diffDomains({ resource, domainType: "custom", before: undefined, after: networking?.customDomains, changes });
+      diffDomains({ resource, domainType: "service", before: undefined, after: networking?.serviceDomains, changes });
       continue;
     }
 
@@ -130,7 +157,7 @@ export function diffGraphs({ current, desired, revealValues = false }: { current
       diffTopLevelField({ previous, resource, field: "deploy", changes });
     }
     diffTopLevelField({ previous, resource, field: "groupId", changes });
-    diffNetworking({ previous, resource, changes, diagnostics });
+    diffNetworking({ previous, resource, changes });
     // Volume lifecycle is not part of v0 authoring. Never plan an accidental unmount just
     // because imported config omitted a Railway-owned volume id.
     if (previous.type === "bucket" && resource.type === "bucket" && bucketRegion(previous) !== bucketRegion(resource)) {
@@ -183,6 +210,13 @@ export function diffGraphs({ current, desired, revealValues = false }: { current
   return { version: RAILWAY_CHANGE_SET_VERSION, changes, diagnostics };
 }
 
+function getResourceDomains(resource: ResourceNode, domainType: DomainType): Record<string, DomainConfig | null> | null {
+  const networking = (resource as ServiceNode).networking;
+  return domainType === 'custom'
+    ? networking?.customDomains ?? null
+    : networking?.serviceDomains ?? null
+}
+
 export function changeSetToGraph({ current, changeSet }: { current: RailwayGraph; changeSet: RailwayChangeSet }): RailwayGraph {
   const next = structuredClone(current) as RailwayGraph;
   const resources = new Map<ResourceAddress, ResourceNode>(next.resources.map(resource => [resource.address, resource]));
@@ -202,6 +236,40 @@ export function changeSetToGraph({ current, changeSet }: { current: RailwayGraph
     if (!resource) continue;
 
     if (change.kind === "domain.create") {
+      let networking = (resource as ServiceNode).networking;
+      if (!networking) {
+        networking = (resource as ServiceNode).networking = {};
+      }
+
+      if (change.domainType === "custom") {
+        if (!networking.customDomains) networking.customDomains = {};
+        networking.customDomains[change.domain] = change.targetPort != null ? { port: change.targetPort } : {};
+      } else {
+        if (!networking.serviceDomains) networking.serviceDomains = {};
+        networking.serviceDomains[change.domain] = change.targetPort != null ? { port: change.targetPort } : {};
+      }
+    }
+
+    if (change.kind === "domain.update") {
+      let networking = (resource as ServiceNode).networking;
+      if (!networking) {
+        networking = (resource as ServiceNode).networking = {};
+      }
+
+      if (change.domainType === "custom") {
+        if (!networking.customDomains) networking.customDomains = {};
+        networking.customDomains[change.domain] = change.targetPort != null ? { port: change.targetPort } : {};
+      } else {
+        if (!networking.serviceDomains) networking.serviceDomains = {};
+        networking.serviceDomains[change.domain] = change.targetPort != null ? { port: change.targetPort } : {};
+      }
+      continue;
+    }
+
+    if (change.kind === "domain.delete") {
+      const networking = (resource as ResourceNode & { networking?: ServiceNetworking }).networking;
+      const domains = change.domainType === 'custom' ? networking?.customDomains : networking?.serviceDomains;
+      delete domains?.[change.domain];
       continue;
     }
 
@@ -300,35 +368,78 @@ function diffVariables({ previous, resource, changes, resourcesByAddress, reveal
   }
 }
 
-function diffNetworking({ previous, resource, changes, diagnostics }: { previous: ResourceNode; resource: ResourceNode; changes: RailwayChange[]; diagnostics: ChangeDiagnostic[] }) {
+function diffNetworking({ previous, resource, changes }: { previous: ResourceNode; resource: ResourceNode; changes: RailwayChange[] }) {
   const before = "networking" in previous ? previous.networking : undefined;
   const after = "networking" in resource ? resource.networking : undefined;
-  const beforeDomains = before?.customDomains ?? {};
-  diagnoseUnsupportedCustomDomains({ resource, diagnostics, existingDomains: beforeDomains });
 
   const normalizedBefore = normalizeForDiff("networking", { ...before, customDomains: undefined, serviceDomains: undefined });
   const normalizedAfter = normalizeForDiff("networking", { ...after, customDomains: undefined, serviceDomains: undefined });
   if (stableStringify(normalizedBefore) !== stableStringify(normalizedAfter)) {
     changes.push(update(resource.address, "networking", normalizedBefore, normalizedAfter, `Update ${resource.name} networking`));
   }
+
+  diffDomains({ resource, domainType: "custom", before: before?.customDomains, after: after?.customDomains, changes });
+  diffDomains({ resource, domainType: "service", before: before?.serviceDomains, after: after?.serviceDomains, changes });
 }
 
-function diagnoseUnsupportedCustomDomains({
-  resource,
-  diagnostics,
-  existingDomains = {},
-}: {
+// Diffs one domain map (custom or service) into per-domain create/update/delete changes.
+// Backboard applies each via the matching mutation family (see DomainType).
+function diffDomains({ resource, domainType, before, after, changes }: {
   resource: ResourceNode;
-  diagnostics: ChangeDiagnostic[];
-  existingDomains?: Record<string, unknown>;
+  domainType: DomainType;
+  before: Record<string, DomainConfig | null> | null | undefined;
+  after: Record<string, DomainConfig | null> | null | undefined;
+  changes: RailwayChange[];
 }) {
-  const desiredDomains = ("networking" in resource ? resource.networking : undefined)?.customDomains ?? {};
-  for (const domain of Object.keys(desiredDomains)) {
-    if (existingDomains[domain]) continue;
-    diagnostics.push({
-      severity: "error",
+  const beforeDomains = (normalizeForDiff('networking', before) ?? {}) as Record<string, DomainConfig | null>
+  const afterDomains = (normalizeForDiff('networking', after) ?? {}) as Record<string, DomainConfig | null>
+  const label = domainType === "custom" ? "custom domain" : "service domain";
+
+  for (const [domain, beforeConfig] of Object.entries(beforeDomains)) {
+    if (beforeConfig == null) continue;
+    if (!(domain in afterDomains) || afterDomains[domain] == null) {
+      changes.push({
+        kind: "domain.delete",
+        address: resource.address,
+        domainType,
+        domain,
+        path: `resources.${resource.address}.domains.${domain}`,
+        summary: `Delete ${label} ${resource.name}.${domain}`,
+        severity: "destructive",
+        deployEffect: "none",
+      });
+      continue;
+    }
+    const beforePort = beforeConfig.port ?? 8080;
+    const afterPort = afterDomains[domain]?.port ?? 8080;
+    if (beforePort === afterPort) continue;
+    changes.push({
+      kind: "domain.update",
+      address: resource.address,
+      domainType,
+      domain,
+      before: beforePort,
+      targetPort: afterPort,
       path: `resources.${resource.address}.domains.${domain}`,
-      message: `Custom-domain registration is not supported by Railway configuration. Add ${domain} in the dashboard, then run railway config pull.`,
+      summary: `Update ${label} ${resource.name}.${domain} target port ${beforePort} → ${afterPort}`,
+      severity: "safe",
+      deployEffect: "none",
+    });
+  }
+
+  for (const [domain, afterConfig] of Object.entries(afterDomains)) {
+    if (afterConfig == null) continue;
+    if (domain in beforeDomains && beforeDomains[domain] != null) continue;
+    changes.push({
+      kind: "domain.create",
+      address: resource.address,
+      domainType,
+      domain,
+      ...(afterConfig.port != null ? { targetPort: afterConfig.port } : {}),
+      path: `resources.${resource.address}.domains.${domain}`,
+      summary: `Create ${label} ${resource.name}.${domain}`,
+      severity: "safe",
+      deployEffect: "none",
     });
   }
 }
@@ -616,7 +727,7 @@ function update(address: ResourceAddress, field: string, before: unknown, after:
 
 function marker(change: RailwayChange): string {
   if (change.kind === "resource.create" || change.kind === "domain.create") return "+";
-  if (change.kind === "resource.delete") return "-";
+  if (change.kind === "resource.delete" || change.kind === "domain.delete") return "-";
   return "~";
 }
 
@@ -712,6 +823,25 @@ function normalizeForDiff(field: string, value: unknown): unknown {
     // The assignment above can leave the key holding undefined, making an
     // otherwise-empty deploy compare unequal to an absent one
     if (copy.multiRegionConfig === undefined) delete copy.multiRegionConfig;
+  }
+
+  if (field === "networking") {
+    // Domains stay in the networking config; give every domain an explicit port so a
+    // Railway-reported `{}` (no targetPort) and an authored `{port:8080}` compare equal and
+    // a round-tripped domain doesn't churn a networking update every apply.
+    for (const key of ["customDomains", "serviceDomains"] as const) {
+      const domains = copy[key] as Record<string, { port?: number } | null> | undefined;
+      if (domains == null || typeof domains !== "object" || Array.isArray(domains)) {
+        delete copy[key];
+        continue;
+      }
+      for (const [domainName, domainConfig] of Object.entries(domains)) {
+        domains[domainName] = {
+          ...(domainConfig || {}),
+          port: domainConfig?.port ?? 8080
+        }
+      }
+    }
   }
 
   return Object.keys(copy).length === 0 ? undefined : copy;

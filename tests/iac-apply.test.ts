@@ -78,6 +78,71 @@ describe("IaC apply — configEtag handshake", () => {
   });
 });
 
+describe("IaC apply — reconcileDomains dispatches dedicated domain mutations", () => {
+  const domainChange = (kind: "domain.create" | "domain.update" | "domain.delete", extra: Record<string, unknown>) =>
+    ({ kind, address: "service.web", domainType: "custom", domain: "app.example.com", path: "", summary: "", severity: "safe", deployEffect: "none", ...extra }) as RailwayChangeSet["changes"][number];
+
+  it("creates, updates, and deletes custom domains with correctly resolved ids and ports", async () => {
+    const mock = createFetchMock([
+      { data: { project: { services: { edges: [{ node: { id: "svc1", name: "web" } }] } } } }, // getProjectServices
+      { data: { customDomainCreate: { id: "d1", domain: "app.example.com" } } },                 // create
+      { data: { domains: { customDomains: [{ id: "d1", domain: "app.example.com", targetPort: 8080 }], serviceDomains: [] } } }, // records (cached after)
+      { data: { customDomainUpdate: true } },                                                     // update
+      { data: { customDomainDelete: true } },                                                     // delete (id from cache)
+    ]);
+
+    const results = await client(mock.fetch).reconcileDomains({
+      projectId: "p1",
+      environmentId: "e1",
+      changes: [
+        domainChange("domain.create", { targetPort: 8080 }),
+        domainChange("domain.update", { before: 8080, targetPort: 3000 }),
+        domainChange("domain.delete", { severity: "destructive" }),
+      ],
+    });
+
+    expect(results.map(result => result.status)).toEqual(["created", "updated", "deleted"]);
+    expect(variablesOf(mock.calls[1]).input).toMatchObject({ domain: "app.example.com", environmentId: "e1", projectId: "p1", serviceId: "svc1", targetPort: 8080 });
+    expect(variablesOf(mock.calls[3])).toMatchObject({ environmentId: "e1", id: "d1", targetPort: 3000 });
+    expect(variablesOf(mock.calls[4])).toMatchObject({ id: "d1" });
+    // records fetched once (cached across update+delete on the same service)
+    expect(mock.calls.length).toBe(5);
+  });
+
+  it("creates a service domain then renames it to the authored name", async () => {
+    const mock = createFetchMock([
+      { data: { project: { services: { edges: [{ node: { id: "svc1", name: "web" } }] } } } },     // getProjectServices
+      { data: { serviceDomainCreate: { id: "sd1", domain: "random-generated.up.railway.app" } } }, // create (random name)
+      { data: { serviceDomainUpdate: true } },                                                       // rename to authored
+    ]);
+
+    const results = await client(mock.fetch).reconcileDomains({
+      projectId: "p1",
+      environmentId: "e1",
+      changes: [{ kind: "domain.create", address: "service.web", domainType: "service", domain: "app-web.up.railway.app", path: "", summary: "", severity: "safe", deployEffect: "none", targetPort: 8080 } as RailwayChangeSet["changes"][number]],
+    });
+
+    expect(results[0]).toMatchObject({ status: "created" });
+    expect(variablesOf(mock.calls[1]).input).toMatchObject({ environmentId: "e1", serviceId: "svc1", targetPort: 8080 });
+    expect(variablesOf(mock.calls[2]).input).toMatchObject({ environmentId: "e1", serviceId: "svc1", serviceDomainId: "sd1", domain: "app-web.up.railway.app", targetPort: 8080 });
+  });
+
+  it("skips a domain change when its service is not found", async () => {
+    const mock = createFetchMock([
+      { data: { project: { services: { edges: [] } } } },
+    ]);
+
+    const results = await client(mock.fetch).reconcileDomains({
+      projectId: "p1",
+      environmentId: "e1",
+      changes: [domainChange("domain.create", { targetPort: 8080 })],
+    });
+
+    expect(results[0]).toMatchObject({ status: "skipped" });
+    expect(mock.calls.length).toBe(1); // no mutation attempted
+  });
+});
+
 describe("IaC runner — threads configEtag from plan into apply", () => {
   afterEach(() => vi.unstubAllGlobals());
 
