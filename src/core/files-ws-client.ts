@@ -61,6 +61,8 @@ export class FilesRemoteError extends Error {
 }
 
 export interface FilesWsConnection {
+  /** Whether the socket is still open and usable for another operation. */
+  isOpen(): boolean;
   /** Send a request and resolve with the reply frame's `data` value. */
   call(type: string, data: unknown): Promise<unknown>;
   /**
@@ -101,7 +103,8 @@ const sleep = (ms: number): Promise<void> =>
  * token-extraction contract; a `files:*`-scoped token authorizes the path.
  *
  * The bridge handles one request at a time per connection (uploads are modal
- * server-side), so callers should open a connection per operation.
+ * server-side), so callers run one operation at a time and may reuse the
+ * connection for the next one while it is still open.
  */
 export function connectFilesWs(args: {
   config: NormalizedRailwayClientConfig;
@@ -130,6 +133,7 @@ export function connectFilesWs(args: {
     };
 
     const closeSocket = () => {
+      closed = true;
       try {
         socket.close(1000, "");
       } catch {
@@ -380,6 +384,8 @@ export function connectFilesWs(args: {
         if (completed) arm();
         return done;
       },
+
+      isOpen: () => opened && !closed,
 
       close: closeSocket,
     };
