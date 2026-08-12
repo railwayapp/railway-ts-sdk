@@ -45,10 +45,30 @@ type FilesScope = "files:read" | "files:read files:write";
 let constructFiles: (context: FilesContext) => SandboxFiles;
 
 /**
- * File operations on a live sandbox, exposed as `sandbox.files`. Each
- * operation mints a short-lived `files`-scoped token and opens its own
- * tcp-proxy `/ws/files` session (the bridge serves one request per
- * connection), so concurrent operations run independently.
+ * How long an idle pooled file-session connection lingers before closing.
+ * Long enough to carry a burst of sequential operations on one connection
+ * (the platform rate-limits new connections per client), short enough that
+ * a script's process exit is barely delayed by an open socket.
+ */
+const FILES_IDLE_CLOSE_MS = 2_000;
+
+/** Idle connections kept beyond this are closed on release instead of pooled. */
+const FILES_MAX_IDLE_CONNECTIONS = 4;
+
+/** A pooled files session: the raw connection plus the scope its token holds. */
+interface PooledFilesConnection {
+  connection: FilesWsConnection;
+  scope: FilesScope;
+  idleTimer?: ReturnType<typeof setTimeout>;
+}
+
+/**
+ * File operations on a live sandbox, exposed as `sandbox.files`. Operations
+ * run one at a time per file-session connection (the server serves one
+ * request per connection), but connections are pooled: a finished
+ * operation's connection lingers briefly and the next operation reuses it
+ * instead of minting a new token and dialing again. Concurrent operations
+ * still run independently on their own connections.
  *
  * Paths are absolute within the sandbox filesystem. Content streams in
  * 64KB frames both ways: pushes accept streams without buffering, and
@@ -57,6 +77,7 @@ let constructFiles: (context: FilesContext) => SandboxFiles;
  */
 export class SandboxFiles {
   readonly #context: FilesContext;
+  readonly #idleConnections: PooledFilesConnection[] = [];
 
   /** Constructed by `Sandbox#files`; not constructible from outside the SDK. */
   private constructor(context: FilesContext) {
@@ -344,8 +365,91 @@ export class SandboxFiles {
     });
   }
 
-  /** Mints a files-scoped token and opens a `/ws/files` session with it. */
+  /**
+   * Leases a `/ws/files` session: an idle pooled connection whose token
+   * covers `scope` when one exists, otherwise a fresh dial. The returned
+   * connection's `close()` releases it back to the pool (dead or surplus
+   * connections are really closed), so callers manage it exactly like an
+   * owned connection.
+   */
   async #connect(scope: FilesScope): Promise<FilesWsConnection> {
+    for (;;) {
+      // An rw-scoped token covers read-only operations too.
+      const index = this.#idleConnections.findIndex(
+        entry =>
+          entry.scope === scope || entry.scope === "files:read files:write",
+      );
+      if (index === -1) break;
+      const [entry] = this.#idleConnections.splice(index, 1);
+      if (!entry) break;
+      if (entry.idleTimer) clearTimeout(entry.idleTimer);
+      if (entry.connection.isOpen()) return this.#lease(entry);
+      entry.connection.close();
+    }
+    return this.#lease({ connection: await this.#dial(scope), scope });
+  }
+
+  /**
+   * Wraps a pooled entry so `close()` releases instead of destroying. Only a
+   * connection whose every operation succeeded is worth pooling: a failure
+   * may have poisoned the server's stream to the sandbox even when the
+   * socket itself stays open (reported as "connection lost"), and retry
+   * paths count on getting a genuinely fresh session.
+   */
+  #lease(entry: PooledFilesConnection): FilesWsConnection {
+    let released = false;
+    let failed = false;
+    const guard = <A extends unknown[], R>(
+      operation: (...args: A) => Promise<R>,
+    ): ((...args: A) => Promise<R>) => {
+      return async (...args) => {
+        try {
+          return await operation(...args);
+        } catch (error) {
+          failed = true;
+          throw error;
+        }
+      };
+    };
+    return {
+      isOpen: () => entry.connection.isOpen(),
+      call: guard((type, data) => entry.connection.call(type, data)),
+      read: guard((data, onChunk) => entry.connection.read(data, onChunk)),
+      write: guard((start, chunks) => entry.connection.write(start, chunks)),
+      close: () => {
+        if (released) return;
+        released = true;
+        if (failed) {
+          entry.connection.close();
+          return;
+        }
+        this.#release(entry);
+      },
+    };
+  }
+
+  #release(entry: PooledFilesConnection): void {
+    if (
+      !entry.connection.isOpen() ||
+      this.#idleConnections.length >= FILES_MAX_IDLE_CONNECTIONS
+    ) {
+      entry.connection.close();
+      return;
+    }
+    const timer = setTimeout(() => {
+      const index = this.#idleConnections.indexOf(entry);
+      if (index !== -1) this.#idleConnections.splice(index, 1);
+      entry.connection.close();
+    }, FILES_IDLE_CLOSE_MS);
+    // Node timers hold the event loop open; unref so the linger itself never
+    // delays process exit (the socket still lingers at most the idle window).
+    (timer as { unref?: () => void }).unref?.();
+    entry.idleTimer = timer;
+    this.#idleConnections.push(entry);
+  }
+
+  /** Mints a files-scoped token and opens a `/ws/files` session with it. */
+  async #dial(scope: FilesScope): Promise<FilesWsConnection> {
     const { config, environmentId, sandboxId } = this.#context;
     const input: RailwayGenerateShellTokenMutationVariables["input"] = {
       environmentId,

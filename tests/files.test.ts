@@ -126,8 +126,7 @@ describe("files.read", () => {
     });
     expect(socket.url).toBe("wss://ssh.railway.com:2226/ws/files");
     expect(socket.protocols).toEqual(["railway-shell", "jwt_0"]);
-    // The per-op connection is closed once the read settles.
-    expect(socket.readyState).toBe(3);
+    expect(socket.readyState).toBe(1);
   });
 
   it("returns bytes for format=bytes, including the end-frame payload", async () => {
@@ -241,7 +240,7 @@ describe("files.read", () => {
     expect((await reader.read()).value).toEqual(new Uint8Array([7]));
     expect((await reader.read()).value).toEqual(new Uint8Array([8]));
     expect((await reader.read()).done).toBe(true);
-    expect(socket.readyState).toBe(3);
+    expect(socket.readyState).toBe(1);
   });
 
   it("aborts the transfer when the stream is cancelled", async () => {
@@ -468,7 +467,7 @@ describe("files.write", () => {
         scope: "files:read files:write",
       },
     });
-    expect(socket.readyState).toBe(3);
+    expect(socket.readyState).toBe(1);
   });
 
   it("re-chunks large payloads to 64KB frames with the last one end-tagged", async () => {
@@ -858,11 +857,11 @@ describe("files metadata ops", () => {
   });
 
   it("stats a path and reports missing ones via exists()", async () => {
-    const { sandbox, ws } = await filesSandbox(2);
+    const { sandbox, ws } = await filesSandbox();
 
     const statPromise = sandbox.files.stat("/app/index.ts");
-    const socket1 = await ws.nextSocket();
-    expect(await socket1.nextRequest()).toEqual({
+    const socket = await ws.nextSocket();
+    expect(await socket.nextRequest()).toEqual({
       type: "stat",
       id: "1",
       data: { path: "/app/index.ts" },
@@ -874,47 +873,49 @@ describe("files metadata ops", () => {
       isDir: false,
       modTime: "2026-06-11T00:00:00Z",
     };
-    socket1.serverReply("stat_result", "1", entry);
+    socket.serverReply("stat_result", "1", entry);
     await expect(statPromise).resolves.toEqual(entry);
 
     const existsPromise = sandbox.files.exists("/nope");
-    const socket2 = await ws.nextSocket();
-    await socket2.nextRequest();
-    socket2.serverError("1", "file does not exist");
+    expect(await socket.nextRequest()).toEqual({
+      type: "stat",
+      id: "2",
+      data: { path: "/nope" },
+    });
+    socket.serverError("2", "file does not exist");
     await expect(existsPromise).resolves.toBe(false);
+    expect(socket.readyState).toBe(3);
   });
 
   it("creates directories, removes, and renames", async () => {
-    const { sandbox, ws } = await filesSandbox(3);
+    const { sandbox, ws } = await filesSandbox();
 
     const mkdirPromise = sandbox.files.mkdir("/a/b/c");
-    const socket1 = await ws.nextSocket();
-    expect(await socket1.nextRequest()).toEqual({
+    const socket = await ws.nextSocket();
+    expect(await socket.nextRequest()).toEqual({
       type: "mkdir",
       id: "1",
       data: { path: "/a/b/c" },
     });
-    socket1.serverReply("ok", "1");
+    socket.serverReply("ok", "1");
     await expect(mkdirPromise).resolves.toBeUndefined();
 
     const removePromise = sandbox.files.remove("/a/b/c");
-    const socket2 = await ws.nextSocket();
-    expect(await socket2.nextRequest()).toEqual({
+    expect(await socket.nextRequest()).toEqual({
       type: "rm",
-      id: "1",
+      id: "2",
       data: { path: "/a/b/c" },
     });
-    socket2.serverReply("ok", "1");
+    socket.serverReply("ok", "2");
     await expect(removePromise).resolves.toBeUndefined();
 
     const renamePromise = sandbox.files.rename("/old.txt", "/new.txt");
-    const socket3 = await ws.nextSocket();
-    expect(await socket3.nextRequest()).toEqual({
+    expect(await socket.nextRequest()).toEqual({
       type: "rename",
-      id: "1",
+      id: "3",
       data: { old: "/old.txt", new: "/new.txt" },
     });
-    socket3.serverReply("ok", "1");
+    socket.serverReply("ok", "3");
     await expect(renamePromise).resolves.toBeUndefined();
   });
 
