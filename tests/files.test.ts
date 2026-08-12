@@ -126,7 +126,6 @@ describe("files.read", () => {
     });
     expect(socket.url).toBe("wss://ssh.railway.com:2226/ws/files");
     expect(socket.protocols).toEqual(["railway-shell", "jwt_0"]);
-    // A successful operation's connection is pooled for reuse, not closed.
     expect(socket.readyState).toBe(1);
   });
 
@@ -241,7 +240,6 @@ describe("files.read", () => {
     expect((await reader.read()).value).toEqual(new Uint8Array([7]));
     expect((await reader.read()).value).toEqual(new Uint8Array([8]));
     expect((await reader.read()).done).toBe(true);
-    // A successful operation's connection is pooled for reuse, not closed.
     expect(socket.readyState).toBe(1);
   });
 
@@ -469,7 +467,6 @@ describe("files.write", () => {
         scope: "files:read files:write",
       },
     });
-    // A successful operation's connection is pooled for reuse, not closed.
     expect(socket.readyState).toBe(1);
   });
 
@@ -879,7 +876,6 @@ describe("files metadata ops", () => {
     socket.serverReply("stat_result", "1", entry);
     await expect(statPromise).resolves.toEqual(entry);
 
-    // The pooled connection carries the follow-up op; request ids continue.
     const existsPromise = sandbox.files.exists("/nope");
     expect(await socket.nextRequest()).toEqual({
       type: "stat",
@@ -888,7 +884,6 @@ describe("files metadata ops", () => {
     });
     socket.serverError("2", "file does not exist");
     await expect(existsPromise).resolves.toBe(false);
-    // A failed op's connection is closed, never pooled.
     expect(socket.readyState).toBe(3);
   });
 
@@ -905,7 +900,6 @@ describe("files metadata ops", () => {
     socket.serverReply("ok", "1");
     await expect(mkdirPromise).resolves.toBeUndefined();
 
-    // Successive successful mutations reuse the pooled connection.
     const removePromise = sandbox.files.remove("/a/b/c");
     expect(await socket.nextRequest()).toEqual({
       type: "rm",
