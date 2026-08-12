@@ -45,10 +45,10 @@ type FilesScope = "files:read" | "files:read files:write";
 let constructFiles: (context: FilesContext) => SandboxFiles;
 
 /**
- * How long an idle pooled `/ws/files` connection lingers before closing.
+ * How long an idle pooled file-session connection lingers before closing.
  * Long enough to carry a burst of sequential operations on one connection
- * (tcp-proxy rate-limits new WS connections per IP), short enough that a
- * script's process exit is barely delayed by an open socket.
+ * (the platform rate-limits new connections per client), short enough that
+ * a script's process exit is barely delayed by an open socket.
  */
 const FILES_IDLE_CLOSE_MS = 2_000;
 
@@ -64,11 +64,11 @@ interface PooledFilesConnection {
 
 /**
  * File operations on a live sandbox, exposed as `sandbox.files`. Operations
- * run one at a time per tcp-proxy `/ws/files` session (the bridge serves one
- * request per connection), but sessions are pooled: a finished operation's
- * connection lingers briefly and the next operation reuses it instead of
- * minting a new token and dialing again. Concurrent operations still run
- * independently on their own connections.
+ * run one at a time per file-session connection (the server serves one
+ * request per connection), but connections are pooled: a finished
+ * operation's connection lingers briefly and the next operation reuses it
+ * instead of minting a new token and dialing again. Concurrent operations
+ * still run independently on their own connections.
  *
  * Paths are absolute within the sandbox filesystem. Content streams in
  * 64KB frames both ways: pushes accept streams without buffering, and
@@ -374,14 +374,17 @@ export class SandboxFiles {
    */
   async #connect(scope: FilesScope): Promise<FilesWsConnection> {
     for (;;) {
+      // An rw-scoped token covers read-only operations too.
       const index = this.#idleConnections.findIndex(
-        entry => entry.scope === "files:read files:write" || entry.scope === scope,
+        entry =>
+          entry.scope === scope || entry.scope === "files:read files:write",
       );
       if (index === -1) break;
       const [entry] = this.#idleConnections.splice(index, 1);
-      if (entry!.idleTimer) clearTimeout(entry!.idleTimer);
-      if (entry!.connection.isOpen()) return this.#lease(entry!);
-      entry!.connection.close();
+      if (!entry) break;
+      if (entry.idleTimer) clearTimeout(entry.idleTimer);
+      if (entry.connection.isOpen()) return this.#lease(entry);
+      entry.connection.close();
     }
     return this.#lease({ connection: await this.#dial(scope), scope });
   }
@@ -389,9 +392,9 @@ export class SandboxFiles {
   /**
    * Wraps a pooled entry so `close()` releases instead of destroying. Only a
    * connection whose every operation succeeded is worth pooling: a failure
-   * may have poisoned the bridge's upstream stream even when the socket
-   * itself stays open (the server reports that as "connection lost"), and
-   * retry paths count on getting a genuinely fresh session.
+   * may have poisoned the server's stream to the sandbox even when the
+   * socket itself stays open (reported as "connection lost"), and retry
+   * paths count on getting a genuinely fresh session.
    */
   #lease(entry: PooledFilesConnection): FilesWsConnection {
     let released = false;
