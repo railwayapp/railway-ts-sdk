@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { resourceAddress } from "./graph.js";
 import type {
   BucketNode,
   DatabaseNode,
@@ -7,17 +6,18 @@ import type {
   GroupableResourceInput,
   GroupableResourceNode,
   ProjectDefinition,
-  ProjectResourceInput,
   ResourceNode,
   ServiceNode,
   SourceConfig,
   VariableValue,
-  VolumeNode,
+  VolumeNode
 } from "./graph.js";
+import { resourceAddress } from "./graph.js";
 import type {
   BucketConfig,
   BuildConfig,
   DeployConfig,
+  DomainConfig,
   ServiceConfig,
   ServiceNetworking,
   VariableConfig,
@@ -339,15 +339,43 @@ function normalizeRegions(regions: Record<string, RegionConfig>): NonNullable<De
 }
 
 function normalizeNetworking(config: ServiceConfigInput): ServiceNetworking | undefined {
-  const customDomains = config.domains
-    ? Object.fromEntries(config.domains.map(domain => (typeof domain === "string" ? [domain, { port: 8080 }] : [domain.domain, { port: domain.port ?? 8080 }])))
-    : undefined;
+  const customDomains: Record<string, DomainConfig | null> = config.networking?.customDomains
+    ? structuredClone(config.networking?.customDomains)
+    : {};
+  const serviceDomains: Record<string, DomainConfig | null> = config.networking?.serviceDomains
+    ? structuredClone(config.networking?.serviceDomains)
+    : {};
+
+  for (const domain of (config.domains ?? [])) {
+    let targetPort = 8080;
+    let targetDomain = "";
+    if (typeof domain === "string") {
+      targetDomain = domain.trim();
+    } else {
+      targetDomain = domain.domain?.trim();
+      targetPort = domain.port ?? targetPort;
+    }
+
+    if (!targetDomain) continue;
+    if (isServiceDomain(targetDomain)) {
+      serviceDomains[targetDomain] = { port: targetPort };
+    } else {
+      customDomains[targetDomain] = { port: targetPort };
+    }
+  }
+
   const tcpProxies = config.tcp
     ? Object.fromEntries(config.tcp.map(port => [String(port), {}]))
     : config.tcpProxies
       ? Object.fromEntries(config.tcpProxies.map(port => [port, {}]))
       : undefined;
-  return pruneEmpty({ ...config.networking, customDomains, tcpProxies }) as ServiceNetworking | undefined;
+
+  return pruneEmpty({
+    ...config.networking,
+    customDomains: Object.keys(customDomains).length ? customDomains : undefined,
+    serviceDomains: Object.keys(serviceDomains).length ? serviceDomains : undefined,
+    tcpProxies
+  }) as ServiceNetworking | undefined;
 }
 
 function normalizeVariables(variables: Record<string, string | VariableConfig | VariableValue>): Record<string, VariableValue> {
@@ -383,4 +411,8 @@ function pruneEmpty<T>(value: T): T | undefined {
   const entries = Object.entries(value).filter(([, child]) => child != null);
   if (entries.length === 0) return undefined;
   return Object.fromEntries(entries) as T;
+}
+
+function isServiceDomain(value: string): boolean {
+  return value.endsWith('.up.railway.app')
 }

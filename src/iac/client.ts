@@ -3,8 +3,8 @@ import type { TypedDocumentNode } from "@graphql-typed-document-node/core";
 import { normalizeRailwayClientConfig, type RailwayClientConfig, type NormalizedRailwayClientConfig } from "../core/config.js";
 import { requestGraphQL } from "../core/graphql-client.js";
 import { RailwayGraphQLError, StaleEnvironmentError, STALE_ENVIRONMENT_BASE_CODE } from "../core/errors.js";
-import type { BucketCreateInput, ServiceCreateInput, VolumeCreateInput } from "../generated/graphql.js";
-import type { RailwayChangeSet } from "./change-set.js";
+import type { BucketCreateInput, CustomDomainCreateInput, ServiceCreateInput, ServiceDomainCreateInput, ServiceDomainUpdateInput, VolumeCreateInput } from "../generated/graphql.js";
+import type { CreateDomainChange, DeleteDomainChange, DomainType, RailwayChange, RailwayChangeSet, UpdateDomainChange } from "./change-set.js";
 import type { RailwayGraph, ResourceNode } from "./graph.js";
 import type { EnvironmentConfig } from "./schema.js";
 
@@ -54,6 +54,17 @@ export interface ChangeSetApplyResult {
   stagedPatchId?: string | null;
 }
 
+export interface DomainRecord { id: string; domain: string; port?: number }
+interface RawDomain { id: string; domain: string; targetPort?: number | null }
+
+export interface DomainReconcileResult {
+  kind: "domain.create" | "domain.update" | "domain.delete";
+  domainType: DomainType;
+  address: string;
+  domain: string;
+  status: "created" | "updated" | "deleted" | "skipped" | "failed";
+  reason?: string;
+}
 export interface ProjectService { id: string; name: string }
 export interface ProjectVolume { id: string; name?: string | null; serviceId?: string | null }
 export interface ProjectBucket { id: string; name: string; groupId?: string | null }
@@ -145,6 +156,57 @@ export class IacClient {
       return [service.id, Object.fromEntries(data.domains.customDomains.map(domain => [domain.domain, domain.targetPort == null ? {} : { port: domain.targetPort }]))] as const;
     }));
     return Object.fromEntries(entries.filter(([, domains]) => Object.keys(domains).length > 0));
+  }
+
+  // Fetches existing domains (custom + service) with their ids — needed to update/delete a
+  // domain, which the dedicated mutations key by id rather than by name.
+  async getServiceDomainRecords(projectId: string, environmentId: string, serviceId: string): Promise<{ custom: DomainRecord[]; service: DomainRecord[] }> {
+    const data = await gql<{ domains: { customDomains: RawDomain[]; serviceDomains: RawDomain[] } }, { projectId: string; environmentId: string; serviceId: string }>(this.#config, `query IacServiceDomainRecords($projectId: String!, $environmentId: String!, $serviceId: String!) {
+      domains(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId) {
+        customDomains { id domain targetPort }
+        serviceDomains { id domain targetPort }
+      }
+    }`, { projectId, environmentId, serviceId });
+    const map = (list: RawDomain[]): DomainRecord[] => list.map(domain => ({ id: domain.id, domain: domain.domain, ...(domain.targetPort == null ? {} : { port: domain.targetPort }) }));
+    return { custom: map(data.domains.customDomains), service: map(data.domains.serviceDomains) };
+  }
+
+  async createCustomDomain(input: CustomDomainCreateInput): Promise<DomainRecord> {
+    const data = await gql<{ customDomainCreate: { id: string; domain: string } }, { input: CustomDomainCreateInput }>(this.#config, `mutation IacCustomDomainCreate($input: CustomDomainCreateInput!) {
+      customDomainCreate(input: $input) { id domain }
+    }`, { input });
+    return data.customDomainCreate;
+  }
+
+  async updateCustomDomain(args: { environmentId: string; id: string; targetPort?: number }): Promise<void> {
+    await gql<{ customDomainUpdate: boolean }, { environmentId: string; id: string; targetPort?: number }>(this.#config, `mutation IacCustomDomainUpdate($environmentId: String!, $id: String!, $targetPort: Int) {
+      customDomainUpdate(environmentId: $environmentId, id: $id, targetPort: $targetPort)
+    }`, args);
+  }
+
+  async deleteCustomDomain(id: string): Promise<void> {
+    await gql<{ customDomainDelete: boolean }, { id: string }>(this.#config, `mutation IacCustomDomainDelete($id: String!) {
+      customDomainDelete(id: $id)
+    }`, { id });
+  }
+
+  async createServiceDomain(input: ServiceDomainCreateInput): Promise<DomainRecord> {
+    const data = await gql<{ serviceDomainCreate: { id: string; domain: string } }, { input: ServiceDomainCreateInput }>(this.#config, `mutation IacServiceDomainCreate($input: ServiceDomainCreateInput!) {
+      serviceDomainCreate(input: $input) { id domain }
+    }`, { input });
+    return data.serviceDomainCreate;
+  }
+
+  async updateServiceDomain(input: ServiceDomainUpdateInput): Promise<void> {
+    await gql<{ serviceDomainUpdate: boolean }, { input: ServiceDomainUpdateInput }>(this.#config, `mutation IacServiceDomainUpdate($input: ServiceDomainUpdateInput!) {
+      serviceDomainUpdate(input: $input)
+    }`, { input });
+  }
+
+  async deleteServiceDomain(id: string): Promise<void> {
+    await gql<{ serviceDomainDelete: boolean }, { id: string }>(this.#config, `mutation IacServiceDomainDelete($id: String!) {
+      serviceDomainDelete(id: $id)
+    }`, { id });
   }
 
   async ensureGraphResources({ projectId, environmentId, graph, currentConfig }: {
@@ -288,6 +350,65 @@ export class IacClient {
       serviceCreate(input: $input) { id name }
     }`, { input });
     return data.serviceCreate;
+  }
+
+  // Realizes the plan's domain.* changes through the dedicated domain mutations, which are
+  // the only mechanism that actually provisions domains (the config/change-set path does
+  // not). Runs after applyChangeSet so services created by the change set already exist.
+  async reconcileDomains({ projectId, environmentId, changes }: { projectId: string; environmentId: string; changes: RailwayChange[] }): Promise<DomainReconcileResult[]> {
+    const domainChanges = changes.filter((change): change is CreateDomainChange | UpdateDomainChange | DeleteDomainChange =>
+      change.kind === "domain.create" || change.kind === "domain.update" || change.kind === "domain.delete");
+    if (domainChanges.length === 0) return [];
+
+    // Resolve service ids from the post-apply project state (a change set may have just
+    // created the target service).
+    const services = await this.getProjectServices(projectId);
+    const serviceIdByName = Object.fromEntries(services.map(service => [service.name, service.id]));
+    const recordsCache = new Map<string, { custom: DomainRecord[]; service: DomainRecord[] }>();
+    const findDomainId = async (serviceId: string, domainType: DomainType, domain: string): Promise<string | undefined> => {
+      let records = recordsCache.get(serviceId);
+      if (!records) { records = await this.getServiceDomainRecords(projectId, environmentId, serviceId); recordsCache.set(serviceId, records); }
+      return (domainType === "custom" ? records.custom : records.service).find(record => record.domain === domain)?.id;
+    };
+
+    const results: DomainReconcileResult[] = [];
+    for (const change of domainChanges) {
+      const serviceName = change.address.slice("service.".length);
+      const serviceId = serviceIdByName[serviceName];
+      const base = { kind: change.kind, domainType: change.domainType, address: change.address, domain: change.domain } as const;
+      if (!serviceId) { results.push({ ...base, status: "skipped", reason: `service ${serviceName} not found` }); continue; }
+      const targetPort = "targetPort" in change && change.targetPort != null ? { targetPort: change.targetPort } : {};
+      try {
+        if (change.kind === "domain.create") {
+          if (change.domainType === "custom") {
+            await this.createCustomDomain({ domain: change.domain, environmentId, projectId, serviceId, ...targetPort });
+          } else {
+            // serviceDomainCreate assigns a random *.up.railway.app subdomain; immediately
+            // rename it to the authored name so the result is deterministic and re-diffs clean.
+            const created = await this.createServiceDomain({ environmentId, serviceId, ...targetPort });
+            if (created.domain !== change.domain) {
+              await this.updateServiceDomain({ environmentId, serviceId, serviceDomainId: created.id, domain: change.domain, ...targetPort });
+            }
+          }
+          results.push({ ...base, status: "created" });
+        } else if (change.kind === "domain.update") {
+          const id = await findDomainId(serviceId, change.domainType, change.domain);
+          if (!id) { results.push({ ...base, status: "skipped", reason: "existing domain not found" }); continue; }
+          if (change.domainType === "custom") await this.updateCustomDomain({ environmentId, id, ...targetPort });
+          else await this.updateServiceDomain({ environmentId, serviceId, serviceDomainId: id, domain: change.domain, ...targetPort });
+          results.push({ ...base, status: "updated" });
+        } else {
+          const id = await findDomainId(serviceId, change.domainType, change.domain);
+          if (!id) { results.push({ ...base, status: "skipped", reason: "existing domain not found" }); continue; }
+          if (change.domainType === "custom") await this.deleteCustomDomain(id);
+          else await this.deleteServiceDomain(id);
+          results.push({ ...base, status: "deleted" });
+        }
+      } catch (error) {
+        results.push({ ...base, status: "failed", reason: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    return results;
   }
 }
 

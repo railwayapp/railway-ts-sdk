@@ -3,11 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { bucket, createRailwayContext, diffGraphs, environmentConfigToGraph, evaluateRailwayFile, github, graphToEnvironmentConfig, group, image, postgres, project, redis, service, volume } from "../src/index.js";
+import { changeSetToEnvironmentPatch, changeSetToGraph, RAILWAY_CHANGE_SET_VERSION, renderChangeSet, SUPPORTED_CHANGE_SET_VERSIONS, type SetVariableChange } from "../src/iac/change-set.js";
 import { projectDefinitionToGraph } from "../src/iac/compiler.js";
-import { changeSetToEnvironmentPatch, RAILWAY_CHANGE_SET_VERSION, SUPPORTED_CHANGE_SET_VERSIONS, renderChangeSet, type SetVariableChange } from "../src/iac/change-set.js";
 import { runRailwayIac } from "../src/iac/runner.js";
 import { preserve } from "../src/iac/sdk.js";
+import { bucket, createRailwayContext, diffGraphs, environmentConfigToGraph, evaluateRailwayFile, github, graphToEnvironmentConfig, group, image, postgres, project, redis, service, volume } from "../src/index.js";
 
 describe("Railway IaC", () => {
   it("emits the current change-set wire version", () => {
@@ -215,19 +215,55 @@ describe("Railway IaC", () => {
     }));
   });
 
-  it("diagnoses unsupported custom-domain registration", () => {
+  it("plans a domain.create for a custom domain on a brand-new service", () => {
     const current = environmentConfigToGraph({ services: {} }, { projectName: "app" });
     const desired = projectDefinitionToGraph(project("app", {
       resources: [service("web", { domains: ["app.example.com"] })],
     }));
 
     const result = diffGraphs({ current, desired });
-    expect(result.changes).not.toContainEqual(expect.objectContaining({ kind: "domain.create" }));
-    expect(result.diagnostics).toContainEqual(expect.objectContaining({
-      severity: "error",
-      path: "resources.service.web.domains.app.example.com",
-      message: expect.stringContaining("not supported"),
+    expect(result.diagnostics).toEqual([]);
+    expect(result.changes).toContainEqual(expect.objectContaining({
+      kind: "domain.create",
+      domainType: "custom",
+      address: "service.web",
+      domain: "app.example.com",
+      targetPort: 8080,
+      severity: "safe",
     }));
+  });
+
+  it("plans a domain.create for a custom domain added to an existing service", () => {
+    const current = environmentConfigToGraph({ services: { web: {} } }, { projectName: "app" });
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [service("web", { domains: ["app.example.com"] })],
+    }));
+
+    const { changes, diagnostics } = diffGraphs({ current, desired });
+    expect(diagnostics).toEqual([]);
+    expect(changes).toContainEqual(expect.objectContaining({
+      kind: "domain.create",
+      domainType: "custom",
+      domain: "app.example.com",
+    }));
+  });
+
+  it("plans create/update/delete for service domains", () => {
+    const current = environmentConfigToGraph(
+      { services: { web: { networking: { serviceDomains: { "keep-web.up.railway.app": {}, "drop-web.up.railway.app": { port: 3000 } } } } } },
+      { projectName: "app" },
+    );
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [service("web", { networking: { serviceDomains: { "keep-web.up.railway.app": {}, "new-web.up.railway.app": { port: 9000 } } } })],
+    }));
+
+    const kinds = diffGraphs({ current, desired }).changes.filter(change => change.kind.startsWith("domain"));
+    expect(kinds).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "domain.create", domainType: "service", domain: "new-web.up.railway.app", targetPort: 9000 }),
+      expect.objectContaining({ kind: "domain.delete", domainType: "service", domain: "drop-web.up.railway.app" }),
+    ]));
+    // keep-web is unchanged (both unset → default port); no update churned.
+    expect(kinds).not.toContainEqual(expect.objectContaining({ domain: "keep-web.up.railway.app" }));
   });
 
   it("keeps existing custom domains plan-clean", () => {
@@ -243,6 +279,113 @@ describe("Railway IaC", () => {
     }));
 
     expect(diffGraphs({ current, desired })).toMatchObject({ changes: [], diagnostics: [] });
+  });
+
+  it("plans a domain.update when an existing custom domain's target port changes", () => {
+    const current = environmentConfigToGraph(
+      { services: { web: {} } },
+      { projectName: "app", customDomainsByServiceId: { web: { "app.example.com": { port: 3000 } } } },
+    );
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [service("web", { domains: [{ domain: "app.example.com", port: 8080 }] })],
+    }));
+
+    const { changes, diagnostics } = diffGraphs({ current, desired });
+    expect(changes).toContainEqual(expect.objectContaining({
+      kind: "domain.update",
+      domainType: "custom",
+      address: "service.web",
+      domain: "app.example.com",
+      before: 3000,
+      targetPort: 8080,
+      severity: "safe",
+    }));
+    expect(diagnostics).toEqual([]);
+  });
+
+  it("plans a domain.delete when a custom domain is removed from config", () => {
+    const current = environmentConfigToGraph(
+      { services: { web: {} } },
+      { projectName: "app", customDomainsByServiceId: { web: { "app.example.com": {} } } },
+    );
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [service("web", {})],
+    }));
+
+    expect(diffGraphs({ current, desired }).changes).toContainEqual(expect.objectContaining({
+      kind: "domain.delete",
+      domainType: "custom",
+      address: "service.web",
+      domain: "app.example.com",
+      severity: "destructive",
+    }));
+  });
+
+  it("carries domains in the graph for a clean re-diff", () => {
+    const current = environmentConfigToGraph(
+      { services: { web: {} } },
+      { projectName: "app", customDomainsByServiceId: { web: { "keep.example.com": { port: 3000 }, "drop.example.com": {} } } },
+    );
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [service("web", { domains: [{ domain: "keep.example.com", port: 8080 }] })],
+    }));
+
+    const changeSet = diffGraphs({ current, desired });
+    expect(changeSet.changes.map(change => change.kind).sort()).toEqual(["domain.delete", "domain.update"]);
+
+    const applied = changeSetToGraph({ current, changeSet });
+    expect(diffGraphs({ current: applied, desired }).changes).toEqual([]);
+  });
+
+  it("strips a domain-only networking update from the apply change set but keeps real setting changes", () => {
+    const current = environmentConfigToGraph(
+      { services: { web: {} } },
+      { projectName: "app", customDomainsByServiceId: { web: { "app.example.com": { port: 3000 } } } },
+    );
+    const domainOnly = projectDefinitionToGraph(project("app", {
+      resources: [service("web", { domains: [{ domain: "app.example.com", port: 8080 }] })],
+    }));
+    const networkChanged = projectDefinitionToGraph(project("app", {
+      resources: [service("web", { domains: [{ domain: "app.example.com", port: 3000 }], tcp: [5432] })],
+    }));
+
+    // domain-only: the plan carries a domain.update + a networking update (domains live in the
+    // graph), but the apply change set is emptied — domains are reconciled out-of-band.
+    const domainOnlyChangeSet = diffGraphs({ current, desired: domainOnly });
+    expect(domainOnlyChangeSet.changes.map(change => change.kind).sort()).toEqual(["domain.update"]);
+
+    // a real networking field (tcp) survives stripping, with no domain data in the payload
+    const applyChanges = diffGraphs({ current, desired: networkChanged }).changes;
+    const networking = applyChanges.find(change => change.kind === "resource.update");
+    expect(networking).toMatchObject({ field: "networking", after: { tcpProxies: { "5432": {} } } });
+    expect((networking as { after?: Record<string, unknown> }).after).not.toHaveProperty("customDomains");
+  });
+
+  it("strips domains from a new service's resource.create before apply", () => {
+    const current = environmentConfigToGraph({ services: {} }, { projectName: "app" });
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [service("web", { domains: ["app.example.com"], tcp: [5432] })],
+    }));
+
+    const changeSet = diffGraphs({ current, desired });
+    const created = changeSet.changes.find(change => change.kind === "resource.create");
+
+    expect(created?.resource).toStrictEqual({
+      address: "service.web",
+      kind: "empty",
+      name: "web",
+      networking: {
+        customDomains: {
+          "app.example.com": {
+            port: 8080,
+          },
+        },
+        tcpProxies: {
+          "5432": {},
+        },
+      },
+      type: "service",
+    });
   });
 
   it("typechecks known bucket regions", () => {
@@ -432,6 +575,24 @@ describe("Railway IaC", () => {
     }, { projectName: "app" });
     const desired = projectDefinitionToGraph(project("app", {
       resources: [service("web", { source: github("r"), env: { SECRET: preserve() } })],
+    }));
+
+    const varChanges = diffGraphs({ current, desired }).changes.filter(change => change.kind.startsWith("variable"));
+    expect(varChanges).toEqual([]);
+  });
+
+  it("never plans a change for a preserveExisting variable, even when the authored value differs", () => {
+    const current = environmentConfigToGraph({
+      services: { web: { source: { repo: "r" }, variables: { SECRET: { value: "existing" } } } },
+    }, { projectName: "app" });
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [service("web", {
+        source: github("r"),
+        env: {
+          SECRET: { value: "different", preserveExisting: true },
+          TOKEN: { type: "literal", value: "changed", preserveExisting: true },
+        },
+      })],
     }));
 
     const varChanges = diffGraphs({ current, desired }).changes.filter(change => change.kind.startsWith("variable"));
