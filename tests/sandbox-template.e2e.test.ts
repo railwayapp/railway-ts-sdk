@@ -9,9 +9,7 @@ import {
 describe.runIf(live)("template e2e (live)", () => {
   const { track, cleanup } = createSandboxTracker();
 
-  afterEach(async () => {
-    await cleanup();
-  });
+  afterEach(cleanup);
 
   it("installs apt packages during the build", async () => {
     const sandbox = track(

@@ -14,9 +14,7 @@ import {
 describe.runIf(live)("fork + checkpoint e2e (live)", () => {
   const { track, cleanup } = createSandboxTracker();
 
-  afterEach(async () => {
-    await cleanup();
-  });
+  afterEach(cleanup);
 
   it("forks with both factory forms and keeps each filesystem isolated", async () => {
     const source = track(await Sandbox.create());

@@ -1,3 +1,5 @@
+import { basename } from "node:path";
+
 import { defineConfig } from "vitest/config";
 import { BaseSequencer, type TestSpecification } from "vitest/node";
 
@@ -22,7 +24,7 @@ class E2ESequencer extends BaseSequencer {
 }
 
 function priorityOf(moduleId: string): number {
-  const index = filePriority.findIndex(name => moduleId.endsWith(`/${name}`));
+  const index = filePriority.indexOf(basename(moduleId));
   return index === -1 ? filePriority.length : index;
 }
 
