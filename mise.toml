@@ -22,16 +22,16 @@ description = "Typecheck source, tests, and examples"
 run = "pnpm run typecheck"
 
 [tasks.test]
-description = "Run tests; loads .env so the live e2e runs when RAILWAY_API_TOKEN + RAILWAY_ENVIRONMENT_ID are set (else it skips)"
-run = "if [ -f .env ]; then set -a; . ./.env; set +a; fi; pnpm run test"
+description = "Run offline tests, then the bounded live e2e task when .env provides credentials"
+run = "if [ -f .env ]; then set -a; . ./.env; set +a; fi; if [ -n \"${RAILWAY_API_TOKEN:-}\" ] && [ -n \"${RAILWAY_ENVIRONMENT_ID:-}\" ]; then RAILWAY_API_TOKEN='' RAILWAY_ENVIRONMENT_ID='' pnpm run test && mise run e2e; else pnpm run test; fi"
 
 [tasks.test-watch]
 description = "Run unit tests in watch mode"
 run = "pnpm run test:watch"
 
 [tasks.e2e]
-description = "Run the live e2e suites against .env credentials (uses the system CA store for dev certs)"
-run = "if [ -f .env ]; then set -a; . ./.env; set +a; fi; pnpm exec vitest run tests/*.e2e.test.ts"
+description = "Run live e2e suites with two workers against .env credentials"
+run = "if [ -f .env ]; then set -a; . ./.env; set +a; fi; pnpm exec vitest run --config vitest.e2e.config.ts --maxWorkers=2 --minWorkers=2 --reporter=verbose"
 
 [tasks.codegen]
 description = "Regenerate GraphQL types from the configured schema"
@@ -92,4 +92,3 @@ run = "if [ -f .env ]; then set -a; . ./.env; set +a; fi; pnpm exec tsx examples
 description = "Minimal flags quickstart using .env credentials"
 depends = ["build"]
 run = "if [ -f .env ]; then set -a; . ./.env; set +a; fi; pnpm exec tsx examples/flags/quickstart.ts"
-
