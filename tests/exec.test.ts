@@ -83,7 +83,7 @@ describe("exec", () => {
     expect(socket.protocols).toEqual(["railway-shell", "jwt_abc"]);
     expect(socket.sentText[0]).toEqual({
       type: "init_exec",
-      data: { command: "echo hi" },
+      data: { command: "bash -lc 'echo hi'" },
     });
     // No stdin provided, so stdin is EOF'd up front.
     expect(socket.sentText.some(f => f.type === "stdin_close")).toBe(true);
@@ -235,7 +235,11 @@ describe("exec", () => {
 
     expect(socket.sentText[0]).toEqual({
       type: "init_exec",
-      data: { command: "npm test", cwd: "/app", env: { NODE_ENV: "test" } },
+      data: {
+        command: "bash -lc 'npm test'",
+        cwd: "/app",
+        env: { NODE_ENV: "test" },
+      },
     });
 
     socket.serverExit(0);

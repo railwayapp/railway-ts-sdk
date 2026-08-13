@@ -1,4 +1,5 @@
 import { engineFromOptions } from "./engine.js";
+import { shellQuote } from "./shell.js";
 import type { CompiledTemplate, TemplateBuildOptions } from "./types.js";
 
 interface TemplateState {
@@ -78,7 +79,10 @@ class SandboxTemplateRecipe implements SandboxTemplate {
     const compiled = this.compile();
     // Nothing to build without instructions; build-time env alone has no effect.
     if (compiled.instructions.length > 0) {
-      await engineFromOptions(options).buildTemplateUntilReady(compiled);
+      await engineFromOptions(options).buildTemplateUntilReady(
+        compiled,
+        options.region,
+      );
     }
     return this;
   }
@@ -114,8 +118,4 @@ function upsertEnv(
   const next = env.slice();
   next[index] = [key, value];
   return next;
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
 }

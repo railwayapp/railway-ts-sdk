@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { deriveFilesWsEndpoint } from "../src/core/config.js";
 import { RailwayConnectionError } from "../src/core/errors.js";
+import { loginShellCommand } from "../src/sandbox/shell.js";
 import {
   Sandbox,
   SandboxFileNotFoundError,
@@ -583,7 +584,7 @@ describe("files.write", () => {
     const init = await exec.nextRequest();
     expect(init).toMatchObject({
       type: "init_exec",
-      data: { command: "chmod 755 -- '/app/run.sh'" },
+      data: { command: loginShellCommand("chmod 755 -- '/app/run.sh'") },
     });
     exec.serverReply("exit", "0", { exit_code: 0 });
 
@@ -603,7 +604,7 @@ describe("files.write", () => {
     const init = await exec.nextRequest();
     expect(init).toMatchObject({
       type: "init_exec",
-      data: { command: "chmod 700 -- '/tmp/it'\\''s.sh'" },
+      data: { command: loginShellCommand("chmod 700 -- '/tmp/it'\\''s.sh'") },
     });
     exec.serverReply("exit", "0", { exit_code: 0 });
     await expect(promise).resolves.toBeUndefined();

@@ -149,10 +149,11 @@ export class SandboxEngine {
 
   async buildTemplate(
     template: CompiledTemplate,
+    region?: string,
   ): Promise<SandboxTemplateBuildInfo> {
     const variables: RailwaySandboxTemplateBuildMutationVariables = {
       environmentId: this.#config.environmentId,
-      input: toTemplateInput(template),
+      input: { ...toTemplateInput(template), ...(region && { region }) },
     };
     const data = await requestGraphQL<
       RailwaySandboxTemplateBuildMutation,
@@ -177,6 +178,7 @@ export class SandboxEngine {
 
   async buildTemplateUntilReady(
     template: CompiledTemplate,
+    region?: string,
   ): Promise<SandboxTemplateBuildInfo> {
     const varCount = template.variables
       ? Object.keys(template.variables).length
@@ -184,7 +186,7 @@ export class SandboxEngine {
     this.#config.log(
       `build template (${template.instructions.length} steps, vars=${varCount})`,
     );
-    return this.#waitForBuildReady(await this.buildTemplate(template));
+    return this.#waitForBuildReady(await this.buildTemplate(template, region));
   }
 
   /**

@@ -111,7 +111,7 @@ export class Sandbox implements AsyncDisposable {
         // effect; runtime env still comes from `create({ env })`.
         return new Sandbox(engine, await engine.create(maybeOptions));
       }
-      await engine.buildTemplateUntilReady(compiled);
+      await engine.buildTemplateUntilReady(compiled, maybeOptions.region);
       const info = await engine.create(maybeOptions, compiled);
       return new Sandbox(engine, info);
     }

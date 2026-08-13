@@ -44,14 +44,27 @@ export type AccessRule = {
 };
 
 export type ActiveFeatureFlag =
+  | 'ACCESS_GROUPS'
   | 'AGENT_BYOK'
-  | 'AGENT_VM'
+  | 'AGENT_CONTEXT_SOURCES'
   | 'CHAT_SANDBOX'
+  | 'CLOUD_AGENTS'
   | 'DEBUG_SMART_DIAGNOSIS'
+  | 'EDGE_RULES'
+  | 'FIXED_DOMAIN_RADAR_RULES'
+  | 'HA_FOR_ALL_TEMPLATES'
+  | 'HA_FOR_MYSQL'
+  | 'HA_FOR_REDIS'
   | 'IN_DASHBOARD_SUPPORT'
   | 'MAGIC_CONFIG'
+  | 'NEW_PEOPLE_PAGE'
+  | 'POSTGRES_MAJOR_UPGRADE'
+  | 'POSTGRES_VULN_AUTO_UPDATE'
   | 'PRIORITY_BOARDING'
-  | 'PROJECT_SANDBOXES';
+  | 'PROJECT_SANDBOXES'
+  | 'SANDBOX_FACTORY_VM'
+  | 'TEMPLATE_CHAT'
+  | 'VM_STORAGE_TRACES';
 
 export type ActivePlatformFlag =
   | 'ALERT_SUS_USERS_CRON_KILLSWITCH'
@@ -62,20 +75,31 @@ export type ActivePlatformFlag =
   | 'CLICKHOUSE_WORKSPACE_LIMIT_ENFORCE'
   | 'CS_MCP'
   | 'CTRD_IMAGE_STORE_ROLLOUT'
+  | 'DEFAULT_USAGE_ALERTS'
   | 'DEMO_PERCENTAGE_ROLLOUT'
+  | 'DEPLOYMENT_DIAGNOSIS_KILLSWITCH'
+  | 'DEPLOY_SUPERSEDE_ON_PUSH'
+  | 'DEV_STUDIO'
+  | 'DEV_STUDIO_ANON_PROVISIONS'
+  | 'DOMAIN_PURCHASE_VELOCITY_LIMIT'
+  | 'FIXED_DOMAIN_RADAR_RULES'
   | 'IN_DASHBOARD_SUPPORT'
   | 'KAFKA_EPHEMERAL_ENVIRONMENT_UPDATES'
+  | 'LOGS_LONG_WINDOW_CHUNKING'
+  | 'LOGS_V2_ENVIRONMENT_DARK_READS'
+  | 'LOGS_V2_ENVIRONMENT_READS'
+  | 'LOGS_V2_FILTERED_READS'
+  | 'LOGS_V2_READS'
   | 'NEW_STRIPE_WEBHOOK_VERSION_ROLLOUT'
   | 'OAUTH_DCR_KILLSWITCH'
   | 'REMOVE_DEPLOYMENT_COMPACT'
+  | 'SANDBOX_FACTORY_VM'
   | 'SERVICEINSTANCE_DATALOADER_FOR_STATIC_URL'
   | 'SPLIT_USAGE_QUERIES'
   | 'STRIPE_METERS_NEW_ACCOUNTS'
   | 'STRIPE_METERS_SHADOW_ENABLED'
-  | 'TEMPORAL_CLOUD_DEPLOYS'
-  | 'TEMPORAL_CLOUD_DEPLOY_REMOVALS'
-  | 'TEMPORAL_CLOUD_VOLUME_BACKUPS'
-  | 'UPDATED_VM_QUERIES';
+  | 'UPDATED_VM_QUERIES'
+  | 'WORKSPACE_MCP_KILLSWITCH';
 
 export type ActiveProjectFeatureFlag =
   | 'PLACEHOLDER';
@@ -86,6 +110,7 @@ export type ActiveServiceFeatureFlag =
   | 'PLACEHOLDER'
   | 'SKIPPED_BUILDS'
   | 'USE_EXPRESS_DEPLOY'
+  | 'USE_EXPRESS_PACKSTORE'
   | 'USE_VM_RUNTIME';
 
 export type AdoptionInfo = Node & {
@@ -253,6 +278,7 @@ export type Bucket = Node & {
   groupId?: Maybe<Scalars['String']['output']>;
   id: Scalars['ID']['output'];
   name: Scalars['String']['output'];
+  parentServiceId?: Maybe<Scalars['String']['output']>;
   project: Project;
   projectId: Scalars['String']['output'];
   updatedAt: Scalars['DateTime']['output'];
@@ -410,6 +436,87 @@ export type CliEventTrackInput = {
   success: Scalars['Boolean']['input'];
   workspaceId?: InputMaybe<Scalars['String']['input']>;
 };
+
+/** A persistent cloud agent for running coding harnesses. */
+export type CloudAgent = {
+  __typename?: 'CloudAgent';
+  /** Target ID for console or command execution. Null while unavailable. */
+  consoleTargetId?: Maybe<Scalars['String']['output']>;
+  createdAt: Scalars['DateTime']['output'];
+  /** The first of the agent machine's public domains. Stable across sleep and wake; returns no endpoints while the machine sleeps. */
+  domain?: Maybe<Scalars['String']['output']>;
+  /** Every public domain on the agent's machine, one per port, in the order the machine declared them. */
+  domains: Array<CloudAgentDomain>;
+  environmentId: Scalars['String']['output'];
+  id: Scalars['ID']['output'];
+  name: Scalars['String']['output'];
+  projectId: Scalars['String']['output'];
+  /** Live coding-agent sessions, one entry per session. Retained for 24h after the last report, so a sleeping agent still shows what it was last doing. */
+  sessions: Array<CloudAgentSnapshot>;
+  status: CloudAgentStatus;
+};
+
+export type CloudAgentCreateInput = {
+  environmentId: Scalars['String']['input'];
+  name?: InputMaybe<Scalars['String']['input']>;
+  variables?: InputMaybe<Scalars['JSON']['input']>;
+};
+
+/** One public domain on an agent's machine. */
+export type CloudAgentDomain = {
+  __typename?: 'CloudAgentDomain';
+  /** Resolved FQDN. */
+  domain: Scalars['String']['output'];
+  /** Target port on the workload this domain routes to. */
+  port: Scalars['Int']['output'];
+  /** Label prefix the machine declared, e.g. app. */
+  prefix: Scalars['String']['output'];
+};
+
+/** The state of one coding agent session in a cloud agent. */
+export type CloudAgentSnapshot = {
+  __typename?: 'CloudAgentSnapshot';
+  harness: Scalars['String']['output'];
+  lastEventKind: Scalars['String']['output'];
+  /** Truncated first prompt of the session, display-only. Null when the harness never reported one. */
+  prompt?: Maybe<Scalars['String']['output']>;
+  sessionId: Scalars['String']['output'];
+  /** Durable console session name the harness ran inside. Null on older VMs that don't report it. */
+  sessionName?: Maybe<Scalars['String']['output']>;
+  /** One of: unknown, working, waiting, idle, failed, done. */
+  state: Scalars['String']['output'];
+  taskId?: Maybe<Scalars['String']['output']>;
+  terminal: Scalars['Boolean']['output'];
+  updatedAt: Scalars['String']['output'];
+};
+
+export type CloudAgentSnapshotInput = {
+  harness: Scalars['String']['input'];
+  lastEventKind: Scalars['String']['input'];
+  prompt?: InputMaybe<Scalars['String']['input']>;
+  sessionId: Scalars['String']['input'];
+  sessionName?: InputMaybe<Scalars['String']['input']>;
+  state: Scalars['String']['input'];
+  taskId?: InputMaybe<Scalars['String']['input']>;
+  terminal: Scalars['Boolean']['input'];
+  updatedAt: Scalars['String']['input'];
+};
+
+/** State reported by a cloud agent. */
+export type CloudAgentStateReportInput = {
+  agents: Array<CloudAgentSnapshotInput>;
+  cloudAgentId: Scalars['String']['input'];
+  reportedAt: Scalars['String']['input'];
+};
+
+/** The current lifecycle state of a cloud agent. */
+export type CloudAgentStatus =
+  | 'CRASHED'
+  | 'DELETING'
+  | 'FAILED'
+  | 'RUNNING'
+  | 'SLEEPING'
+  | 'STARTING';
 
 export type CnameCheck = {
   __typename?: 'CnameCheck';
@@ -861,10 +968,49 @@ export type DeploymentTriggerUpdateInput = {
   rootDirectory?: InputMaybe<Scalars['String']['input']>;
 };
 
+export type DisablePitrForHaClusterInput = {
+  /** Environment containing the cluster */
+  environmentId: Scalars['String']['input'];
+  /** Project containing the cluster (returned in payload) */
+  projectId: Scalars['String']['input'];
+  /** Root service of the HA Postgres cluster */
+  rootServiceId: Scalars['String']['input'];
+};
+
 export type DisableServiceCdnInput = {
   environmentId: Scalars['String']['input'];
   serviceId: Scalars['String']['input'];
 };
+
+/** A single DNS query resolved for a service (one row per query, not aggregated) */
+export type DnsQueryLog = {
+  __typename?: 'DnsQueryLog';
+  /** The IP addresses the name resolved to */
+  answers: Array<Scalars['String']['output']>;
+  /** Ordered CNAME targets the queried name aliased through before the final answer (empty when the response had no CNAME) */
+  cnameChain: Array<Scalars['String']['output']>;
+  /** The deployment ID */
+  deploymentId: Scalars['String']['output'];
+  /** The deployment instance ID */
+  deploymentInstanceId: Scalars['String']['output'];
+  /** The domain name that was looked up */
+  qname: Scalars['String']['output'];
+  /** The DNS record type queried (A, AAAA, TXT, ...) */
+  qtype: Scalars['String']['output'];
+  /** When the query was resolved (ISO timestamp) */
+  queriedAt: Scalars['String']['output'];
+  /** Whether the query targeted the internal zone or the public internet */
+  queryZone: DnsQueryZone;
+  /** The DNS response code (NOERROR, NXDOMAIN, SERVFAIL, ...) or synthetic TIMEOUT/ERROR when no upstream response was received */
+  rcode: Scalars['String']['output'];
+  /** The service ID that made the queries */
+  serviceId: Scalars['String']['output'];
+};
+
+/** Whether a DNS query targeted the internal zone or the public internet */
+export type DnsQueryZone =
+  | 'external'
+  | 'internal';
 
 export type DockerComposeImport = {
   __typename?: 'DockerComposeImport';
@@ -929,8 +1075,10 @@ export type EdgeCachingConfigInput = {
 export type EdgeConfig = {
   __typename?: 'EdgeConfig';
   caching?: Maybe<EdgeCachingConfig>;
+  edgeRules?: Maybe<Scalars['JSON']['output']>;
   enabled: Scalars['Boolean']['output'];
   id: Scalars['String']['output'];
+  overrides: Scalars['JSON']['output'];
   purgeEpoch: Scalars['Int']['output'];
   purgeEpochByKind: Scalars['JSON']['output'];
   underAttackModeUntil?: Maybe<Scalars['Int']['output']>;
@@ -938,6 +1086,13 @@ export type EdgeConfig = {
 
 export type EdgeConfigInput = {
   caching?: InputMaybe<EdgeCachingConfigInput>;
+};
+
+export type EdgeRuleDiagnostic = {
+  __typename?: 'EdgeRuleDiagnostic';
+  code: Scalars['String']['output'];
+  message: Scalars['String']['output'];
+  path: Scalars['String']['output'];
 };
 
 export type EgressGateway = {
@@ -974,6 +1129,15 @@ export type EgressMigrationResult = {
   ips: Array<EgressGateway>;
 };
 
+export type EnablePitrForHaClusterInput = {
+  /** Environment containing the cluster */
+  environmentId: Scalars['String']['input'];
+  /** Project containing the cluster (returned in payload) */
+  projectId: Scalars['String']['input'];
+  /** Root service of the HA Postgres cluster */
+  rootServiceId: Scalars['String']['input'];
+};
+
 export type EnableServiceCdnInput = {
   config?: InputMaybe<EdgeConfigInput>;
   environmentId: Scalars['String']['input'];
@@ -983,6 +1147,7 @@ export type EnableServiceCdnInput = {
 export type Environment = Node & {
   __typename?: 'Environment';
   canAccess: Scalars['Boolean']['output'];
+  canvasGroupRefs: Scalars['JSON']['output'];
   config: Scalars['EnvironmentConfig']['output'];
   /** Opaque snapshot token of the environment's IaC-relevant config. Echo it back as baseConfigEtag on environmentApplyChangeSet for optimistic concurrency. */
   configEtag: Scalars['String']['output'];
@@ -1447,6 +1612,12 @@ export type HttpLog = {
   upstreamRqDuration: Scalars['Int']['output'];
 };
 
+/** Which HTTP metric an HTTP_METRICS_ITEM widget renders. */
+export type HttpMetricKind =
+  | 'LATENCY'
+  | 'REQUESTS'
+  | 'STATUS_RATIO';
+
 /** HTTP metrics grouped by status code. */
 export type HttpMetricsByStatusResult = {
   __typename?: 'HttpMetricsByStatusResult';
@@ -1726,12 +1897,26 @@ export type Mutation = {
   bucketCredentialsReset: BucketS3CompatibleCredentials;
   /** Updates a bucket. */
   bucketUpdate: Bucket;
+  /** Terminates a running HA PITR enable/disable workflow and clears the progress snapshot so the UI re-evaluates from the live cluster state. No-ops if no workflow is running. */
+  cancelPitrHaWorkflow: Scalars['Boolean']['output'];
   /** Merge a canvas layout from one environment into another. Re-computes the merge from current state and applies mutations. */
   canvasViewMerge: Scalars['Boolean']['output'];
+  /** Clears a completed HA PITR workflow progress snapshot so the Backups page can start fresh. In-flight workflows cannot be cleared. */
+  clearPitrHaWorkflowProgress: Scalars['Boolean']['output'];
   /** Track CLI authentication-attempt outcomes (signup / sign-in funnel) */
   cliAuthEventTrack: Scalars['Boolean']['output'];
   /** Track events from the Railway CLI */
   cliEventTrack: Scalars['Boolean']['output'];
+  /** Create a cloud agent. */
+  cloudAgentCreate: CloudAgent;
+  /** Delete a cloud agent. */
+  cloudAgentDelete: Scalars['Boolean']['output'];
+  /** Sleep a running cloud agent, keeping its volume. Processes on the machine are terminated; waking re-runs its entrypoint. */
+  cloudAgentSleep: CloudAgent;
+  /** Report the current coding-agent session state. */
+  cloudAgentStateReport: Scalars['Boolean']['output'];
+  /** Wake a sleeping cloud agent. */
+  cloudAgentWake: CloudAgent;
   /** Creates a new custom domain. */
   customDomainCreate: CustomDomain;
   /** Deletes a custom domain. */
@@ -1766,6 +1951,8 @@ export type Mutation = {
   deploymentTriggerDelete: Scalars['Boolean']['output'];
   /** Updates a deployment trigger. */
   deploymentTriggerUpdate: DeploymentTrigger;
+  /** Disables PITR on a Postgres-HA cluster via the same rolling workflow as enable: PATCHes Patroni DCS archive_mode=off, restarts replicas one at a time, switches over, restarts the former leader, then strips the WAL_ARCHIVE_* vars. The bucket is left intact so backup history isn't destroyed. */
+  disablePitrForHaCluster: TemplateDeployPayload;
   /** Disables CDN for a service, soft-deleting the edge config. */
   disableServiceCdn: Scalars['Boolean']['output'];
   /** Create services and volumes from docker compose */
@@ -1784,6 +1971,8 @@ export type Mutation = {
   emailChangeConfirm: Scalars['Boolean']['output'];
   /** Initiate an email change request for a user */
   emailChangeInitiate: Scalars['Boolean']['output'];
+  /** Enables PITR on a Postgres-HA cluster via a rolling workflow: creates the bucket, writes WAL_ARCHIVE_* vars on every member, ensures Patroni DCS archive_mode=on, restarts replicas one at a time, switches over, then restarts the former leader. */
+  enablePitrForHaCluster: TemplateDeployPayload;
   /** Enables CDN for a service, creating an edge config and attaching all live domains. */
   enableServiceCdn: EdgeConfig;
   /** Experimental: applies an intent-level RailwayChangeSet and returns operation results. */
@@ -1804,7 +1993,7 @@ export type Mutation = {
   environmentStageChanges: EnvironmentPatch;
   /** Deploys all connected triggers for an environment. */
   environmentTriggersDeploy: Scalars['Boolean']['output'];
-  /** Unskip a service in a PR environment, deploying it and its transitive dependencies. */
+  /** Deploy a service that was skipped when its environment was created, along with its skipped transitive dependencies. */
   environmentUnskipService: Scalars['Boolean']['output'];
   /** Agree to the fair use policy for the currently authenticated user */
   fairUseAgree: Scalars['Boolean']['output'];
@@ -2025,6 +2214,10 @@ export type Mutation = {
   serviceInstanceRedeploy: Scalars['Boolean']['output'];
   /** Update a service instance */
   serviceInstanceUpdate: Scalars['Boolean']['output'];
+  /** Dismiss a platform-armed Postgres security update notice and stand down the scheduled redeploy */
+  serviceInstanceVulnRemediationDismiss: Scalars['Boolean']['output'];
+  /** Immediately apply a platform-armed Postgres security update (backup + redeploy). Returns the new deployment id. */
+  serviceInstanceVulnRemediationPatchNow: Scalars['String']['output'];
   /** Remove the upstream URL from all service instances for this service */
   serviceRemoveUpstreamUrl: Service;
   /** Updates a service. */
@@ -2079,6 +2272,8 @@ export type Mutation = {
   templateGenerate: Template;
   /** Publishes a template. */
   templatePublish: Template;
+  /** Reverts an HA cluster to standalone mode using template metadata to derive variables to remove */
+  templateRevert: TemplateDeployPayload;
   /** Ejects a service from the template and creates a new repo in the provided org. */
   templateServiceSourceEject: Scalars['Boolean']['output'];
   /** Unpublishes a template. */
@@ -2103,6 +2298,8 @@ export type Mutation = {
   twoFactorInfoValidate: Scalars['Boolean']['output'];
   /** Updates the edge config (caching settings) for a service. */
   updateServiceEdgeConfig: EdgeConfig;
+  /** Replaces the service's edge rules (whole-section replace; null clears). Rules are boolean expressions over request attributes plus one action (block/allow/challenge/redirect/cache_override), evaluated at the edge before requests reach the service. The ruleset is validated server-side; invalid rulesets are rejected with per-rule diagnostics and nothing is written. Rules without an id get a server-assigned stable `rul_` id. */
+  updateServiceEdgeRules: EdgeConfig;
   /** Generate a Slack channel for a workspace */
   upsertSlackChannel: Scalars['Boolean']['output'];
   /** Remove the usage limit for a customer */
@@ -2225,9 +2422,21 @@ export type MutationBucketUpdateArgs = {
 };
 
 
+export type MutationCancelPitrHaWorkflowArgs = {
+  environmentId: Scalars['String']['input'];
+  rootServiceId: Scalars['String']['input'];
+};
+
+
 export type MutationCanvasViewMergeArgs = {
   sourceEnvironmentId: Scalars['String']['input'];
   targetEnvironmentId: Scalars['String']['input'];
+};
+
+
+export type MutationClearPitrHaWorkflowProgressArgs = {
+  environmentId: Scalars['String']['input'];
+  rootServiceId: Scalars['String']['input'];
 };
 
 
@@ -2238,6 +2447,31 @@ export type MutationCliAuthEventTrackArgs = {
 
 export type MutationCliEventTrackArgs = {
   input: CliEventTrackInput;
+};
+
+
+export type MutationCloudAgentCreateArgs = {
+  input: CloudAgentCreateInput;
+};
+
+
+export type MutationCloudAgentDeleteArgs = {
+  id: Scalars['ID']['input'];
+};
+
+
+export type MutationCloudAgentSleepArgs = {
+  id: Scalars['ID']['input'];
+};
+
+
+export type MutationCloudAgentStateReportArgs = {
+  input: CloudAgentStateReportInput;
+};
+
+
+export type MutationCloudAgentWakeArgs = {
+  id: Scalars['ID']['input'];
 };
 
 
@@ -2331,6 +2565,11 @@ export type MutationDeploymentTriggerUpdateArgs = {
 };
 
 
+export type MutationDisablePitrForHaClusterArgs = {
+  input: DisablePitrForHaClusterInput;
+};
+
+
 export type MutationDisableServiceCdnArgs = {
   input: DisableServiceCdnInput;
 };
@@ -2379,6 +2618,11 @@ export type MutationEmailChangeInitiateArgs = {
 };
 
 
+export type MutationEnablePitrForHaClusterArgs = {
+  input: EnablePitrForHaClusterInput;
+};
+
+
 export type MutationEnableServiceCdnArgs = {
   input: EnableServiceCdnInput;
 };
@@ -2389,6 +2633,7 @@ export type MutationEnvironmentApplyChangeSetArgs = {
   commitMessage?: InputMaybe<Scalars['String']['input']>;
   environmentId: Scalars['String']['input'];
   input: Scalars['JSON']['input'];
+  waitForCompletion?: InputMaybe<Scalars['Boolean']['input']>;
 };
 
 
@@ -2956,6 +3201,18 @@ export type MutationServiceInstanceUpdateArgs = {
 };
 
 
+export type MutationServiceInstanceVulnRemediationDismissArgs = {
+  environmentId: Scalars['String']['input'];
+  serviceId: Scalars['String']['input'];
+};
+
+
+export type MutationServiceInstanceVulnRemediationPatchNowArgs = {
+  environmentId: Scalars['String']['input'];
+  serviceId: Scalars['String']['input'];
+};
+
+
 export type MutationServiceRemoveUpstreamUrlArgs = {
   id: Scalars['String']['input'];
 };
@@ -3079,6 +3336,11 @@ export type MutationTemplatePublishArgs = {
 };
 
 
+export type MutationTemplateRevertArgs = {
+  input: TemplateRevertInput;
+};
+
+
 export type MutationTemplateServiceSourceEjectArgs = {
   input: TemplateServiceSourceEjectInput;
 };
@@ -3129,6 +3391,11 @@ export type MutationTwoFactorInfoValidateArgs = {
 
 export type MutationUpdateServiceEdgeConfigArgs = {
   input: UpdateServiceEdgeConfigInput;
+};
+
+
+export type MutationUpdateServiceEdgeRulesArgs = {
+  input: UpdateServiceEdgeRulesInput;
 };
 
 
@@ -3206,8 +3473,10 @@ export type MutationVolumeInstanceBackupLockArgs = {
 
 
 export type MutationVolumeInstanceBackupRestoreArgs = {
+  replicaServiceIds?: InputMaybe<Array<Scalars['String']['input']>>;
   volumeInstanceBackupId: Scalars['String']['input'];
   volumeInstanceId: Scalars['String']['input'];
+  wipeServiceIds?: InputMaybe<Array<Scalars['String']['input']>>;
 };
 
 
@@ -3525,6 +3794,7 @@ export type ObservabilityDashboardItem = Node & {
 
 export type ObservabilityDashboardItemConfig = {
   __typename?: 'ObservabilityDashboardItemConfig';
+  httpMetric?: Maybe<HttpMetricKind>;
   logsFilter?: Maybe<Scalars['String']['output']>;
   measurements?: Maybe<Array<MetricMeasurement>>;
   projectUsageProperties?: Maybe<Array<ProjectUsageProperty>>;
@@ -3532,6 +3802,7 @@ export type ObservabilityDashboardItemConfig = {
 };
 
 export type ObservabilityDashboardItemConfigInput = {
+  httpMetric?: InputMaybe<HttpMetricKind>;
   logsFilter?: InputMaybe<Scalars['String']['input']>;
   measurements?: InputMaybe<Array<MetricMeasurement>>;
   projectUsageProperties?: InputMaybe<Array<ProjectUsageProperty>>;
@@ -3554,6 +3825,10 @@ export type ObservabilityDashboardItemInstance = Node & {
 };
 
 export type ObservabilityDashboardItemType =
+  | 'DNS_LOGS_ITEM'
+  | 'HTTP_LOGS_ITEM'
+  | 'HTTP_METRICS_ITEM'
+  | 'NETWORK_LOGS_ITEM'
   | 'PROJECT_USAGE_ITEM'
   | 'SERVICE_LOGS_ITEM'
   | 'SERVICE_METRICS_ITEM'
@@ -3633,6 +3908,79 @@ export type PaymentMethodCard = {
   last4: Scalars['String']['output'];
 };
 
+/** Live replication health of an HA postgres cluster, probed from patroni on demand. Used to gate the Enable/Disable PITR buttons on the same 'caught up' definition the rolling workflow enforces. */
+export type PitrHaClusterReplicationHealth = {
+  __typename?: 'PitrHaClusterReplicationHealth';
+  allHealthy: Scalars['Boolean']['output'];
+  checkedAt: Scalars['String']['output'];
+  environmentId: Scalars['String']['output'];
+  members: Array<PitrHaMemberReplicationHealth>;
+  reachable: Scalars['Boolean']['output'];
+  rootServiceId: Scalars['String']['output'];
+};
+
+export type PitrHaMemberReplicationHealth = {
+  __typename?: 'PitrHaMemberReplicationHealth';
+  healthy: Scalars['Boolean']['output'];
+  isLeader: Scalars['Boolean']['output'];
+  lagMb?: Maybe<Scalars['Int']['output']>;
+  patroniName?: Maybe<Scalars['String']['output']>;
+  serviceId: Scalars['String']['output'];
+  serviceName: Scalars['String']['output'];
+  state?: Maybe<Scalars['String']['output']>;
+};
+
+export type PitrHaWorkflowDirection =
+  | 'DISABLE'
+  | 'ENABLE';
+
+export type PitrHaWorkflowMemberProgress = {
+  __typename?: 'PitrHaWorkflowMemberProgress';
+  isLeader: Scalars['Boolean']['output'];
+  serviceId: Scalars['String']['output'];
+  serviceName: Scalars['String']['output'];
+  status: PitrHaWorkflowMemberStatus;
+};
+
+export type PitrHaWorkflowMemberStatus =
+  | 'HEALTHY'
+  | 'PENDING'
+  | 'RESTARTING'
+  | 'SKIPPED';
+
+export type PitrHaWorkflowPhase =
+  | 'CREATING_BUCKET'
+  | 'DONE'
+  | 'FAILED'
+  | 'PATCHING_DCS'
+  | 'PLANNING'
+  | 'REMOVING_VARIABLES'
+  | 'ROLLING_EX_LEADER'
+  | 'ROLLING_REPLICAS'
+  | 'SWITCHING_OVER'
+  | 'VERIFYING'
+  | 'WRITING_VARIABLES';
+
+/** Progress snapshot for an in-flight (or recently completed) HA PITR enable/disable workflow. Persisted in Redis for ~1h and re-emitted on every phase transition over the pitrHaWorkflowProgress subscription. */
+export type PitrHaWorkflowProgress = {
+  __typename?: 'PitrHaWorkflowProgress';
+  clusterMutated: Scalars['Boolean']['output'];
+  completedAt?: Maybe<Scalars['String']['output']>;
+  currentMemberServiceId?: Maybe<Scalars['String']['output']>;
+  direction: PitrHaWorkflowDirection;
+  environmentId: Scalars['String']['output'];
+  errorMessage?: Maybe<Scalars['String']['output']>;
+  failedAtPhase?: Maybe<PitrHaWorkflowPhase>;
+  members: Array<PitrHaWorkflowMemberProgress>;
+  newLeaderServiceId?: Maybe<Scalars['String']['output']>;
+  phase: PitrHaWorkflowPhase;
+  projectId: Scalars['String']['output'];
+  rootServiceId: Scalars['String']['output'];
+  startedAt: Scalars['String']['output'];
+  updatedAt: Scalars['String']['output'];
+  workflowId: Scalars['String']['output'];
+};
+
 export type Plan =
   | 'FREE'
   | 'HOBBY'
@@ -3641,7 +3989,6 @@ export type Plan =
 export type PlanLimitOverride = Node & {
   __typename?: 'PlanLimitOverride';
   config: Scalars['SubscriptionPlanLimit']['output'];
-  expiresAt?: Maybe<Scalars['DateTime']['output']>;
   id: Scalars['ID']['output'];
 };
 
@@ -3654,20 +4001,31 @@ export type PlatformFeatureFlag =
   | 'CLICKHOUSE_WORKSPACE_LIMIT_ENFORCE'
   | 'CS_MCP'
   | 'CTRD_IMAGE_STORE_ROLLOUT'
+  | 'DEFAULT_USAGE_ALERTS'
   | 'DEMO_PERCENTAGE_ROLLOUT'
+  | 'DEPLOYMENT_DIAGNOSIS_KILLSWITCH'
+  | 'DEPLOY_SUPERSEDE_ON_PUSH'
+  | 'DEV_STUDIO'
+  | 'DEV_STUDIO_ANON_PROVISIONS'
+  | 'DOMAIN_PURCHASE_VELOCITY_LIMIT'
+  | 'FIXED_DOMAIN_RADAR_RULES'
   | 'IN_DASHBOARD_SUPPORT'
   | 'KAFKA_EPHEMERAL_ENVIRONMENT_UPDATES'
+  | 'LOGS_LONG_WINDOW_CHUNKING'
+  | 'LOGS_V2_ENVIRONMENT_DARK_READS'
+  | 'LOGS_V2_ENVIRONMENT_READS'
+  | 'LOGS_V2_FILTERED_READS'
+  | 'LOGS_V2_READS'
   | 'NEW_STRIPE_WEBHOOK_VERSION_ROLLOUT'
   | 'OAUTH_DCR_KILLSWITCH'
   | 'REMOVE_DEPLOYMENT_COMPACT'
+  | 'SANDBOX_FACTORY_VM'
   | 'SERVICEINSTANCE_DATALOADER_FOR_STATIC_URL'
   | 'SPLIT_USAGE_QUERIES'
   | 'STRIPE_METERS_NEW_ACCOUNTS'
   | 'STRIPE_METERS_SHADOW_ENABLED'
-  | 'TEMPORAL_CLOUD_DEPLOYS'
-  | 'TEMPORAL_CLOUD_DEPLOY_REMOVALS'
-  | 'TEMPORAL_CLOUD_VOLUME_BACKUPS'
-  | 'UPDATED_VM_QUERIES';
+  | 'UPDATED_VM_QUERIES'
+  | 'WORKSPACE_MCP_KILLSWITCH';
 
 export type PlatformFeatureFlagStatus = {
   __typename?: 'PlatformFeatureFlagStatus';
@@ -4369,6 +4727,12 @@ export type Query = {
   canvasViewMergePreview: CanvasViewMergePreview;
   /** Gets the image URL for a Notion image block */
   changelogBlockImage: Scalars['String']['output'];
+  /** A cloud agent by ID, within an environment. Null when the agent belongs to another one, so a caller cannot render an agent it has switched away from. */
+  cloudAgent?: Maybe<CloudAgent>;
+  /** Shell and exec sessions running on a cloud agent's VM that you can reconnect to. Null if the agent has no running machine. */
+  cloudAgentConsoleSessions?: Maybe<QueryCloudAgentConsoleSessionsConnection>;
+  /** Cloud agents in an environment. */
+  cloudAgents: Array<CloudAgent>;
   /** Get compliance agreements for a workspace including HIPAA BAA and GDPR DPA status. */
   complianceAgreements: ComplianceAgreementsInfo;
   /** Fetch details for a custom domain */
@@ -4391,6 +4755,8 @@ export type Query = {
   deploymentTriggers: QueryDeploymentTriggersConnection;
   /** Get all deployments */
   deployments: QueryDeploymentsConnection;
+  /** Fetch individual DNS query logs for an environment */
+  dnsQueryLogs: Array<DnsQueryLog>;
   /**
    * Domain with status
    * @deprecated Use the `status` field within the `domain` query instead
@@ -4406,6 +4772,8 @@ export type Query = {
   egressGateways: Array<EgressGateway>;
   /** Find a single environment */
   environment: Environment;
+  /** Returns the status or completed result of an asynchronous RailwayChangeSet apply. */
+  environmentChangeSetApply: ChangeSetApplyResult;
   /** Whether any service in the environment is on legacy static egress (not HA). Used to surface the HA migration banner. */
   environmentHasLegacyStaticEgress: Scalars['Boolean']['output'];
   /** Fetch logs for a project environment. Build logs are excluded unless a snapshot ID is explicitly provided in the filter */
@@ -4468,6 +4836,8 @@ export type Query = {
   me: User;
   /** Get metrics for a project, environment, and service */
   metrics: Array<MetricsResult>;
+  /** Cloud agents you own, across every project and environment you can reach. Answers "where are my agents" in one request; `cloudAgents` needs one call per environment. Machine fields (`status`, `domain`, `domains`) read the last observed state in batched queries, so selecting them across many environments is fine. */
+  myCloudAgents: Array<CloudAgent>;
   /** Fetch individual network flow logs for an environment */
   networkFlowLogs: Array<NetworkFlowLog>;
   /** Gets notification deliveries for the authenticated user */
@@ -4480,6 +4850,10 @@ export type Query = {
   observabilityDashboards: QueryObservabilityDashboardsConnection;
   /** Gets all passkeys for the authenticated user */
   passkeys: QueryPasskeysConnection;
+  /** Live replication health for an HA postgres cluster, probed from patroni. Use to gate the Enable/Disable PITR buttons so the user can't start a rollout while a replica is too far behind to rejoin. Returns null when the service isn't an HA root. */
+  pitrHaClusterReplicationHealth?: Maybe<PitrHaClusterReplicationHealth>;
+  /** One-shot read of the persisted progress for an HA PITR enable/disable workflow. Use to rehydrate state on page load before connecting to the subscription. Returns null if no workflow has run recently (TTL ~1h). */
+  pitrHaWorkflowProgress?: Maybe<PitrHaWorkflowProgress>;
   /** Get the current status of the platform */
   platformStatus: PlatformStatus;
   /**
@@ -4622,6 +4996,8 @@ export type Query = {
    * @deprecated Users don't have personal templates anymore, they belong to their team now
    */
   userTemplates: QueryUserTemplatesConnection;
+  /** Validates an edge ruleset without writing it — returns the same diagnostics updateServiceEdgeRules would reject with (empty list = valid). For live feedback in rule editors. */
+  validateServiceEdgeRules: Array<EdgeRuleDiagnostic>;
   /** All variables by pluginId or serviceId. If neither are provided, all shared variables are returned. */
   variables: Scalars['EnvironmentVariables']['output'];
   /** All rendered variables that are required for a service deployment. */
@@ -4719,6 +5095,27 @@ export type QueryChangelogBlockImageArgs = {
 };
 
 
+export type QueryCloudAgentArgs = {
+  environmentId: Scalars['ID']['input'];
+  id: Scalars['ID']['input'];
+};
+
+
+export type QueryCloudAgentConsoleSessionsArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
+  before?: InputMaybe<Scalars['String']['input']>;
+  cloudAgentId: Scalars['ID']['input'];
+  first?: InputMaybe<Scalars['Int']['input']>;
+  last?: InputMaybe<Scalars['Int']['input']>;
+};
+
+
+export type QueryCloudAgentsArgs = {
+  environmentId: Scalars['ID']['input'];
+  mine?: InputMaybe<Scalars['Boolean']['input']>;
+};
+
+
 export type QueryComplianceAgreementsArgs = {
   workspaceId: Scalars['String']['input'];
 };
@@ -4801,6 +5198,19 @@ export type QueryDeploymentsArgs = {
 };
 
 
+export type QueryDnsQueryLogsArgs = {
+  afterDate?: InputMaybe<Scalars['String']['input']>;
+  afterLimit?: InputMaybe<Scalars['Int']['input']>;
+  anchorDate?: InputMaybe<Scalars['String']['input']>;
+  beforeDate?: InputMaybe<Scalars['String']['input']>;
+  beforeLimit?: InputMaybe<Scalars['Int']['input']>;
+  deploymentInstanceId?: InputMaybe<Scalars['String']['input']>;
+  environmentId: Scalars['String']['input'];
+  filter?: InputMaybe<Scalars['String']['input']>;
+  serviceId?: InputMaybe<Scalars['String']['input']>;
+};
+
+
 export type QueryDomainStatusArgs = {
   id: Scalars['String']['input'];
   projectId: Scalars['String']['input'];
@@ -4835,6 +5245,12 @@ export type QueryEgressGatewaysArgs = {
 export type QueryEnvironmentArgs = {
   id: Scalars['String']['input'];
   projectId?: InputMaybe<Scalars['String']['input']>;
+};
+
+
+export type QueryEnvironmentChangeSetApplyArgs = {
+  environmentId: Scalars['String']['input'];
+  id: Scalars['String']['input'];
 };
 
 
@@ -4964,10 +5380,8 @@ export type QueryHttpLogsArgs = {
   beforeDate?: InputMaybe<Scalars['String']['input']>;
   beforeLimit?: InputMaybe<Scalars['Int']['input']>;
   deploymentId: Scalars['String']['input'];
-  endDate?: InputMaybe<Scalars['String']['input']>;
   filter?: InputMaybe<Scalars['String']['input']>;
   limit?: InputMaybe<Scalars['Int']['input']>;
-  startDate?: InputMaybe<Scalars['String']['input']>;
 };
 
 
@@ -5086,6 +5500,18 @@ export type QueryPasskeysArgs = {
   before?: InputMaybe<Scalars['String']['input']>;
   first?: InputMaybe<Scalars['Int']['input']>;
   last?: InputMaybe<Scalars['Int']['input']>;
+};
+
+
+export type QueryPitrHaClusterReplicationHealthArgs = {
+  environmentId: Scalars['String']['input'];
+  rootServiceId: Scalars['String']['input'];
+};
+
+
+export type QueryPitrHaWorkflowProgressArgs = {
+  environmentId: Scalars['String']['input'];
+  rootServiceId: Scalars['String']['input'];
 };
 
 
@@ -5465,6 +5891,11 @@ export type QueryUserTemplatesArgs = {
 };
 
 
+export type QueryValidateServiceEdgeRulesArgs = {
+  input: ValidateServiceEdgeRulesInput;
+};
+
+
 export type QueryVariablesArgs = {
   environmentId: Scalars['String']['input'];
   projectId: Scalars['String']['input'];
@@ -5560,6 +5991,18 @@ export type QueryAuditLogsConnectionEdge = {
   __typename?: 'QueryAuditLogsConnectionEdge';
   cursor: Scalars['String']['output'];
   node: AuditLog;
+};
+
+export type QueryCloudAgentConsoleSessionsConnection = {
+  __typename?: 'QueryCloudAgentConsoleSessionsConnection';
+  edges: Array<QueryCloudAgentConsoleSessionsConnectionEdge>;
+  pageInfo: PageInfo;
+};
+
+export type QueryCloudAgentConsoleSessionsConnectionEdge = {
+  __typename?: 'QueryCloudAgentConsoleSessionsConnectionEdge';
+  cursor: Scalars['String']['output'];
+  node: SandboxSession;
 };
 
 export type QueryDeploymentEventsConnection = {
@@ -6197,6 +6640,8 @@ export type SandboxTemplateInput = {
   instructions?: InputMaybe<Array<Scalars['String']['input']>>;
   /** Boot from a saved checkpoint with this name (one captured from a sandbox). Mutually exclusive with instructions. */
   name?: InputMaybe<Scalars['String']['input']>;
+  /** Placement region for the build sandbox. The resulting checkpoint lives in this region, and sandboxes created from the template boot there. Defaults to the platform default; only the cold build consults it (a built template's own region wins). */
+  region?: InputMaybe<Scalars['String']['input']>;
   /** Environment variables available to the template's build instructions. Values may contain Railway variable references (e.g. ${{shared.FOO}}, ${{ServiceName.BAR}}), resolved at build time. */
   variables?: InputMaybe<Scalars['EnvironmentVariables']['input']>;
 };
@@ -6699,6 +7144,8 @@ export type Subscription = {
   deploymentInstanceExecutions: DeploymentInstanceExecution;
   /** Stream logs for a deployment */
   deploymentLogs: Array<Log>;
+  /** Stream individual DNS query logs for an environment */
+  dnsQueryLogs: Array<DnsQueryLog>;
   /** Stream logs for a project environment */
   environmentLogs: Array<Log>;
   /** Subscribe to updates for the staged patch for a single environment. */
@@ -6745,6 +7192,19 @@ export type SubscriptionDeploymentLogsArgs = {
   deploymentId: Scalars['String']['input'];
   filter?: InputMaybe<Scalars['String']['input']>;
   limit?: InputMaybe<Scalars['Int']['input']>;
+};
+
+
+export type SubscriptionDnsQueryLogsArgs = {
+  afterDate?: InputMaybe<Scalars['String']['input']>;
+  afterLimit?: InputMaybe<Scalars['Int']['input']>;
+  anchorDate?: InputMaybe<Scalars['String']['input']>;
+  beforeDate?: InputMaybe<Scalars['String']['input']>;
+  beforeLimit?: InputMaybe<Scalars['Int']['input']>;
+  deploymentInstanceId?: InputMaybe<Scalars['String']['input']>;
+  environmentId: Scalars['String']['input'];
+  filter?: InputMaybe<Scalars['String']['input']>;
+  serviceId?: InputMaybe<Scalars['String']['input']>;
 };
 
 
@@ -7029,6 +7489,7 @@ export type TemplateDeployPayload = {
 
 export type TemplateDeployService = {
   commit?: InputMaybe<Scalars['String']['input']>;
+  /** Generate a service domain on the service's default port. Merged with serviceDomainPorts. */
   hasDomain?: InputMaybe<Scalars['Boolean']['input']>;
   healthcheckPath?: InputMaybe<Scalars['String']['input']>;
   id: Scalars['String']['input'];
@@ -7037,10 +7498,14 @@ export type TemplateDeployService = {
   owner?: InputMaybe<Scalars['String']['input']>;
   preDeployCommand?: InputMaybe<Array<Scalars['String']['input']>>;
   rootDirectory?: InputMaybe<Scalars['String']['input']>;
+  /** Generate a service domain per target port, in addition to hasDomain. */
+  serviceDomainPorts?: InputMaybe<Array<Scalars['Int']['input']>>;
   serviceIcon?: InputMaybe<Scalars['String']['input']>;
   serviceName: Scalars['String']['input'];
   startCommand?: InputMaybe<Scalars['String']['input']>;
+  /** Merged with tcpProxyApplicationPorts. */
   tcpProxyApplicationPort?: InputMaybe<Scalars['Int']['input']>;
+  tcpProxyApplicationPorts?: InputMaybe<Array<Scalars['Int']['input']>>;
   template: Scalars['String']['input'];
   variables?: InputMaybe<Scalars['EnvironmentVariables']['input']>;
   volumes?: InputMaybe<Array<Scalars['TemplateVolume']['input']>>;
@@ -7048,8 +7513,12 @@ export type TemplateDeployService = {
 
 export type TemplateDeployV2Input = {
   environmentId?: InputMaybe<Scalars['String']['input']>;
+  /** Use an existing service as the cluster root instead of creating a new one. Used for HA cluster conversion where an existing postgres becomes the primary. */
+  existingRootServiceId?: InputMaybe<Scalars['String']['input']>;
   projectId?: InputMaybe<Scalars['String']['input']>;
   serializedConfig: Scalars['SerializedTemplateConfig']['input'];
+  /** If true, create resources and patch but don't deploy. Returns patchId for later commit. */
+  stageOnly?: InputMaybe<Scalars['Boolean']['input']>;
   templateId: Scalars['String']['input'];
   workspaceId?: InputMaybe<Scalars['String']['input']>;
 };
@@ -7085,6 +7554,21 @@ export type TemplatePublishInput = {
   image?: InputMaybe<Scalars['String']['input']>;
   readme: Scalars['String']['input'];
   workspaceId?: InputMaybe<Scalars['String']['input']>;
+};
+
+export type TemplateRevertInput = {
+  /** The environment ID containing the cluster */
+  environmentId: Scalars['String']['input'];
+  /** The group ID to delete when reverting */
+  groupId?: InputMaybe<Scalars['String']['input']>;
+  /** The project ID containing the cluster */
+  projectId: Scalars['String']['input'];
+  /** The root service ID of the HA cluster to revert */
+  rootServiceId: Scalars['String']['input'];
+  /** If true, stage changes instead of deploying. Returns patchId. */
+  stageOnly?: InputMaybe<Scalars['Boolean']['input']>;
+  /** The template code to revert (e.g., 'ha-postgres') */
+  templateCode: Scalars['String']['input'];
 };
 
 export type TemplateSearchResult = {
@@ -7197,6 +7681,12 @@ export type UpdateNotificationRuleInput = {
 
 export type UpdateServiceEdgeConfigInput = {
   config: EdgeConfigInput;
+  environmentId: Scalars['String']['input'];
+  serviceId: Scalars['String']['input'];
+};
+
+export type UpdateServiceEdgeRulesInput = {
+  edgeRules?: InputMaybe<Scalars['JSON']['input']>;
   environmentId: Scalars['String']['input'];
   serviceId: Scalars['String']['input'];
 };
@@ -7365,6 +7855,12 @@ export type UserProviderAuthsConnectionEdge = {
   __typename?: 'UserProviderAuthsConnectionEdge';
   cursor: Scalars['String']['output'];
   node: ProviderAuth;
+};
+
+export type ValidateServiceEdgeRulesInput = {
+  edgeRules: Scalars['JSON']['input'];
+  environmentId: Scalars['String']['input'];
+  serviceId: Scalars['String']['input'];
 };
 
 export type Variable = Node & {
@@ -7640,6 +8136,8 @@ export type Workspace = Node & {
   hasAutomaticDiagnosis: Scalars['Boolean']['output'];
   /** Whether this workspace has access to guardrails policies. */
   hasGuardrailsAccess: Scalars['Boolean']['output'];
+  /** Whether this workspace has a signed HIPAA Business Associate Agreement, from either the legacy hasBAA flag or the HIPAA_BAA spend commitment feature. */
+  hasHipaaBAA: Scalars['Boolean']['output'];
   hasSAML: Scalars['Boolean']['output'];
   id: Scalars['ID']['output'];
   identityProviders: WorkspaceIdentityProvidersConnection;

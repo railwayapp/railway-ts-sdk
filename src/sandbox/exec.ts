@@ -6,6 +6,7 @@ import {
 } from "../core/exec-ws-client.js";
 import { requestGraphQL } from "../core/graphql-client.js";
 import { ExecInterruptedError } from "./errors.js";
+import { loginShellCommand } from "./shell.js";
 import {
   RailwayGenerateShellTokenDocument,
   type RailwayGenerateShellTokenMutation,
@@ -211,7 +212,9 @@ async function runExec(
   control: ExecControl,
 ): Promise<ExecResult> {
   const reattach = typeof target !== "string";
-  const command = reattach ? REATTACH_PLACEHOLDER_COMMAND : target;
+  const command = reattach
+    ? REATTACH_PLACEHOLDER_COMMAND
+    : loginShellCommand(target);
   const sessionName = reattach ? target.sessionName : undefined;
 
   // Resolve the session name once: to the resume name immediately on reattach,
