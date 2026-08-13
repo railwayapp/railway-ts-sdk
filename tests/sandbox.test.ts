@@ -534,7 +534,7 @@ describe("Sandbox.create(template)", () => {
 
     expect(mock.calls[0]?.body.variables).toEqual({
       environmentId: "environment_123",
-      input: { instructions: ["true"] },
+      input: { instructions: ["true"], region: "europe-west4-drams3a" },
     });
     expect(mock.calls[1]?.body.variables).toEqual({
       input: {

@@ -169,6 +169,8 @@ export interface FileWriteOptions {
 
 export interface TemplateBuildOptions extends RailwayClientConfig {
   environmentId?: string;
+  /** Region the build sandbox runs in; sandboxes created from the template boot there. */
+  region?: string;
 }
 
 /** Connection/environment options for the checkpoint statics (`Sandbox.checkpoints` etc.). */
