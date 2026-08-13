@@ -171,7 +171,7 @@ describe("sandbox instance", () => {
     );
     expect(socket.sentText[0]).toEqual({
       type: "init_exec",
-      data: { command: "pwd" },
+      data: { command: "bash -lc 'pwd'" },
     });
   });
 

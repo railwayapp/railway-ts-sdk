@@ -1,4 +1,5 @@
 import { engineFromOptions } from "./engine.js";
+import { shellQuote } from "./shell.js";
 import type { CompiledTemplate, TemplateBuildOptions } from "./types.js";
 
 interface TemplateState {
@@ -114,8 +115,4 @@ function upsertEnv(
   const next = env.slice();
   next[index] = [key, value];
   return next;
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
 }
