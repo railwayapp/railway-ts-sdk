@@ -65,7 +65,9 @@ describe.runIf(live)("exec e2e (live)", () => {
       env: { PROBE: "1" },
     });
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("/mise/shims/node");
+    // mise resolves node via the shim or, once activated, the install dir;
+    // either proves the image PATH survived cwd/env.
+    expect(result.stdout).toMatch(/\/mise\/(shims|installs)\/(.*\/)?node/);
     expect(result.stdout).toContain("/mise");
   }, 90_000);
 
