@@ -361,9 +361,10 @@ function diffTopLevelField({ previous, resource, field, changes }: { previous: R
 function diffServiceDeploy({ previous, resource, changes }: { previous: ServiceNode; resource: ServiceNode; changes: RailwayChange[] }) {
   const desiredDeploy = serviceDeployWithCurrentRegion(previous.deploy, resource.deploy);
   const switchingAwayFromImage = previous.source?.type === "image" && resource.source?.type !== "image";
-  const [before, after] = switchingAwayFromImage && previous.deploy?.registryCredentials !== undefined
+  let [before, after] = switchingAwayFromImage && previous.deploy?.registryCredentials !== undefined
     ? [withoutRegistryCredentials(previous.deploy), { ...(desiredDeploy ?? {}), registryCredentials: null }]
     : stripWriteOnlyRegistryCredentials(previous.deploy, desiredDeploy);
+  before = dropUnauthoredPlatformFields(before, after, ["limitOverride"]) as ServiceNode["deploy"];
   const normalizedBefore = normalizeForDiff("deploy", before);
   const normalizedAfter = normalizeForDiff("deploy", after);
   if (stableStringify(normalizedBefore) === stableStringify(normalizedAfter)) return;
@@ -406,6 +407,7 @@ function diffVolumeConfig({ previous, resource, changes }: { previous: VolumeNod
 function diffDatabaseDeploy({ previous, resource, changes }: { previous: DatabaseNode; resource: DatabaseNode; changes: RailwayChange[] }) {
   let [previousDeploy, resourceDeploy] = stripWriteOnlyRegistryCredentials(previous.deploy, resource.deploy);
   previousDeploy = dropPlatformStartCommand(previousDeploy, resourceDeploy);
+  previousDeploy = dropUnauthoredPlatformFields(previousDeploy, resourceDeploy, ["limitOverride"]);
   const previousRegion = databaseRegion(previous);
   const desiredRegion = databaseRegion(resource);
   if (desiredRegion !== undefined && desiredRegion !== previousRegion) {
@@ -427,8 +429,9 @@ function diffDatabaseDeploy({ previous, resource, changes }: { previous: Databas
 }
 
 // Fields Backboard realizes outside authored config (template start commands with
-// auth flags, volume alert thresholds, resize capability). Diffing them against a
-// config that never authored them plans unsets that strip live behavior — so a
+// auth flags, volume alert thresholds, resize capability, resource limits set via
+// the dashboard or serviceInstanceLimitsUpdate). Diffing them against a config
+// that never authored them plans unsets that strip live behavior — so a
 // current-side value is only diffed when the author wrote one.
 function dropUnauthoredPlatformFields(previousValue: unknown, desiredValue: unknown, fields: string[]): unknown {
   if (previousValue == null || typeof previousValue !== "object") return previousValue;

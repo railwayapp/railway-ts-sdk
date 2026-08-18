@@ -249,6 +249,92 @@ describe("Railway IaC", () => {
     expect(bucket("assets", { region: "sjc" }).config?.region).toBe("sjc");
   });
 
+  it("maps service limits to deploy.limitOverride", () => {
+    const graph = projectDefinitionToGraph(project("app", {
+      resources: [service("web", { limits: { cpu: 2, memoryBytes: 1_000_000_000 } })],
+    }));
+
+    expect(graphToEnvironmentConfig(graph).services?.web?.deploy).toEqual({
+      limitOverride: { containers: { cpu: 2, memoryBytes: 1_000_000_000 } },
+    });
+  });
+
+  it("maps database limits alongside region placement", () => {
+    const graph = projectDefinitionToGraph(project("app", {
+      resources: [redis("cache", { region: "us-east4", limits: { cpu: 1, memoryBytes: 500_000_000 } })],
+    }));
+
+    expect(graphToEnvironmentConfig(graph).services?.cache?.deploy).toMatchObject({
+      multiRegionConfig: { "us-east4": { numReplicas: 1 } },
+      limitOverride: { containers: { cpu: 1, memoryBytes: 500_000_000 } },
+    });
+  });
+
+  // Limits are routinely set outside repo config (dashboard, serviceInstanceLimitsUpdate).
+  // A config that never authored them must not plan an unset that strips live limits.
+  it("does not churn unauthored service resource limits", () => {
+    const current = environmentConfigToGraph(
+      { services: { web: { deploy: { limitOverride: { containers: { cpu: 2, memoryBytes: 1_000_000_000 } } } } } },
+      { projectName: "app" },
+    );
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [service("web", {})],
+    }));
+
+    expect(diffGraphs({ current, desired })).toMatchObject({ changes: [], diagnostics: [] });
+  });
+
+  it("does not churn unauthored database resource limits", () => {
+    const current = environmentConfigToGraph(
+      {
+        services: {
+          cache: {
+            source: { image: "railwayapp/redis:8.2" },
+            deploy: { limitOverride: { containers: { cpu: 1, memoryBytes: 500_000_000 } } },
+          },
+        },
+      },
+      { projectName: "app" },
+    );
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [redis("cache")],
+    }));
+
+    const limitChanges = diffGraphs({ current, desired }).changes
+      .filter(change => JSON.stringify(change).includes("limitOverride"));
+    expect(limitChanges).toEqual([]);
+  });
+
+  it("still diffs authored limits against current limits", () => {
+    const current = environmentConfigToGraph(
+      { services: { web: { deploy: { limitOverride: { containers: { cpu: 1, memoryBytes: 500_000_000 } } } } } },
+      { projectName: "app" },
+    );
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [service("web", { limits: { cpu: 2, memoryBytes: 1_000_000_000 } })],
+    }));
+
+    const changeSet = diffGraphs({ current, desired });
+    expect(changeSet.changes).toHaveLength(1);
+    expect(changeSet.changes[0]).toMatchObject({
+      kind: "resource.update",
+      address: "service.web",
+    });
+  });
+
+  it("plans no changes for round-tripped limits", () => {
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [
+        service("web", { source: image("ghcr.io/acme/web:1.0.0"), limits: { cpu: 2, memoryBytes: 1_000_000_000 } }),
+        redis("cache", { limits: { cpu: 1, memoryBytes: 500_000_000 } }),
+      ],
+    }));
+
+    const current = environmentConfigToGraph(graphToEnvironmentConfig(desired), { projectName: "app" });
+
+    expect(diffGraphs({ current, desired }).changes).toEqual([]);
+  });
+
   // The GA gate: compiling a desired graph to config and reading it straight back
   // must produce zero changes. This is the "import → plan → ∅" round-trip the
   // runner performs against a live environment.

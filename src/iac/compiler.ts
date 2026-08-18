@@ -291,6 +291,7 @@ function databaseDeploy(database: DatabaseNode, requiredMountPath: string): Depl
   return {
     requiredMountPath,
     ...(database.deploy?.multiRegionConfig ? { multiRegionConfig: database.deploy.multiRegionConfig } : {}),
+    ...(database.deploy?.limitOverride ? { limitOverride: database.deploy.limitOverride } : {}),
   };
 }
 
