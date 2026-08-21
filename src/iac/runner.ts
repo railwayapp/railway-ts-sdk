@@ -2,6 +2,7 @@ import { diffGraphs, renderChangeSet, type RailwayChangeSet } from "./change-set
 import { environmentConfigToGraph } from "./compiler.js";
 import { IacClient, type ChangeSetApplyResult, type ChangeSetPreviewResult, type CurrentEnvironmentResult } from "./client.js";
 import { validateGraph, type RailwayGraph } from "./graph.js";
+import { needsPartialClaimApply } from "./partial.js";
 import { evaluateRailwayProject, findRailwayFile } from "./project.js";
 import { renderRailwayGraphTypes } from "./typegen.js";
 import type { EnvironmentConfig } from "./schema.js";
@@ -80,6 +81,8 @@ export interface RailwayIacPlanResponse {
   diff?: string;
   graphTypes?: string;
   diagnostics: RailwayIacRunnerDiagnostic[];
+  /** True when there are no resource ops but unbound declared resources still need to be claimed. */
+  claim?: boolean;
 }
 
 export interface RailwayIacStageResponse extends Omit<RailwayIacPlanResponse, "command"> {
@@ -105,6 +108,7 @@ interface EvaluatedCommandInput {
   file: string;
   graph: RailwayGraph;
   diagnostics: RailwayIacRunnerDiagnostic[];
+  partial?: string;
 }
 
 export async function runRailwayIac(request: RailwayIacRunnerRequest = {}): Promise<RailwayIacRunnerResponse> {
@@ -119,6 +123,7 @@ export async function runRailwayIac(request: RailwayIacRunnerRequest = {}): Prom
       file: evaluated.file,
       graph: evaluated.graph,
       diagnostics: graphDiagnostics(evaluated.graph),
+      ...(evaluated.partial ? { partial: evaluated.partial } : {}),
     };
     return { sdkVersion: SDK_VERSION, ...(await runEvaluatedCommand(command, input)) };
   } catch (error) {
@@ -184,12 +189,18 @@ async function currentRailwayIac({ file, graph: desiredGraph, request, diagnosti
   };
 }
 
-async function planRailwayIac({ file, graph: desiredGraph, request, diagnostics }: EvaluatedCommandInput): Promise<RailwayIacPlanResponse> {
+async function planRailwayIac({ file, graph: desiredGraph, request, diagnostics, partial }: EvaluatedCommandInput): Promise<RailwayIacPlanResponse> {
   const context = requireBackboardContext(request.backboard, "plan");
   const client = new IacClient(clientConfig(context));
   const current = await readCurrentEnvironment(client, context);
   const currentGraph = graphFromCurrentEnvironment(current, desiredGraph);
-  const changeSet = diffGraphs({ current: currentGraph, desired: desiredGraph, revealValues: request.revealValues ?? false });
+  const changeSet = diffGraphs({
+    current: currentGraph,
+    desired: desiredGraph,
+    revealValues: request.revealValues ?? false,
+    ...(partial ? { partial } : {}),
+    ...(current.iacPartials ? { owners: current.iacPartials } : {}),
+  });
   const allDiagnostics = [...diagnostics, ...changeSetDiagnostics(changeSet)];
   const { config: _config, ...currentEnvironment } = current;
   const hasErrors = !hasNoErrors(allDiagnostics);
@@ -197,7 +208,14 @@ async function planRailwayIac({ file, graph: desiredGraph, request, diagnostics 
     ? await client.previewChangeSet({ environmentId: context.environmentId, changeSet })
     : undefined;
 
-  const previewedChangeSet = preview?.changeSet ?? changeSet;
+  const previewedChangeSet = preview?.changeSet
+    ? {
+        ...preview.changeSet,
+        ...(changeSet.partial ? { partial: changeSet.partial } : {}),
+        ...(changeSet.declared ? { declared: changeSet.declared } : {}),
+      }
+    : changeSet;
+  const claim = needsPartialClaimApply(changeSet.declared ?? [], current.iacPartials, partial);
 
   return {
     ok: !hasErrors,
@@ -213,6 +231,7 @@ async function planRailwayIac({ file, graph: desiredGraph, request, diagnostics 
     diff: renderChangeSet(previewedChangeSet),
     ...(request.includeTypes ? { graphTypes: renderRailwayGraphTypes(desiredGraph) } : {}),
     diagnostics: allDiagnostics,
+    ...(claim ? { claim: true } : {}),
   };
 }
 
@@ -227,7 +246,8 @@ async function stageRailwayIac(input: EvaluatedCommandInput): Promise<RailwayIac
 
 async function applyRailwayIac(input: EvaluatedCommandInput): Promise<RailwayIacApplyResponse> {
   const planned = await planRailwayIac(input);
-  if (!planned.ok || !planned.changeSet || planned.changeSet.changes.length === 0) {
+  const claimed = planned.claim === true;
+  if (!planned.ok || !planned.changeSet || (planned.changeSet.changes.length === 0 && !claimed)) {
     return { ...planned, command: "apply" };
   }
 

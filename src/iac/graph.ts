@@ -140,6 +140,7 @@ export interface GraphCompileOptions {
 export interface CompileResult {
   graph: RailwayGraph;
   desiredConfig: EnvironmentConfig;
+  partial?: string;
 }
 
 export interface GraphIndex {

@@ -22,6 +22,8 @@ export interface CurrentEnvironmentResult {
   bucketNamesById: Record<string, string>;
   bucketGroupIdsById: Record<string, string>;
   customDomainsByServiceId: Record<string, Record<string, { port?: number }>>;
+  /** Resource address → partial name. `*` is the whole-project owner. Absent on older servers. */
+  iacPartials?: Record<string, string> | undefined;
 }
 
 export interface StagedPatchResult {
@@ -72,17 +74,14 @@ export class IacClient {
   }
 
   async getCurrentEnvironment(environmentId: string, options: { decryptVariables?: boolean } = {}): Promise<CurrentEnvironmentResult> {
-    const data = await gql<{
-      environment: { id: string; name?: string; projectId?: string; config: EnvironmentConfig; configEtag?: string; canvasGroupRefs?: Record<string, string> };
-    }, { environmentId: string; decryptVariables: boolean }>(this.#config, `query IacEnvironmentConfig($environmentId: String!, $decryptVariables: Boolean) {
-      environment(id: $environmentId) { id name projectId config(decryptVariables: $decryptVariables) configEtag canvasGroupRefs }
-    }`, { environmentId, decryptVariables: options.decryptVariables ?? false });
+    const data = await this.queryEnvironmentConfig(environmentId, options.decryptVariables ?? false);
 
     const projectName = data.environment.projectId ? await this.getProjectName(data.environment.projectId) : undefined;
     const services = data.environment.projectId ? await this.getProjectServices(data.environment.projectId) : [];
     const volumes = data.environment.projectId ? await this.getProjectVolumes(data.environment.projectId) : [];
     const buckets = data.environment.projectId ? await this.getProjectBuckets(data.environment.projectId) : [];
     const customDomainsByServiceId = data.environment.projectId ? await this.getEnvironmentCustomDomains(data.environment.projectId, environmentId, services) : {};
+    const iacPartials = parseIacPartials(data.environment.iacPartials);
     return {
       projectId: data.environment.projectId,
       projectName,
@@ -99,7 +98,51 @@ export class IacClient {
       bucketGroupIdsById: Object.fromEntries(buckets.flatMap(bucket => bucket.groupId ? [[bucket.id, bucket.groupId] as const] : [])),
       customDomainsByServiceId,
       ...(data.environment.configEtag ? { configEtag: data.environment.configEtag } : {}),
+      ...(iacPartials ? { iacPartials } : {}),
     };
+  }
+
+  private async queryEnvironmentConfig(environmentId: string, decryptVariables: boolean): Promise<{
+    environment: {
+      id: string;
+      name?: string;
+      projectId?: string;
+      config: EnvironmentConfig;
+      configEtag?: string;
+      canvasGroupRefs?: Record<string, string>;
+      iacPartials?: unknown;
+    };
+  }> {
+    const variables = { environmentId, decryptVariables };
+    try {
+      return await gql<{
+        environment: {
+          id: string;
+          name?: string;
+          projectId?: string;
+          config: EnvironmentConfig;
+          configEtag?: string;
+          canvasGroupRefs?: Record<string, string>;
+          iacPartials?: unknown;
+        };
+      }, { environmentId: string; decryptVariables: boolean }>(this.#config, `query IacEnvironmentConfig($environmentId: String!, $decryptVariables: Boolean) {
+        environment(id: $environmentId) { id name projectId config(decryptVariables: $decryptVariables) configEtag canvasGroupRefs iacPartials }
+      }`, variables);
+    } catch (error) {
+      if (!isUnknownGraphQLField(error, "iacPartials")) throw error;
+      return await gql<{
+        environment: {
+          id: string;
+          name?: string;
+          projectId?: string;
+          config: EnvironmentConfig;
+          configEtag?: string;
+          canvasGroupRefs?: Record<string, string>;
+        };
+      }, { environmentId: string; decryptVariables: boolean }>(this.#config, `query IacEnvironmentConfig($environmentId: String!, $decryptVariables: Boolean) {
+        environment(id: $environmentId) { id name projectId config(decryptVariables: $decryptVariables) configEtag canvasGroupRefs }
+      }`, variables);
+    }
   }
 
   async getStagedPatch(environmentId: string, options: { decryptVariables?: boolean } = {}): Promise<StagedPatchResult> {
@@ -298,6 +341,23 @@ async function gql<TResult, TVariables>(config: NormalizedRailwayClientConfig, s
 function isStaleBaseError(error: unknown): boolean {
   if (!(error instanceof RailwayGraphQLError)) return false;
   return error.errors.some(item => item.extensions?.code === STALE_ENVIRONMENT_BASE_CODE);
+}
+
+function isUnknownGraphQLField(error: unknown, field: string): boolean {
+  if (!(error instanceof RailwayGraphQLError)) return false;
+  return error.errors.some(item =>
+    typeof item.message === "string" &&
+    item.message.includes(field) &&
+    /Cannot query field|Unknown field|cannot query field/i.test(item.message),
+  );
+}
+
+function parseIacPartials(value: unknown): Record<string, string> | undefined {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const entries = Object.entries(value as Record<string, unknown>).filter(
+    (entry): entry is [string, string] => typeof entry[1] === "string",
+  );
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
 function extractVolumeIdsByServiceName({ currentConfig, serviceIdsByName }: { currentConfig?: EnvironmentConfig; serviceIdsByName: Record<string, string> }): Record<string, string> {

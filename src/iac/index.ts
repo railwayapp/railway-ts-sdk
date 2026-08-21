@@ -4,6 +4,7 @@ export * from "./compiler.js";
 export * from "./diff.js";
 export * from "./evaluator.js";
 export * from "./graph.js";
+export * from "./partial.js";
 export * from "./project.js";
 export * from "./runner.js";
 export * from "./schema.js";

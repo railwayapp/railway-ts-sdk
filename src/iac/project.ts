@@ -38,14 +38,15 @@ export interface EvaluatedRailwayProjectSnapshot {
   file: string;
   graph: RailwayGraph;
   desiredConfig: EnvironmentConfig;
+  partial?: string;
 }
 
 export async function evaluateRailwayProject(
   options: EvaluatedRailwayProjectOptions = {},
 ): Promise<EvaluatedRailwayProject> {
   const file = options.file ? path.resolve(options.file) : findRailwayFile(options.cwd);
-  const { graph, desiredConfig } = await evaluateRailwayFile(file, options);
-  return new EvaluatedRailwayProject({ file, graph, desiredConfig });
+  const { graph, desiredConfig, partial } = await evaluateRailwayFile(file, options);
+  return new EvaluatedRailwayProject({ file, graph, desiredConfig, ...(partial ? { partial } : {}) });
 }
 
 export function findRailwayFile(cwd = process.cwd()): string {
@@ -68,11 +69,13 @@ export class EvaluatedRailwayProject {
   readonly file: string;
   readonly graph: RailwayGraph;
   readonly desiredConfig: EnvironmentConfig;
+  readonly partial?: string;
 
   constructor(snapshot: EvaluatedRailwayProjectSnapshot) {
     this.file = snapshot.file;
     this.graph = snapshot.graph;
     this.desiredConfig = snapshot.desiredConfig;
+    if (snapshot.partial !== undefined) this.partial = snapshot.partial;
   }
 
   get name(): string {
@@ -142,6 +145,7 @@ export class EvaluatedRailwayProject {
       file: this.file,
       graph: this.graph,
       desiredConfig: this.desiredConfig,
+      ...(this.partial ? { partial: this.partial } : {}),
     };
   }
 }

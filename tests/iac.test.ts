@@ -413,6 +413,117 @@ describe("Railway IaC", () => {
     expect(deletion).toMatchObject({ kind: "resource.delete", address: "service.api", severity: "destructive" });
   });
 
+  it("does not delete resources owned by another partial", () => {
+    const current = environmentConfigToGraph({
+      services: { api: { source: { repo: "acme/api" } }, worker: { source: { repo: "acme/worker" } } },
+    }, { projectName: "app" });
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [service("api", { source: github("acme/api") })],
+    }));
+
+    const { changes, diagnostics, declared } = diffGraphs({
+      current,
+      desired,
+      partial: "api",
+      owners: { "service.api": "api", "service.worker": "worker" },
+    });
+    expect(changes.filter(change => change.kind === "resource.delete")).toEqual([]);
+    expect(diagnostics).toEqual([]);
+    expect(declared).toEqual(["service.api"]);
+  });
+
+  it("errors when a partial declares a resource owned by another partial", () => {
+    const current = environmentConfigToGraph({
+      services: { api: { source: { repo: "acme/api" } } },
+    }, { projectName: "app" });
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [service("api", { source: github("acme/api") })],
+    }));
+
+    const { changes, diagnostics } = diffGraphs({
+      current,
+      desired,
+      partial: "worker",
+      owners: { "service.api": "api" },
+    });
+    expect(changes).toEqual([]);
+    expect(diagnostics).toContainEqual(expect.objectContaining({
+      severity: "error",
+      message: expect.stringContaining('already managed by partial "api"'),
+    }));
+  });
+
+  it("errors when a nameless file runs in an environment that already has named partials", () => {
+    const current = environmentConfigToGraph({
+      services: { api: { source: { repo: "acme/api" } } },
+    }, { projectName: "app" });
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [service("api", { source: github("acme/api") })],
+    }));
+
+    const { changes, diagnostics } = diffGraphs({
+      current,
+      desired,
+      owners: { "service.api": "api" },
+    });
+    expect(changes).toEqual([]);
+    expect(diagnostics).toContainEqual(expect.objectContaining({
+      severity: "error",
+      path: "partial",
+      message: expect.stringContaining("named IaC partials"),
+    }));
+  });
+
+  it("still deletes omitted resources when this file owns the whole project", () => {
+    const current = environmentConfigToGraph({
+      services: { web: { source: { repo: "railwayapp/demo" } }, api: { source: { repo: "railwayapp/api" } } },
+    }, { projectName: "app" });
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [service("web", { source: github("railwayapp/demo") })],
+    }));
+
+    const deletion = diffGraphs({
+      current,
+      desired,
+      owners: { "service.web": "*", "service.api": "*" },
+    }).changes.find(change => change.kind === "resource.delete");
+    expect(deletion).toMatchObject({ kind: "resource.delete", address: "service.api" });
+  });
+
+  it("deletes a partial's own omitted service", () => {
+    const current = environmentConfigToGraph({
+      services: { api: { source: { repo: "acme/api" } }, extra: { source: { repo: "acme/extra" } } },
+    }, { projectName: "app" });
+    const desired = projectDefinitionToGraph(project("app", {
+      resources: [service("api", { source: github("acme/api") })],
+    }));
+
+    const deletion = diffGraphs({
+      current,
+      desired,
+      partial: "api",
+      owners: { "service.api": "api", "service.extra": "api" },
+    }).changes.find(change => change.kind === "resource.delete");
+    expect(deletion).toMatchObject({ kind: "resource.delete", address: "service.extra" });
+  });
+
+  it("reads export const partial from the module", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "railway-iac-partial-"));
+    const file = join(dir, "railway.ts");
+    await writeFile(file, `
+      export const partial = "api";
+      export default () => ({
+        name: "app",
+        resources: [{ address: "service.api", type: "service", name: "api" }],
+      });
+    `);
+
+    await expect(evaluateRailwayFile(file)).resolves.toMatchObject({
+      partial: "api",
+      graph: { resources: [{ address: "service.api" }] },
+    });
+  });
+
   it("treats variable removal as destructive and addition as safe", () => {
     const current = environmentConfigToGraph({
       services: { web: { source: { repo: "r" }, variables: { OLD: { value: "1" } } } },

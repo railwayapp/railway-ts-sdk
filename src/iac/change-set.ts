@@ -1,5 +1,14 @@
 import { composePatch, graphToEnvironmentConfig } from "./compiler.js";
 import type { DatabaseNode, GraphCompileOptions, RailwayGraph, ResourceAddress, ResourceNode, ServiceNode, VariableValue, VolumeNode } from "./graph.js";
+import {
+  effectivePartial,
+  foreignResourceMessage,
+  hasNamedPartials,
+  namelessFileMessage,
+  ownerOf,
+  PROJECT_PARTIAL,
+  type IacPartials,
+} from "./partial.js";
 import type { EnvironmentConfig } from "./schema.js";
 
 // Wire-contract version for the RailwayChangeSet exchanged with backboard.
@@ -17,6 +26,10 @@ export interface RailwayChangeSet {
   version: RailwayChangeSetVersion;
   changes: RailwayChange[];
   diagnostics: ChangeDiagnostic[];
+  /** File identity from `export const partial`. Omitted means whole-project. */
+  partial?: string;
+  /** Addresses this file declares — server binds them to `partial` on apply. */
+  declared?: ResourceAddress[];
 }
 
 export type RailwayChange =
@@ -85,14 +98,47 @@ export interface ChangeDiagnostic {
   message: string;
 }
 
-export function diffGraphs({ current, desired, revealValues = false }: { current: RailwayGraph; desired: RailwayGraph; revealValues?: boolean }): RailwayChangeSet {
+export function diffGraphs({
+  current,
+  desired,
+  revealValues = false,
+  partial,
+  owners,
+}: {
+  current: RailwayGraph;
+  desired: RailwayGraph;
+  revealValues?: boolean;
+  /** `export const partial` from the file. Omitted means this file owns the whole environment. */
+  partial?: string;
+  owners?: IacPartials;
+}): RailwayChangeSet {
   const changes: RailwayChange[] = [];
   const diagnostics: ChangeDiagnostic[] = [];
   const currentByAddress = new Map(current.resources.map(resource => [resource.address, resource]));
   const desiredByAddress = new Map(desired.resources.map(resource => [resource.address, resource]));
+  const p = effectivePartial(partial);
+  const declared = desired.resources.map(resource => resource.address);
+
+  if (p === PROJECT_PARTIAL && hasNamedPartials(owners)) {
+    diagnostics.push({
+      severity: "error",
+      path: "partial",
+      message: namelessFileMessage(),
+    });
+    return changeSetResult({ changes: [], diagnostics, declared, ...(partial ? { partial } : {}) });
+  }
 
   for (const resource of desired.resources) {
     const previous = currentByAddress.get(resource.address);
+    const owner = ownerOf(owners, resource.address);
+    if (owner != null && owner !== p) {
+      diagnostics.push({
+        severity: "error",
+        path: `resources.${resource.address}`,
+        message: foreignResourceMessage(resource.address, owner),
+      });
+      continue;
+    }
     if (previous && isManagedByRepoConfig(previous)) {
       diagnostics.push({
         severity: "error",
@@ -151,6 +197,7 @@ export function diffGraphs({ current, desired, revealValues = false }: { current
 
   for (const resource of current.resources) {
     if (desiredByAddress.has(resource.address)) continue;
+    if (p !== PROJECT_PARTIAL && ownerOf(owners, resource.address) !== p) continue;
     // Volumes hold data, and database volumes are realized by Backboard without ever
     // appearing in authored config — a plan against a postgres() database would otherwise
     // delete its volume on every apply. Never plan an implicit volume deletion; deleting
@@ -180,7 +227,27 @@ export function diffGraphs({ current, desired, revealValues = false }: { current
     });
   }
 
-  return { version: RAILWAY_CHANGE_SET_VERSION, changes, diagnostics };
+  return changeSetResult({ changes, diagnostics, declared, ...(partial ? { partial } : {}) });
+}
+
+function changeSetResult({
+  changes,
+  diagnostics,
+  partial,
+  declared,
+}: {
+  changes: RailwayChange[];
+  diagnostics: ChangeDiagnostic[];
+  partial?: string;
+  declared: ResourceAddress[];
+}): RailwayChangeSet {
+  return {
+    version: RAILWAY_CHANGE_SET_VERSION,
+    changes,
+    diagnostics,
+    ...(partial ? { partial } : {}),
+    declared,
+  };
 }
 
 export function changeSetToGraph({ current, changeSet }: { current: RailwayGraph; changeSet: RailwayChangeSet }): RailwayGraph {
