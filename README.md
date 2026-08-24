@@ -318,6 +318,9 @@ railway config plan    # preview the diff against the linked environment
 railway config apply   # apply it — prompts before destructive changes
 ```
 
+IaC authoring with this package requires Railway CLI 5.42.1 or newer. Older
+CLIs use the retired TypeScript engine and will stop with an upgrade error.
+
 How it works:
 
 - **Declarative and stateless.** Your `.railway/railway.ts` is diffed against the *live*

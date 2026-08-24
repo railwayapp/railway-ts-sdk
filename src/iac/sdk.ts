@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { assertMinimumIacCliVersion } from "./cli-version.js";
 import { resourceAddress } from "./graph.js";
 import type {
   BucketNode,
@@ -24,6 +25,8 @@ import type {
   VolumeConfig,
   VolumeMount,
 } from "./schema.js";
+
+assertMinimumIacCliVersion();
 
 export interface RailwayContextInput {
   command?: string;

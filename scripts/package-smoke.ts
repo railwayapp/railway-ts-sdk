@@ -1,5 +1,5 @@
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { chmodSync, mkdtempSync, mkdirSync, rmSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -63,6 +63,88 @@ try {
     "-p",
     join(tempDir, "tsconfig.json"),
   ]);
+
+  const legacyRunner = spawnSync(
+    process.execPath,
+    [join(tempDir, "node_modules", "railway", "dist", "iac", "bin.js")],
+    {
+      encoding: "utf8",
+      input: JSON.stringify({ command: "apply", file: ".railway/railway.ts" }),
+    },
+  );
+  if (legacyRunner.status !== 1) {
+    throw new Error(`Expected legacy IaC runner shim to exit 1, got ${legacyRunner.status}.`);
+  }
+  const runnerResponse = JSON.parse(legacyRunner.stdout) as {
+    ok?: boolean;
+    command?: string;
+    diagnostics?: Array<{ severity?: string; message?: string }>;
+  };
+  if (
+    runnerResponse.ok !== false ||
+    runnerResponse.command !== "apply" ||
+    runnerResponse.diagnostics?.[0]?.severity !== "error" ||
+    !runnerResponse.diagnostics[0].message?.includes("Railway CLI 5.42.1 or newer")
+  ) {
+    throw new Error(`Unexpected legacy IaC runner response: ${legacyRunner.stdout}`);
+  }
+
+  const fakeCli = join(tempDir, process.platform === "win32" ? "railway.cmd" : "railway");
+  writeFileSync(
+    fakeCli,
+    process.platform === "win32"
+      ? "@echo off\r\necho railway %FAKE_RAILWAY_VERSION%\r\n"
+      : "#!/usr/bin/env node\nprocess.stdout.write(`railway ${process.env.FAKE_RAILWAY_VERSION}\\n`);\n",
+  );
+  if (process.platform !== "win32") chmodSync(fakeCli, 0o755);
+
+  const nativeEvaluatorSource = `
+    const mod = {};
+    const graph = {};
+    const partial = mod.partial;
+    await import("railway/iac");
+    process.stdout.write(JSON.stringify({ partial, project: graph }));
+  `;
+  const unsupportedCli = spawnSync(
+    process.execPath,
+    [
+      "--experimental-strip-types",
+      "--disable-warning=ExperimentalWarning",
+      "--input-type=module",
+      "-e",
+      nativeEvaluatorSource,
+    ],
+    {
+      cwd: tempDir,
+      encoding: "utf8",
+      env: { ...process.env, _: fakeCli, FAKE_RAILWAY_VERSION: "5.42.0" },
+    },
+  );
+  if (
+    unsupportedCli.status === 0 ||
+    !unsupportedCli.stderr.includes("Railway CLI 5.42.1 or newer")
+  ) {
+    throw new Error(`Expected CLI 5.42.0 to fail the IaC SDK guard: ${unsupportedCli.stderr}`);
+  }
+
+  const supportedCli = spawnSync(
+    process.execPath,
+    [
+      "--experimental-strip-types",
+      "--disable-warning=ExperimentalWarning",
+      "--input-type=module",
+      "-e",
+      nativeEvaluatorSource,
+    ],
+    {
+      cwd: tempDir,
+      encoding: "utf8",
+      env: { ...process.env, _: fakeCli, FAKE_RAILWAY_VERSION: "5.42.1" },
+    },
+  );
+  if (supportedCli.status !== 0) {
+    throw new Error(`Expected CLI 5.42.1 to pass the IaC SDK guard: ${supportedCli.stderr}`);
+  }
 } finally {
   if (tarballPath) rmSync(tarballPath, { force: true });
   rmSync(tempDir, { force: true, recursive: true });
