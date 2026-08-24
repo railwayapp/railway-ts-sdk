@@ -40,6 +40,8 @@ export default defineRailway((ctx) => {
 });
 ```
 
+Keep one file for the Railway environment. A sibling `export const partial = "api"` is a last resort when separate repositories cannot share that file. Omit it unless omit=delete across repos is a blocker. Do not rename it after apply.
+
 Zero-argument programs are also valid:
 
 ```ts
