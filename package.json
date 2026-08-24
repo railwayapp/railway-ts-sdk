@@ -28,9 +28,6 @@
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "bin": {
-    "railway-iac-ts": "./dist/iac/bin.js"
-  },
   "exports": {
     ".": {
       "import": {
@@ -66,7 +63,6 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "codegen": "graphql-codegen --config codegen.ts",
-    "demo:iac": "tsx examples/iac/demo.ts",
     "package:check": "publint --strict --pack npm && npm pack --dry-run && tsx scripts/package-smoke.ts",
     "clean": "rm -rf dist coverage railway-*.tgz"
   },
