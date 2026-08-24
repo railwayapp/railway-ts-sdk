@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -63,6 +63,31 @@ try {
     "-p",
     join(tempDir, "tsconfig.json"),
   ]);
+
+  const legacyRunner = spawnSync(
+    process.execPath,
+    [join(tempDir, "node_modules", "railway", "dist", "iac", "bin.js")],
+    {
+      encoding: "utf8",
+      input: JSON.stringify({ command: "apply", file: ".railway/railway.ts" }),
+    },
+  );
+  if (legacyRunner.status !== 1) {
+    throw new Error(`Expected legacy IaC runner shim to exit 1, got ${legacyRunner.status}.`);
+  }
+  const runnerResponse = JSON.parse(legacyRunner.stdout) as {
+    ok?: boolean;
+    command?: string;
+    diagnostics?: Array<{ severity?: string; message?: string }>;
+  };
+  if (
+    runnerResponse.ok !== false ||
+    runnerResponse.command !== "apply" ||
+    runnerResponse.diagnostics?.[0]?.severity !== "error" ||
+    !runnerResponse.diagnostics[0].message?.includes("Railway CLI 5.42.1 or newer")
+  ) {
+    throw new Error(`Unexpected legacy IaC runner response: ${legacyRunner.stdout}`);
+  }
 } finally {
   if (tarballPath) rmSync(tarballPath, { force: true });
   rmSync(tempDir, { force: true, recursive: true });
