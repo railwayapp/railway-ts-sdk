@@ -1,10 +1,6 @@
 #!/usr/bin/env node
 import process from "node:process";
-
-const MINIMUM_CLI_VERSION = "5.42.1";
-const message =
-  `This version of railway/iac requires Railway CLI ${MINIMUM_CLI_VERSION} or newer. ` +
-  "Upgrade the CLI and run the command again. The IaC engine now ships in the CLI, not the TypeScript SDK.";
+import { MINIMUM_IAC_CLI_MESSAGE } from "./compatibility.js";
 
 main().catch(error => {
   process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
@@ -27,7 +23,7 @@ async function main(): Promise<void> {
       currentEnvironment: null,
       changeSet: null,
       diff: null,
-      diagnostics: [{ severity: "error", path: "", message }],
+      diagnostics: [{ severity: "error", path: "", message: MINIMUM_IAC_CLI_MESSAGE }],
       currentGraph: null,
       desiredGraph: null,
       stagedPatch: null,
