@@ -241,9 +241,8 @@ sandbox.domains;
 ```
 
 `domains` is settable on `create`, `create(template)`, and `fork`. Forks do not inherit
-the source sandbox's domains; pass them again if the fork should be reachable. There is
-no API to add or remove domains after create. `connect` and `refresh` read back whatever
-routes are already published.
+the source's domains; pass them again if the fork should be reachable. Domains cannot be
+changed after create. `connect` and `refresh` read back whatever is already published.
 
 ## Reconnecting and listing
 

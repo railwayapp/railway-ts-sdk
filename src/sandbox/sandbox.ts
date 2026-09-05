@@ -57,7 +57,7 @@ export class Sandbox implements AsyncDisposable {
     return this.#info.networkIsolation;
   }
 
-  /** Railway-provided HTTP domains published for this sandbox. Empty when none were requested. */
+  /** Railway-provided HTTP domains published for this sandbox. Empty when none. */
   get domains(): SandboxDomain[] {
     return this.#info.domains;
   }
