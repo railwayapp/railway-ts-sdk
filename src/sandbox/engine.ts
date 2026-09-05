@@ -126,6 +126,9 @@ export class SandboxEngine {
     if (options.networkIsolation !== undefined) {
       input.networkIsolation = options.networkIsolation;
     }
+    if (options.domains !== undefined) {
+      input.publicDomains = options.domains;
+    }
     if (options.region !== undefined) {
       input.region = options.region;
     }
@@ -453,6 +456,9 @@ function creationLine(
 ): string {
   const kind = creationKind(input);
   const envKeys = input.variables ? Object.keys(input.variables) : [];
+  const domains = (input.publicDomains ?? []).map(domain =>
+    domain.prefix ? `${domain.prefix}:${domain.port}` : String(domain.port),
+  );
   const parts = [
     kind,
     `env=${input.environmentId}`,
@@ -460,6 +466,7 @@ function creationLine(
     `network=${input.networkIsolation ?? "default"}`,
     `region=${input.region ?? "default"}`,
     `envKeys=[${envKeys.join(",")}]`,
+    `domains=[${domains.join(",")}]`,
   ];
   if (input.sourceSandboxId) parts.push(`source=${input.sourceSandboxId}`);
   if (input.template?.name) parts.push(`checkpoint="${input.template.name}"`);
