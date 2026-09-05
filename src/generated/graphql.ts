@@ -38,38 +38,136 @@ export type Scalars = {
   Upload: { input: any; output: any; }
 };
 
+export type AccessGroup = Node & {
+  __typename?: 'AccessGroup';
+  createdAt: Scalars['DateTime']['output'];
+  id: Scalars['ID']['output'];
+  members: AccessGroupMembersConnection;
+  name: Scalars['String']['output'];
+  projects: AccessGroupProjectsConnection;
+  role: ProjectRole;
+  source: AccessGroupSource;
+  updatedAt: Scalars['DateTime']['output'];
+  workspace: Workspace;
+  workspaceId: Scalars['String']['output'];
+};
+
+
+export type AccessGroupMembersArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
+  before?: InputMaybe<Scalars['String']['input']>;
+  first?: InputMaybe<Scalars['Int']['input']>;
+  last?: InputMaybe<Scalars['Int']['input']>;
+};
+
+
+export type AccessGroupProjectsArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
+  before?: InputMaybe<Scalars['String']['input']>;
+  first?: InputMaybe<Scalars['Int']['input']>;
+  last?: InputMaybe<Scalars['Int']['input']>;
+};
+
+export type AccessGroupCreateInput = {
+  name: Scalars['String']['input'];
+  role: ProjectRole;
+  workspaceId: Scalars['String']['input'];
+};
+
+export type AccessGroupMember = Node & {
+  __typename?: 'AccessGroupMember';
+  accessGroup: AccessGroup;
+  accessGroupId: Scalars['String']['output'];
+  createdAt: Scalars['DateTime']['output'];
+  id: Scalars['ID']['output'];
+  updatedAt: Scalars['DateTime']['output'];
+  user: User;
+  userId: Scalars['String']['output'];
+};
+
+export type AccessGroupMemberInput = {
+  accessGroupId: Scalars['String']['input'];
+  userId: Scalars['String']['input'];
+};
+
+export type AccessGroupMembersConnection = {
+  __typename?: 'AccessGroupMembersConnection';
+  edges: Array<AccessGroupMembersConnectionEdge>;
+  pageInfo: PageInfo;
+};
+
+export type AccessGroupMembersConnectionEdge = {
+  __typename?: 'AccessGroupMembersConnectionEdge';
+  cursor: Scalars['String']['output'];
+  node: AccessGroupMember;
+};
+
+export type AccessGroupProject = Node & {
+  __typename?: 'AccessGroupProject';
+  accessGroup: AccessGroup;
+  accessGroupId: Scalars['String']['output'];
+  createdAt: Scalars['DateTime']['output'];
+  id: Scalars['ID']['output'];
+  project: Project;
+  projectId: Scalars['String']['output'];
+  updatedAt: Scalars['DateTime']['output'];
+};
+
+export type AccessGroupProjectInput = {
+  accessGroupId: Scalars['String']['input'];
+  projectId: Scalars['String']['input'];
+};
+
+export type AccessGroupProjectsConnection = {
+  __typename?: 'AccessGroupProjectsConnection';
+  edges: Array<AccessGroupProjectsConnectionEdge>;
+  pageInfo: PageInfo;
+};
+
+export type AccessGroupProjectsConnectionEdge = {
+  __typename?: 'AccessGroupProjectsConnectionEdge';
+  cursor: Scalars['String']['output'];
+  node: AccessGroupProject;
+};
+
+export type AccessGroupSource =
+  | 'MANUAL';
+
+export type AccessGroupUpdateInput = {
+  name?: InputMaybe<Scalars['String']['input']>;
+  role?: InputMaybe<ProjectRole>;
+};
+
 export type AccessRule = {
   __typename?: 'AccessRule';
   disallowed?: Maybe<Scalars['String']['output']>;
 };
 
 export type ActiveFeatureFlag =
-  | 'ACCESS_GROUPS'
   | 'AGENT_BYOK'
-  | 'AGENT_CONTEXT_SOURCES'
+  | 'AGENT_CONNECTORS'
+  | 'AGENT_USAGE_WARNINGS'
   | 'CHAT_SANDBOX'
   | 'CLOUD_AGENTS'
+  | 'CLOUD_AGENT_CHAT'
   | 'DEBUG_SMART_DIAGNOSIS'
-  | 'EDGE_RULES'
-  | 'FIXED_DOMAIN_RADAR_RULES'
-  | 'HA_FOR_ALL_TEMPLATES'
-  | 'HA_FOR_MYSQL'
-  | 'HA_FOR_REDIS'
+  | 'EMAIL_FORWARDING'
   | 'IN_DASHBOARD_SUPPORT'
   | 'MAGIC_CONFIG'
-  | 'NEW_PEOPLE_PAGE'
-  | 'POSTGRES_MAJOR_UPGRADE'
-  | 'POSTGRES_VULN_AUTO_UPDATE'
+  | 'MYSQL_PITR'
   | 'PRIORITY_BOARDING'
+  | 'PROJECT_FAVORITES'
   | 'PROJECT_SANDBOXES'
-  | 'SANDBOX_FACTORY_VM'
   | 'TEMPLATE_CHAT'
+  | 'USAGE_INSIGHTS'
   | 'VM_STORAGE_TRACES';
 
 export type ActivePlatformFlag =
+  | 'AGENT_USAGE_CH_INGEST'
+  | 'AGENT_USAGE_WARNINGS'
   | 'ALERT_SUS_USERS_CRON_KILLSWITCH'
-  | 'BAN_APPEAL_FORM'
   | 'BUILD_DEPLOY_QUEUE_V2'
+  | 'CAC_T0_KILLSWITCH'
   | 'CANVAS_CROSS_ENV_GUARD_ENFORCE'
   | 'CHAT_SANDBOX'
   | 'CLICKHOUSE_WORKSPACE_LIMIT_ENFORCE'
@@ -81,24 +179,23 @@ export type ActivePlatformFlag =
   | 'DEPLOY_SUPERSEDE_ON_PUSH'
   | 'DEV_STUDIO'
   | 'DEV_STUDIO_ANON_PROVISIONS'
-  | 'DOMAIN_PURCHASE_VELOCITY_LIMIT'
-  | 'FIXED_DOMAIN_RADAR_RULES'
+  | 'DOMAIN_RECONCILE_KILLSWITCH'
+  | 'EMAIL_FORWARDING_KILLSWITCH'
   | 'IN_DASHBOARD_SUPPORT'
   | 'KAFKA_EPHEMERAL_ENVIRONMENT_UPDATES'
   | 'LOGS_LONG_WINDOW_CHUNKING'
-  | 'LOGS_V2_ENVIRONMENT_DARK_READS'
-  | 'LOGS_V2_ENVIRONMENT_READS'
-  | 'LOGS_V2_FILTERED_READS'
-  | 'LOGS_V2_READS'
   | 'NEW_STRIPE_WEBHOOK_VERSION_ROLLOUT'
   | 'OAUTH_DCR_KILLSWITCH'
+  | 'PRE_DEPLOY_TIMEOUT_KILLSWITCH'
+  | 'PROJECT_FAVORITES'
   | 'REMOVE_DEPLOYMENT_COMPACT'
-  | 'SANDBOX_FACTORY_VM'
+  | 'RESTRICTION_APPEALS'
   | 'SERVICEINSTANCE_DATALOADER_FOR_STATIC_URL'
   | 'SPLIT_USAGE_QUERIES'
   | 'STRIPE_METERS_NEW_ACCOUNTS'
   | 'STRIPE_METERS_SHADOW_ENABLED'
   | 'UPDATED_VM_QUERIES'
+  | 'VM_USAGE_CH_INGEST'
   | 'WORKSPACE_MCP_KILLSWITCH';
 
 export type ActiveProjectFeatureFlag =
@@ -109,8 +206,6 @@ export type ActiveServiceFeatureFlag =
   | 'ENABLE_DOCKER_EXTENSION'
   | 'PLACEHOLDER'
   | 'SKIPPED_BUILDS'
-  | 'USE_EXPRESS_DEPLOY'
-  | 'USE_EXPRESS_PACKSTORE'
   | 'USE_VM_RUNTIME';
 
 export type AdoptionInfo = Node & {
@@ -152,6 +247,7 @@ export type AgentUsageSummary = {
   __typename?: 'AgentUsageSummary';
   billingPeriodEnd: Scalars['DateTime']['output'];
   hardLimitCents?: Maybe<Scalars['Int']['output']>;
+  hasCustomHardLimit?: Maybe<Scalars['Boolean']['output']>;
   softLimitCents?: Maybe<Scalars['Int']['output']>;
   totalUsedCents: Scalars['Int']['output'];
   usageRemaining?: Maybe<Scalars['Float']['output']>;
@@ -249,6 +345,15 @@ export type AuditLogFilterInput = {
   startDate?: InputMaybe<Scalars['DateTime']['input']>;
 };
 
+export type AutoUpdateScheduleWindowInput = {
+  /** UTC weekday: 0 (Sunday) through 6 (Saturday) */
+  day: Scalars['Int']['input'];
+  /** UTC hour the window closes (exclusive), 1-24 */
+  endHour: Scalars['Int']['input'];
+  /** UTC hour the window opens (inclusive), 0-23 */
+  startHour: Scalars['Int']['input'];
+};
+
 export type BaseEnvironmentOverrideInput = {
   baseEnvironmentOverrideId?: InputMaybe<Scalars['String']['input']>;
 };
@@ -275,6 +380,7 @@ export type BotScopeBindingInfo = {
 export type Bucket = Node & {
   __typename?: 'Bucket';
   createdAt: Scalars['DateTime']['output'];
+  deletedAt?: Maybe<Scalars['DateTime']['output']>;
   groupId?: Maybe<Scalars['String']['output']>;
   id: Scalars['ID']['output'];
   name: Scalars['String']['output'];
@@ -440,6 +546,8 @@ export type CliEventTrackInput = {
 /** A persistent cloud agent for running coding harnesses. */
 export type CloudAgent = {
   __typename?: 'CloudAgent';
+  /** WebSocket endpoint of the in-VM harness gate, for the dashboard chat. Survives sleep: the domain is stable across sleep and wake, and the observation keeps it. Null only on agents created before the gate existed, or before their first observation lands. */
+  agentWsUrl?: Maybe<Scalars['String']['output']>;
   /** Target ID for console or command execution. Null while unavailable. */
   consoleTargetId?: Maybe<Scalars['String']['output']>;
   createdAt: Scalars['DateTime']['output'];
@@ -451,14 +559,43 @@ export type CloudAgent = {
   id: Scalars['ID']['output'];
   name: Scalars['String']['output'];
   projectId: Scalars['String']['output'];
+  /** Region the agent's machine runs in. Null briefly after creation, before the machine has been placed. */
+  region?: Maybe<Scalars['String']['output']>;
   /** Live coding-agent sessions, one entry per session. Retained for 24h after the last report, so a sleeping agent still shows what it was last doing. */
   sessions: Array<CloudAgentSnapshot>;
+  /** Repo this agent's workspace was created from. Null for agents created without a source. */
+  source?: Maybe<CloudAgentSource>;
   status: CloudAgentStatus;
 };
 
+/** A checkpoint of a cloud agent's disk. */
+export type CloudAgentCheckpoint = {
+  __typename?: 'CloudAgentCheckpoint';
+  createdAt: Scalars['DateTime']['output'];
+  environmentId: Scalars['String']['output'];
+  /** Why the capture failed. */
+  failureReason?: Maybe<Scalars['String']['output']>;
+  id: Scalars['ID']['output'];
+  name?: Maybe<Scalars['String']['output']>;
+  /** Region the checkpoint was captured in. */
+  region: Scalars['String']['output'];
+  status: CloudAgentCheckpointStatus;
+};
+
+/** Capture progress of a cloud agent checkpoint. */
+export type CloudAgentCheckpointStatus =
+  | 'FAILED'
+  | 'IN_PROGRESS'
+  | 'SUCCEEDED';
+
 export type CloudAgentCreateInput = {
+  /** Create the cloud agent from an existing checkpoint. */
+  cloudAgentCheckpointId?: InputMaybe<Scalars['String']['input']>;
   environmentId: Scalars['String']['input'];
   name?: InputMaybe<Scalars['String']['input']>;
+  /** Region to run the agent in, e.g. us-west2. Defaults to the checkpoint's region when booting from one, else the workspace's preferred region. */
+  region?: InputMaybe<Scalars['String']['input']>;
+  source?: InputMaybe<CloudAgentSourceInput>;
   variables?: InputMaybe<Scalars['JSON']['input']>;
 };
 
@@ -478,6 +615,8 @@ export type CloudAgentSnapshot = {
   __typename?: 'CloudAgentSnapshot';
   harness: Scalars['String']['output'];
   lastEventKind: Scalars['String']['output'];
+  /** Truncated most recent prompt of the session, display-only. Null when the harness never reported one. */
+  latestPrompt?: Maybe<Scalars['String']['output']>;
   /** Truncated first prompt of the session, display-only. Null when the harness never reported one. */
   prompt?: Maybe<Scalars['String']['output']>;
   sessionId: Scalars['String']['output'];
@@ -493,6 +632,7 @@ export type CloudAgentSnapshot = {
 export type CloudAgentSnapshotInput = {
   harness: Scalars['String']['input'];
   lastEventKind: Scalars['String']['input'];
+  latestPrompt?: InputMaybe<Scalars['String']['input']>;
   prompt?: InputMaybe<Scalars['String']['input']>;
   sessionId: Scalars['String']['input'];
   sessionName?: InputMaybe<Scalars['String']['input']>;
@@ -501,6 +641,34 @@ export type CloudAgentSnapshotInput = {
   terminal: Scalars['Boolean']['input'];
   updatedAt: Scalars['String']['input'];
 };
+
+/** Workspace provenance: the GitHub repo cloned into the agent's workspace at create time. */
+export type CloudAgentSource = {
+  __typename?: 'CloudAgentSource';
+  /** Requested ref; null = the repo's default branch. */
+  branch?: Maybe<Scalars['String']['output']>;
+  /** owner/repo. */
+  repo: Scalars['String']['output'];
+  /** Service the repo was resolved from, when given. */
+  serviceId?: Maybe<Scalars['String']['output']>;
+  /** Clone progress. Failed never blocks the agent; only CLONING should hold a launch. */
+  status?: Maybe<CloudAgentSourceStatus>;
+};
+
+/** Repo to clone into the agent's workspace: exactly one of repo/serviceId. */
+export type CloudAgentSourceInput = {
+  /** Ref to check out; defaults to the repo's default branch. */
+  branch?: InputMaybe<Scalars['String']['input']>;
+  /** GitHub repo as owner/repo. */
+  repo?: InputMaybe<Scalars['String']['input']>;
+  /** Resolve the repo from this service's connected source. */
+  serviceId?: InputMaybe<Scalars['String']['input']>;
+};
+
+export type CloudAgentSourceStatus =
+  | 'CLONING'
+  | 'FAILED'
+  | 'READY';
 
 /** State reported by a cloud agent. */
 export type CloudAgentStateReportInput = {
@@ -1155,6 +1323,8 @@ export type Environment = Node & {
   deletedAt?: Maybe<Scalars['DateTime']['output']>;
   deploymentTriggers: EnvironmentDeploymentTriggersConnection;
   deployments: EnvironmentDeploymentsConnection;
+  /** IaC resource address → partial name for this environment. '*' is the whole-project owner. Used so omit=delete only applies to resources this file already owns. */
+  iacPartials?: Maybe<Scalars['JSON']['output']>;
   id: Scalars['ID']['output'];
   isEphemeral: Scalars['Boolean']['output'];
   meta?: Maybe<EnvironmentMeta>;
@@ -1211,6 +1381,21 @@ export type EnvironmentVolumeInstancesArgs = {
   before?: InputMaybe<Scalars['String']['input']>;
   first?: InputMaybe<Scalars['Int']['input']>;
   last?: InputMaybe<Scalars['Int']['input']>;
+};
+
+export type EnvironmentConfigPlanCommentUpsertInput = {
+  environmentId: Scalars['String']['input'];
+  /** GitHub Actions OIDC token (id-token: write) with audience `railway`. Its `repository` claim proves the caller runs in the repo the comment is posted to. */
+  githubOidcToken: Scalars['String']['input'];
+  /** Structured plan summary: { changes: [{ kind?, summary }], destructive, sourceTree, configEtag, changeSetHash, cliVersion? }. The comment body is composed server-side. */
+  plan: Scalars['JSON']['input'];
+  prNumber: Scalars['Int']['input'];
+};
+
+export type EnvironmentConfigPlanCommentUpsertResult = {
+  __typename?: 'EnvironmentConfigPlanCommentUpsertResult';
+  commentId: Scalars['String']['output'];
+  url: Scalars['String']['output'];
 };
 
 export type EnvironmentCreateInput = {
@@ -1286,6 +1471,7 @@ export type EnvironmentPatchPatchArgs = {
 export type EnvironmentPatchStatus =
   | 'APPLYING'
   | 'COMMITTED'
+  | 'FAILED'
   | 'STAGED';
 
 export type EnvironmentRenameInput = {
@@ -1805,6 +1991,11 @@ export type Metric = {
 
 /** A thing that can be measured on Railway. */
 export type MetricMeasurement =
+  | 'AGENT_CACHE_READ_TOKENS'
+  | 'AGENT_CACHE_WRITE_TOKENS'
+  | 'AGENT_INPUT_TOKENS'
+  | 'AGENT_OUTPUT_TOKENS'
+  | 'AGENT_SPEND_USD'
   | 'BACKUP_USAGE_GB'
   | 'CPU_LIMIT'
   | 'CPU_USAGE'
@@ -1820,18 +2011,23 @@ export type MetricMeasurement =
 
 /** A property that can be used to group metrics. */
 export type MetricTag =
+  | 'BILLABLE'
   | 'DEPLOYMENT_ID'
   | 'DEPLOYMENT_INSTANCE_ID'
   | 'ENVIRONMENT_ID'
+  | 'FEATURE'
   | 'HOST_TYPE'
   | 'KEY_UNSPECIFIED'
+  | 'MODEL'
   | 'PLUGIN_ID'
   | 'PROJECT_ID'
   | 'REGION'
   | 'SERVICE_ID'
   | 'UNRECOGNIZED'
+  | 'VM_ID'
   | 'VOLUME_ID'
-  | 'VOLUME_INSTANCE_ID';
+  | 'VOLUME_INSTANCE_ID'
+  | 'WORKLOAD_KIND';
 
 /** The tags that were used to group the metric. */
 export type MetricTags = {
@@ -1881,6 +2077,20 @@ export type MonitorThresholdConfig = {
 
 export type Mutation = {
   __typename?: 'Mutation';
+  /** Create an access group in a workspace. */
+  accessGroupCreate: AccessGroup;
+  /** Delete an access group. */
+  accessGroupDelete: Scalars['Boolean']['output'];
+  /** Add a workspace member to an access group. */
+  accessGroupMemberAdd: AccessGroupMember;
+  /** Remove a member from an access group. */
+  accessGroupMemberRemove: Scalars['Boolean']['output'];
+  /** Attach a project to an access group. */
+  accessGroupProjectAttach: AccessGroupProject;
+  /** Detach a project from an access group. */
+  accessGroupProjectDetach: Scalars['Boolean']['output'];
+  /** Update an access group's name or role. */
+  accessGroupUpdate: AccessGroup;
   /** Set agent usage limit for a workspace */
   agentUsageLimitSet: Scalars['Boolean']['output'];
   /** Creates a new API token. */
@@ -1897,20 +2107,28 @@ export type Mutation = {
   bucketCredentialsReset: BucketS3CompatibleCredentials;
   /** Updates a bucket. */
   bucketUpdate: Bucket;
-  /** Terminates a running HA PITR enable/disable workflow and clears the progress snapshot so the UI re-evaluates from the live cluster state. No-ops if no workflow is running. */
+  /** Cancels an in-progress PITR enable/disable rollout on an HA database cluster and resets its progress so the UI re-reads from the live cluster. No-ops when nothing is running. */
   cancelPitrHaWorkflow: Scalars['Boolean']['output'];
   /** Merge a canvas layout from one environment into another. Re-computes the merge from current state and applies mutations. */
   canvasViewMerge: Scalars['Boolean']['output'];
-  /** Clears a completed HA PITR workflow progress snapshot so the Backups page can start fresh. In-flight workflows cannot be cleared. */
+  /** Clears the recorded progress of a finished PITR enable/disable rollout so the Backups page starts fresh. A rollout still in progress cannot be cleared. */
   clearPitrHaWorkflowProgress: Scalars['Boolean']['output'];
   /** Track CLI authentication-attempt outcomes (signup / sign-in funnel) */
   cliAuthEventTrack: Scalars['Boolean']['output'];
   /** Track events from the Railway CLI */
   cliEventTrack: Scalars['Boolean']['output'];
+  /** Checkpoint the agent's disk. Poll cloudAgentCheckpoint until SUCCEEDED. */
+  cloudAgentCheckpointCreate: CloudAgentCheckpoint;
+  /** Delete a checkpoint. */
+  cloudAgentCheckpointDelete: Scalars['Boolean']['output'];
   /** Create a cloud agent. */
   cloudAgentCreate: CloudAgent;
   /** Delete a cloud agent. */
   cloudAgentDelete: Scalars['Boolean']['output'];
+  /** Duplicate a running cloud agent. */
+  cloudAgentFork: CloudAgent;
+  /** Mint a short-lived (5m) JWT for the agent's harness WebSocket (see agentWsUrl). The in-VM gate verifies signature/exp/aud and pins it to this agent. Mint one per dial; the token only has to survive the upgrade. */
+  cloudAgentHarnessToken: Scalars['String']['output'];
   /** Sleep a running cloud agent, keeping its volume. Processes on the machine are terminated; waking re-runs its entrypoint. */
   cloudAgentSleep: CloudAgent;
   /** Report the current coding-agent session state. */
@@ -1951,7 +2169,7 @@ export type Mutation = {
   deploymentTriggerDelete: Scalars['Boolean']['output'];
   /** Updates a deployment trigger. */
   deploymentTriggerUpdate: DeploymentTrigger;
-  /** Disables PITR on a Postgres-HA cluster via the same rolling workflow as enable: PATCHes Patroni DCS archive_mode=off, restarts replicas one at a time, switches over, restarts the former leader, then strips the WAL_ARCHIVE_* vars. The bucket is left intact so backup history isn't destroyed. */
+  /** Disables point-in-time recovery on an HA database cluster with the same rolling rollout as enable. The backup bucket is left intact, so existing backup history is preserved. */
   disablePitrForHaCluster: TemplateDeployPayload;
   /** Disables CDN for a service, soft-deleting the edge config. */
   disableServiceCdn: Scalars['Boolean']['output'];
@@ -1971,12 +2189,14 @@ export type Mutation = {
   emailChangeConfirm: Scalars['Boolean']['output'];
   /** Initiate an email change request for a user */
   emailChangeInitiate: Scalars['Boolean']['output'];
-  /** Enables PITR on a Postgres-HA cluster via a rolling workflow: creates the bucket, writes WAL_ARCHIVE_* vars on every member, ensures Patroni DCS archive_mode=on, restarts replicas one at a time, switches over, then restarts the former leader. */
+  /** Enables point-in-time recovery on an HA database cluster (Postgres HA, MySQL HA) with a rolling, near-zero-downtime rollout across its members. Safe to retry. */
   enablePitrForHaCluster: TemplateDeployPayload;
   /** Enables CDN for a service, creating an edge config and attaching all live domains. */
   enableServiceCdn: EdgeConfig;
   /** Experimental: applies an intent-level RailwayChangeSet and returns operation results. */
   environmentApplyChangeSet: ChangeSetApplyResult;
+  /** Posts or updates a `railway config plan` comment on a GitHub pull request under the Railway app identity. The caller proves it runs in the target repo with a GitHub Actions OIDC token; the comment body is composed server-side from the structured plan. */
+  environmentConfigPlanCommentUpsert: EnvironmentConfigPlanCommentUpsertResult;
   /** Creates a new environment. */
   environmentCreate: Environment;
   /** Deletes an environment. */
@@ -1985,6 +2205,8 @@ export type Mutation = {
   environmentPatchCommit: Scalars['String']['output'];
   /** Commits the staged changes for a single environment. */
   environmentPatchCommitStaged: Scalars['String']['output'];
+  /** Copy a FAILED patch's changes into the environment's staged patch (creating one if needed). The FAILED patch is left untouched. */
+  environmentPatchRestage: EnvironmentPatch;
   /** Experimental: previews an intent-level RailwayChangeSet without side effects. */
   environmentPreviewChangeSet: ChangeSetPreview;
   /** Renames an environment. */
@@ -2098,6 +2320,8 @@ export type Mutation = {
   projectCreate: Project;
   /** Deletes a project. */
   projectDelete: Scalars['Boolean']['output'];
+  /** Star or unstar a project for the authenticated user. Returns the resulting state. */
+  projectFavoriteSet: Scalars['Boolean']['output'];
   /** Add a feature flag for a project */
   projectFeatureFlagAdd: Scalars['Boolean']['output'];
   /** Remove a feature flag for a project */
@@ -2153,6 +2377,16 @@ export type Mutation = {
   railwayDomainDnsRecordDelete: Scalars['Boolean']['output'];
   /** Update a DNS record for a Railway domain */
   railwayDomainDnsRecordUpdate: RailwayDomainDnsRecord;
+  /** Stop forwarding every address on this domain, and remove the mail records that delivered them */
+  railwayDomainEmailForwardingRemoveAll: RailwayDomainEmailForwardingTeardown;
+  /** Forward an address on this domain to an external inbox */
+  railwayDomainEmailForwardingRuleCreate: RailwayDomainEmailForwardingRule;
+  /** Stop forwarding an address on this domain */
+  railwayDomainEmailForwardingRuleDelete: Scalars['Boolean']['output'];
+  /** Send a message to a forwarded address so the customer can confirm it delivers. */
+  railwayDomainEmailForwardingRuleSendTest: RailwayDomainEmailForwardingRule;
+  /** Change where a forwarded address delivers */
+  railwayDomainEmailForwardingRuleUpdate: RailwayDomainEmailForwardingRule;
   /** Delegate the domain's authoritative nameservers to an external DNS provider, or reset to Railway defaults by passing an empty list. */
   railwayDomainNameserversSet: RailwayDomainNameservers;
   /** Update a Railway domain's settings */
@@ -2204,6 +2438,12 @@ export type Mutation = {
   serviceFeatureFlagRemove: Scalars['Boolean']['output'];
   /** Enables or disables auto-deploy for a service instance. */
   serviceInstanceAutoDeployUpdate: ServiceInstanceAutoDeployUpdateResult;
+  /** Update the auto-update maintenance window for a service instance, applied immediately (no config staging, no redeploy). Only the schedule changes — the update policy is untouched. */
+  serviceInstanceAutoUpdateScheduleUpdate: Scalars['Boolean']['output'];
+  /** Skip the next scheduled auto-update occurrence for a service instance, applied immediately (no config staging, no redeploy). The recurring maintenance window and update policy are untouched — this only delays the next fire. */
+  serviceInstanceAutoUpdateSnooze: Scalars['Boolean']['output'];
+  /** Undo an active auto-update skip for a service instance, applied immediately (no config staging, no redeploy). The recurring maintenance window and update policy are untouched — the next scheduled occurrence fires normally again. */
+  serviceInstanceAutoUpdateSnoozeClear: Scalars['Boolean']['output'];
   /** Deploy a service instance */
   serviceInstanceDeploy: Scalars['Boolean']['output'];
   /** Deploy a service instance. Returns a deployment ID */
@@ -2214,9 +2454,9 @@ export type Mutation = {
   serviceInstanceRedeploy: Scalars['Boolean']['output'];
   /** Update a service instance */
   serviceInstanceUpdate: Scalars['Boolean']['output'];
-  /** Dismiss a platform-armed Postgres security update notice and stand down the scheduled redeploy */
+  /** Dismiss a platform-armed database security update notice and stand down the scheduled redeploy */
   serviceInstanceVulnRemediationDismiss: Scalars['Boolean']['output'];
-  /** Immediately apply a platform-armed Postgres security update (backup + redeploy). Returns the new deployment id. */
+  /** Immediately apply a platform-armed database security update (backup + redeploy). Returns the new deployment id. */
   serviceInstanceVulnRemediationPatchNow: Scalars['String']['output'];
   /** Remove the upstream URL from all service instances for this service */
   serviceRemoveUpstreamUrl: Service;
@@ -2340,7 +2580,7 @@ export type Mutation = {
   volumeInstanceBackupRestore: WorkflowId;
   /** Manage schedule for backups of a volume instance */
   volumeInstanceBackupScheduleUpdate: Scalars['Boolean']['output'];
-  /** Point-in-time restore. Creates a brand-new Postgres service in the project. The image populates the new service's volume from the source bucket via `pgbackrest restore --type=time --target=<T>` on first boot, replays WAL forward, and promotes. Source service stays online and untouched. */
+  /** Point-in-time restore. Creates a brand-new database service in the project, recovered to the target timestamp from the source service's backup history. The source service stays online and untouched. */
   volumeInstancePITRRestore: WorkflowId;
   /** Update a volume instance. If no environmentId is provided, all volume instances for the volume will be updated. */
   volumeInstanceUpdate: Scalars['Boolean']['output'];
@@ -2364,6 +2604,8 @@ export type Mutation = {
   workspacePolicyDeploySourceAllowlistRemove: Scalars['Boolean']['output'];
   /** Enable or disable a workspace policy. Enterprise workspaces only. */
   workspacePolicyItemUpdate: Scalars['Boolean']['output'];
+  /** Control whether non-admin project visibility is restricted to access groups and direct project permissions. */
+  workspaceSetRestrictProjectVisibilityToGroups: Scalars['Boolean']['output'];
   /** Enable or disable 2FA enforcement for a workspace */
   workspaceTwoFactorEnforcementUpdate: Scalars['Boolean']['output'];
   /** Update a workspace by id */
@@ -2374,6 +2616,42 @@ export type Mutation = {
   workspaceUserInvite: Scalars['Boolean']['output'];
   /** Remove a user from a workspace */
   workspaceUserRemove: Scalars['Boolean']['output'];
+};
+
+
+export type MutationAccessGroupCreateArgs = {
+  input: AccessGroupCreateInput;
+};
+
+
+export type MutationAccessGroupDeleteArgs = {
+  id: Scalars['String']['input'];
+};
+
+
+export type MutationAccessGroupMemberAddArgs = {
+  input: AccessGroupMemberInput;
+};
+
+
+export type MutationAccessGroupMemberRemoveArgs = {
+  input: AccessGroupMemberInput;
+};
+
+
+export type MutationAccessGroupProjectAttachArgs = {
+  input: AccessGroupProjectInput;
+};
+
+
+export type MutationAccessGroupProjectDetachArgs = {
+  input: AccessGroupProjectInput;
+};
+
+
+export type MutationAccessGroupUpdateArgs = {
+  id: Scalars['String']['input'];
+  input: AccessGroupUpdateInput;
 };
 
 
@@ -2450,12 +2728,36 @@ export type MutationCliEventTrackArgs = {
 };
 
 
+export type MutationCloudAgentCheckpointCreateArgs = {
+  id: Scalars['ID']['input'];
+  name?: InputMaybe<Scalars['String']['input']>;
+};
+
+
+export type MutationCloudAgentCheckpointDeleteArgs = {
+  id: Scalars['ID']['input'];
+};
+
+
 export type MutationCloudAgentCreateArgs = {
   input: CloudAgentCreateInput;
 };
 
 
 export type MutationCloudAgentDeleteArgs = {
+  id: Scalars['ID']['input'];
+};
+
+
+export type MutationCloudAgentForkArgs = {
+  id: Scalars['ID']['input'];
+  name?: InputMaybe<Scalars['String']['input']>;
+  variables?: InputMaybe<Scalars['JSON']['input']>;
+};
+
+
+export type MutationCloudAgentHarnessTokenArgs = {
+  environmentId: Scalars['String']['input'];
   id: Scalars['ID']['input'];
 };
 
@@ -2637,6 +2939,11 @@ export type MutationEnvironmentApplyChangeSetArgs = {
 };
 
 
+export type MutationEnvironmentConfigPlanCommentUpsertArgs = {
+  input: EnvironmentConfigPlanCommentUpsertInput;
+};
+
+
 export type MutationEnvironmentCreateArgs = {
   input: EnvironmentCreateInput;
 };
@@ -2658,6 +2965,11 @@ export type MutationEnvironmentPatchCommitStagedArgs = {
   commitMessage?: InputMaybe<Scalars['String']['input']>;
   environmentId: Scalars['String']['input'];
   skipDeploys?: InputMaybe<Scalars['Boolean']['input']>;
+};
+
+
+export type MutationEnvironmentPatchRestageArgs = {
+  patchId: Scalars['String']['input'];
 };
 
 
@@ -2904,6 +3216,12 @@ export type MutationProjectDeleteArgs = {
 };
 
 
+export type MutationProjectFavoriteSetArgs = {
+  favorite: Scalars['Boolean']['input'];
+  projectId: Scalars['String']['input'];
+};
+
+
 export type MutationProjectFeatureFlagAddArgs = {
   input: ProjectFeatureFlagToggleInput;
 };
@@ -3039,6 +3357,31 @@ export type MutationRailwayDomainDnsRecordUpdateArgs = {
 };
 
 
+export type MutationRailwayDomainEmailForwardingRemoveAllArgs = {
+  input: RailwayDomainEmailForwardingRemoveAllInput;
+};
+
+
+export type MutationRailwayDomainEmailForwardingRuleCreateArgs = {
+  input: RailwayDomainEmailForwardingRuleCreateInput;
+};
+
+
+export type MutationRailwayDomainEmailForwardingRuleDeleteArgs = {
+  input: RailwayDomainEmailForwardingRuleDeleteInput;
+};
+
+
+export type MutationRailwayDomainEmailForwardingRuleSendTestArgs = {
+  input: RailwayDomainEmailForwardingRuleTestInput;
+};
+
+
+export type MutationRailwayDomainEmailForwardingRuleUpdateArgs = {
+  input: RailwayDomainEmailForwardingRuleUpdateInput;
+};
+
+
 export type MutationRailwayDomainNameserversSetArgs = {
   input: RailwayDomainNameserversSetInput;
 };
@@ -3165,6 +3508,26 @@ export type MutationServiceFeatureFlagRemoveArgs = {
 
 export type MutationServiceInstanceAutoDeployUpdateArgs = {
   input: ServiceInstanceAutoDeployUpdateInput;
+};
+
+
+export type MutationServiceInstanceAutoUpdateScheduleUpdateArgs = {
+  environmentId: Scalars['String']['input'];
+  schedule: Array<AutoUpdateScheduleWindowInput>;
+  serviceId: Scalars['String']['input'];
+};
+
+
+export type MutationServiceInstanceAutoUpdateSnoozeArgs = {
+  environmentId: Scalars['String']['input'];
+  serviceId: Scalars['String']['input'];
+  snoozeDays?: InputMaybe<Scalars['Int']['input']>;
+};
+
+
+export type MutationServiceInstanceAutoUpdateSnoozeClearArgs = {
+  environmentId: Scalars['String']['input'];
+  serviceId: Scalars['String']['input'];
 };
 
 
@@ -3559,6 +3922,12 @@ export type MutationWorkspacePolicyItemUpdateArgs = {
 };
 
 
+export type MutationWorkspaceSetRestrictProjectVisibilityToGroupsArgs = {
+  enabled: Scalars['Boolean']['input'];
+  workspaceId: Scalars['String']['input'];
+};
+
+
 export type MutationWorkspaceTwoFactorEnforcementUpdateArgs = {
   enabled: Scalars['Boolean']['input'];
   workspaceId: Scalars['String']['input'];
@@ -3857,6 +4226,12 @@ export type ObservabilityDashboardUpdateInput = {
   id: Scalars['String']['input'];
 };
 
+export type OperationStatus =
+  | 'applied'
+  | 'applying'
+  | 'failed'
+  | 'staged';
+
 export type PageInfo = {
   __typename?: 'PageInfo';
   endCursor?: Maybe<Scalars['String']['output']>;
@@ -3908,7 +4283,7 @@ export type PaymentMethodCard = {
   last4: Scalars['String']['output'];
 };
 
-/** Live replication health of an HA postgres cluster, probed from patroni on demand. Used to gate the Enable/Disable PITR buttons on the same 'caught up' definition the rolling workflow enforces. */
+/** Live replication health of an HA database cluster's members. Used to gate the Enable/Disable PITR buttons on the same 'caught up' definition the rollout enforces. */
 export type PitrHaClusterReplicationHealth = {
   __typename?: 'PitrHaClusterReplicationHealth';
   allHealthy: Scalars['Boolean']['output'];
@@ -3961,13 +4336,14 @@ export type PitrHaWorkflowPhase =
   | 'VERIFYING'
   | 'WRITING_VARIABLES';
 
-/** Progress snapshot for an in-flight (or recently completed) HA PITR enable/disable workflow. Persisted in Redis for ~1h and re-emitted on every phase transition over the pitrHaWorkflowProgress subscription. */
+/** Progress of an in-flight or recently completed PITR enable/disable rollout on an HA database cluster. */
 export type PitrHaWorkflowProgress = {
   __typename?: 'PitrHaWorkflowProgress';
   clusterMutated: Scalars['Boolean']['output'];
   completedAt?: Maybe<Scalars['String']['output']>;
   currentMemberServiceId?: Maybe<Scalars['String']['output']>;
   direction: PitrHaWorkflowDirection;
+  engine?: Maybe<Scalars['String']['output']>;
   environmentId: Scalars['String']['output'];
   errorMessage?: Maybe<Scalars['String']['output']>;
   failedAtPhase?: Maybe<PitrHaWorkflowPhase>;
@@ -3979,6 +4355,17 @@ export type PitrHaWorkflowProgress = {
   startedAt: Scalars['String']['output'];
   updatedAt: Scalars['String']['output'];
   workflowId: Scalars['String']['output'];
+};
+
+/** Estimated destination-volume scratch a PITR restore to a target needs: the base backup's data plus every WAL segment replayed from that backup to the target (Postgres holds replayed WAL in pg_wal faster than restartpoints recycle it). A conservative over-estimate for a non-blocking pre-restore warning — not a gate. */
+export type PitrRestoreScratchEstimate = {
+  __typename?: 'PitrRestoreScratchEstimate';
+  baseBackupLabel: Scalars['String']['output'];
+  dataMB: Scalars['Int']['output'];
+  estimatedScratchMB: Scalars['Int']['output'];
+  likelyToFit: Scalars['Boolean']['output'];
+  planMaxSizeMB: Scalars['Int']['output'];
+  walMB: Scalars['Int']['output'];
 };
 
 export type Plan =
@@ -3993,9 +4380,11 @@ export type PlanLimitOverride = Node & {
 };
 
 export type PlatformFeatureFlag =
+  | 'AGENT_USAGE_CH_INGEST'
+  | 'AGENT_USAGE_WARNINGS'
   | 'ALERT_SUS_USERS_CRON_KILLSWITCH'
-  | 'BAN_APPEAL_FORM'
   | 'BUILD_DEPLOY_QUEUE_V2'
+  | 'CAC_T0_KILLSWITCH'
   | 'CANVAS_CROSS_ENV_GUARD_ENFORCE'
   | 'CHAT_SANDBOX'
   | 'CLICKHOUSE_WORKSPACE_LIMIT_ENFORCE'
@@ -4007,24 +4396,23 @@ export type PlatformFeatureFlag =
   | 'DEPLOY_SUPERSEDE_ON_PUSH'
   | 'DEV_STUDIO'
   | 'DEV_STUDIO_ANON_PROVISIONS'
-  | 'DOMAIN_PURCHASE_VELOCITY_LIMIT'
-  | 'FIXED_DOMAIN_RADAR_RULES'
+  | 'DOMAIN_RECONCILE_KILLSWITCH'
+  | 'EMAIL_FORWARDING_KILLSWITCH'
   | 'IN_DASHBOARD_SUPPORT'
   | 'KAFKA_EPHEMERAL_ENVIRONMENT_UPDATES'
   | 'LOGS_LONG_WINDOW_CHUNKING'
-  | 'LOGS_V2_ENVIRONMENT_DARK_READS'
-  | 'LOGS_V2_ENVIRONMENT_READS'
-  | 'LOGS_V2_FILTERED_READS'
-  | 'LOGS_V2_READS'
   | 'NEW_STRIPE_WEBHOOK_VERSION_ROLLOUT'
   | 'OAUTH_DCR_KILLSWITCH'
+  | 'PRE_DEPLOY_TIMEOUT_KILLSWITCH'
+  | 'PROJECT_FAVORITES'
   | 'REMOVE_DEPLOYMENT_COMPACT'
-  | 'SANDBOX_FACTORY_VM'
+  | 'RESTRICTION_APPEALS'
   | 'SERVICEINSTANCE_DATALOADER_FOR_STATIC_URL'
   | 'SPLIT_USAGE_QUERIES'
   | 'STRIPE_METERS_NEW_ACCOUNTS'
   | 'STRIPE_METERS_SHADOW_ENABLED'
   | 'UPDATED_VM_QUERIES'
+  | 'VM_USAGE_CH_INGEST'
   | 'WORKSPACE_MCP_KILLSWITCH';
 
 export type PlatformFeatureFlagStatus = {
@@ -4243,6 +4631,8 @@ export type Project = Node & {
   /** @deprecated Use workspaceId */
   teamId?: Maybe<Scalars['String']['output']>;
   updatedAt: Scalars['DateTime']['output'];
+  /** Highest project-scoped role the current user holds on this project, through a direct project permission or an access group. Does not include the workspace role. */
+  viewerRole?: Maybe<ProjectRole>;
   volumes: ProjectVolumesConnection;
   workspace?: Maybe<Workspace>;
   workspaceId?: Maybe<Scalars['String']['output']>;
@@ -4483,6 +4873,29 @@ export type ProjectMemberUpdateInput = {
   projectId: Scalars['String']['input'];
   role: ProjectRole;
   userId: Scalars['String']['input'];
+};
+
+export type ProjectOperation = {
+  __typename?: 'ProjectOperation';
+  actor: ProjectOperationActor;
+  changes: Scalars['JSON']['output'];
+  /** In-flight child operations (e.g. deployments created by this patch). */
+  children: Array<ProjectOperation>;
+  environmentId: Scalars['String']['output'];
+  finishedAt?: Maybe<Scalars['DateTime']['output']>;
+  id: Scalars['String']['output'];
+  kind: Scalars['String']['output'];
+  parentRef?: Maybe<Scalars['String']['output']>;
+  startedAt: Scalars['DateTime']['output'];
+  status: OperationStatus;
+  workflowId?: Maybe<Scalars['String']['output']>;
+};
+
+export type ProjectOperationActor = {
+  __typename?: 'ProjectOperationActor';
+  onBehalfOf?: Maybe<Scalars['String']['output']>;
+  principal?: Maybe<Scalars['String']['output']>;
+  surface?: Maybe<Scalars['String']['output']>;
 };
 
 export type ProjectPermission = Node & {
@@ -4729,6 +5142,10 @@ export type Query = {
   changelogBlockImage: Scalars['String']['output'];
   /** A cloud agent by ID, within an environment. Null when the agent belongs to another one, so a caller cannot render an agent it has switched away from. */
   cloudAgent?: Maybe<CloudAgent>;
+  /** A cloud agent checkpoint by ID. */
+  cloudAgentCheckpoint: CloudAgentCheckpoint;
+  /** Cloud agent checkpoints in an environment, newest first. */
+  cloudAgentCheckpoints: QueryCloudAgentCheckpointsConnection;
   /** Shell and exec sessions running on a cloud agent's VM that you can reconnect to. Null if the agent has no running machine. */
   cloudAgentConsoleSessions?: Maybe<QueryCloudAgentConsoleSessionsConnection>;
   /** Cloud agents in an environment. */
@@ -4747,8 +5164,6 @@ export type Query = {
   deploymentInstanceExecutions: QueryDeploymentInstanceExecutionsConnection;
   /** Fetch logs for a deployment */
   deploymentLogs: Array<Log>;
-  /** Shell and exec sessions running on this deployment's VM that you can reconnect to. Null if the deployment has no running VM. */
-  deploymentSessions?: Maybe<QueryDeploymentSessionsConnection>;
   /** Find a single DeploymentSnapshot */
   deploymentSnapshot?: Maybe<DeploymentSnapshot>;
   /** All deployment triggers. */
@@ -4782,6 +5197,8 @@ export type Query = {
   environmentPatch: EnvironmentPatch;
   /** Get the patches for an environment */
   environmentPatches: QueryEnvironmentPatchesConnection;
+  /** Pending project-mutating work for an environment. Unions registered OperationSources (patches, standalone deploys) and returns parent rows only — not a stored inbox. */
+  environmentPendingWork: Array<ProjectOperation>;
   /** Get the latest staged commit for a single environment. */
   environmentStagedChanges: EnvironmentPatch;
   /** Gets all environments for a project. */
@@ -4850,9 +5267,9 @@ export type Query = {
   observabilityDashboards: QueryObservabilityDashboardsConnection;
   /** Gets all passkeys for the authenticated user */
   passkeys: QueryPasskeysConnection;
-  /** Live replication health for an HA postgres cluster, probed from patroni. Use to gate the Enable/Disable PITR buttons so the user can't start a rollout while a replica is too far behind to rejoin. Returns null when the service isn't an HA root. */
+  /** Live replication health for an HA database cluster (Postgres HA, MySQL HA). Use it to gate the Enable/Disable PITR buttons so a rollout can't start while a member is too far behind to rejoin. Returns null when the service isn't an HA root. */
   pitrHaClusterReplicationHealth?: Maybe<PitrHaClusterReplicationHealth>;
-  /** One-shot read of the persisted progress for an HA PITR enable/disable workflow. Use to rehydrate state on page load before connecting to the subscription. Returns null if no workflow has run recently (TTL ~1h). */
+  /** One-shot read of the current progress of a PITR enable/disable rollout on an HA database cluster. Use it to rehydrate state on page load, then poll this field for updates. Returns null when no rollout has run recently. */
   pitrHaWorkflowProgress?: Maybe<PitrHaWorkflowProgress>;
   /** Get the current status of the platform */
   platformStatus: PlatformStatus;
@@ -4878,6 +5295,8 @@ export type Query = {
   project: Project;
   /** Get comprehensive compliance information for a project including 2FA status, member permissions, backup schedules, and compliance agreements. Requires workspace API token with admin access. */
   projectCompliance: ProjectComplianceInfo;
+  /** The authenticated user's favorited project ids in a workspace, in the order the Favorites row should render them. Defaults to the order they were starred in. */
+  projectFavorites: Array<Scalars['String']['output']>;
   /** Get a project invitation by code */
   projectInvitation: PublicProjectInvitation;
   /** Get invitations for a project */
@@ -4908,6 +5327,12 @@ export type Query = {
   railwayDomainByName: RailwayDomain;
   /** List DNS records for a Railway domain */
   railwayDomainDnsRecords: Array<RailwayDomainDnsRecord>;
+  /** Whether email forwarding can be offered on this domain, or why it can't. */
+  railwayDomainEmailForwardingEligibility: RailwayDomainEmailForwardingEligibility;
+  /** Caps the forwarding UI surfaces before a rule is rejected server-side. Pass workspaceId for that workspace's alias allowance; without it the highest plan's is returned. */
+  railwayDomainEmailForwardingLimits: RailwayDomainEmailForwardingLimits;
+  /** List email forwarding rules for a Railway domain */
+  railwayDomainEmailForwardingRules: Array<RailwayDomainEmailForwardingRule>;
   /** Get Railway domains for a workspace */
   railwayDomains: Array<RailwayDomain>;
   /** Gets the ReferralInfo for the authenticated user. */
@@ -4924,7 +5349,7 @@ export type Query = {
   sandboxSessions?: Maybe<QuerySandboxSessionsConnection>;
   /** Get a template's build state by id (the recipe content hash). READY once its checkpoint exists; BUILDING/FAILED reflect the build workflow. */
   sandboxTemplateBuild: SandboxTemplateBuild;
-  /** List sandboxes in an environment. */
+  /** List sandboxes in an environment, newest first. Passing first/after paginates; omitting them returns the full list. */
   sandboxes: QuerySandboxesConnection;
   /** Get a service by ID */
   service: Service;
@@ -5010,6 +5435,8 @@ export type Query = {
   volumeInstanceBackupList: Array<VolumeInstanceBackup>;
   /** List backups schedules of a volume instance */
   volumeInstanceBackupScheduleList: Array<VolumeInstanceBackupSchedule>;
+  /** Estimated destination-volume scratch a PITR restore of this volume instance to a target would need, and whether it fits the workspace plan's max volume size. Read-only pre-check the restore dialog calls to warn before a restore that would fill the disk mid-replay; returns null when no estimate can be formed (non-pgBackRest source, incomplete archive creds, or a target before the earliest backup). */
+  volumeInstancePitrRestoreEstimate?: Maybe<PitrRestoreScratchEstimate>;
   /** Gets the status of a workflow */
   workflowStatus: WorkflowResult;
   /** Get the workspace */
@@ -5024,6 +5451,8 @@ export type Query = {
   workspacePolicySelectableDeploySources: Array<WorkspacePolicySelectableDeploySource>;
   /** Get all templates for a workspace. */
   workspaceTemplates: QueryWorkspaceTemplatesConnection;
+  /** Workspace-wide SUM of the same UI usage rollup as `usage` grouped by project. Use this for the usage-page header so it does not wait on per-project rows. Deleted projects that still bill are included when `includeDeleted` is true. */
+  workspaceUsageTotals: Array<AggregatedUsage>;
 };
 
 
@@ -5101,6 +5530,20 @@ export type QueryCloudAgentArgs = {
 };
 
 
+export type QueryCloudAgentCheckpointArgs = {
+  id: Scalars['ID']['input'];
+};
+
+
+export type QueryCloudAgentCheckpointsArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
+  before?: InputMaybe<Scalars['String']['input']>;
+  environmentId: Scalars['ID']['input'];
+  first?: InputMaybe<Scalars['Int']['input']>;
+  last?: InputMaybe<Scalars['Int']['input']>;
+};
+
+
 export type QueryCloudAgentConsoleSessionsArgs = {
   after?: InputMaybe<Scalars['String']['input']>;
   before?: InputMaybe<Scalars['String']['input']>;
@@ -5161,15 +5604,6 @@ export type QueryDeploymentLogsArgs = {
   filter?: InputMaybe<Scalars['String']['input']>;
   limit?: InputMaybe<Scalars['Int']['input']>;
   startDate?: InputMaybe<Scalars['DateTime']['input']>;
-};
-
-
-export type QueryDeploymentSessionsArgs = {
-  after?: InputMaybe<Scalars['String']['input']>;
-  before?: InputMaybe<Scalars['String']['input']>;
-  deploymentId: Scalars['String']['input'];
-  first?: InputMaybe<Scalars['Int']['input']>;
-  last?: InputMaybe<Scalars['Int']['input']>;
 };
 
 
@@ -5281,6 +5715,11 @@ export type QueryEnvironmentPatchesArgs = {
   environmentId: Scalars['String']['input'];
   first?: InputMaybe<Scalars['Int']['input']>;
   last?: InputMaybe<Scalars['Int']['input']>;
+};
+
+
+export type QueryEnvironmentPendingWorkArgs = {
+  environmentId: Scalars['String']['input'];
 };
 
 
@@ -5564,6 +6003,12 @@ export type QueryProjectComplianceArgs = {
 };
 
 
+export type QueryProjectFavoritesArgs = {
+  orderBy?: InputMaybe<ProjectsOrderBy>;
+  workspaceId: Scalars['String']['input'];
+};
+
+
 export type QueryProjectInvitationArgs = {
   code: Scalars['String']['input'];
 };
@@ -5649,6 +6094,23 @@ export type QueryRailwayDomainDnsRecordsArgs = {
 };
 
 
+export type QueryRailwayDomainEmailForwardingEligibilityArgs = {
+  domain: Scalars['String']['input'];
+  workspaceId: Scalars['String']['input'];
+};
+
+
+export type QueryRailwayDomainEmailForwardingLimitsArgs = {
+  workspaceId?: InputMaybe<Scalars['String']['input']>;
+};
+
+
+export type QueryRailwayDomainEmailForwardingRulesArgs = {
+  domain: Scalars['String']['input'];
+  workspaceId: Scalars['String']['input'];
+};
+
+
 export type QueryRailwayDomainsArgs = {
   status?: InputMaybe<RailwayDomainStatus>;
   workspaceId: Scalars['String']['input'];
@@ -5698,6 +6160,7 @@ export type QuerySandboxTemplateBuildArgs = {
 
 
 export type QuerySandboxesArgs = {
+  active?: InputMaybe<Scalars['Boolean']['input']>;
   after?: InputMaybe<Scalars['String']['input']>;
   before?: InputMaybe<Scalars['String']['input']>;
   environmentId: Scalars['String']['input'];
@@ -5926,6 +6389,13 @@ export type QueryVolumeInstanceBackupScheduleListArgs = {
 };
 
 
+export type QueryVolumeInstancePitrRestoreEstimateArgs = {
+  sourceRepoPath?: InputMaybe<Scalars['String']['input']>;
+  targetTimestamp: Scalars['DateTime']['input'];
+  volumeInstanceId: Scalars['String']['input'];
+};
+
+
 export type QueryWorkflowStatusArgs = {
   workflowId: Scalars['String']['input'];
 };
@@ -5969,6 +6439,15 @@ export type QueryWorkspaceTemplatesArgs = {
   workspaceId: Scalars['String']['input'];
 };
 
+
+export type QueryWorkspaceUsageTotalsArgs = {
+  endDate?: InputMaybe<Scalars['DateTime']['input']>;
+  includeDeleted?: InputMaybe<Scalars['Boolean']['input']>;
+  measurements: Array<MetricMeasurement>;
+  startDate?: InputMaybe<Scalars['DateTime']['input']>;
+  workspaceId?: InputMaybe<Scalars['String']['input']>;
+};
+
 export type QueryApiTokensConnection = {
   __typename?: 'QueryApiTokensConnection';
   edges: Array<QueryApiTokensConnectionEdge>;
@@ -5991,6 +6470,18 @@ export type QueryAuditLogsConnectionEdge = {
   __typename?: 'QueryAuditLogsConnectionEdge';
   cursor: Scalars['String']['output'];
   node: AuditLog;
+};
+
+export type QueryCloudAgentCheckpointsConnection = {
+  __typename?: 'QueryCloudAgentCheckpointsConnection';
+  edges: Array<QueryCloudAgentCheckpointsConnectionEdge>;
+  pageInfo: PageInfo;
+};
+
+export type QueryCloudAgentCheckpointsConnectionEdge = {
+  __typename?: 'QueryCloudAgentCheckpointsConnectionEdge';
+  cursor: Scalars['String']['output'];
+  node: CloudAgentCheckpoint;
 };
 
 export type QueryCloudAgentConsoleSessionsConnection = {
@@ -6027,18 +6518,6 @@ export type QueryDeploymentInstanceExecutionsConnectionEdge = {
   __typename?: 'QueryDeploymentInstanceExecutionsConnectionEdge';
   cursor: Scalars['String']['output'];
   node: DeploymentInstanceExecution;
-};
-
-export type QueryDeploymentSessionsConnection = {
-  __typename?: 'QueryDeploymentSessionsConnection';
-  edges: Array<QueryDeploymentSessionsConnectionEdge>;
-  pageInfo: PageInfo;
-};
-
-export type QueryDeploymentSessionsConnectionEdge = {
-  __typename?: 'QueryDeploymentSessionsConnectionEdge';
-  cursor: Scalars['String']['output'];
-  node: SandboxSession;
 };
 
 export type QueryDeploymentTriggersConnection = {
@@ -6360,6 +6839,8 @@ export type RailwayDomainDnsRecordCreateInput = {
 export type RailwayDomainDnsRecordDeleteInput = {
   domain: Scalars['String']['input'];
   recordId: Scalars['Int']['input'];
+  /** Confirms that deleting a mail exchange may also remove every forwarding address and its sibling exchanges. */
+  removeEmailForwarding?: InputMaybe<Scalars['Boolean']['input']>;
   workspaceId: Scalars['String']['input'];
 };
 
@@ -6382,6 +6863,63 @@ export type RailwayDomainDnsRecordUpdateInput = {
   ttl?: InputMaybe<Scalars['Int']['input']>;
   type: RailwayDomainDnsRecordType;
   workspaceId: Scalars['String']['input'];
+};
+
+export type RailwayDomainEmailForwardingEligibility =
+  | 'DELEGATED'
+  | 'ELIGIBLE'
+  | 'EXTERNAL_MAIL'
+  | 'UNKNOWN';
+
+export type RailwayDomainEmailForwardingLimits = {
+  __typename?: 'RailwayDomainEmailForwardingLimits';
+  maxAliases: Scalars['Int']['output'];
+};
+
+export type RailwayDomainEmailForwardingRemoveAllInput = {
+  domain: Scalars['String']['input'];
+  workspaceId: Scalars['String']['input'];
+};
+
+export type RailwayDomainEmailForwardingRule = {
+  __typename?: 'RailwayDomainEmailForwardingRule';
+  /** Local part of the forwarded address, without the domain. */
+  alias: Scalars['String']['output'];
+  /** The external inbox mail for this alias is delivered to. */
+  destination: Scalars['String']['output'];
+};
+
+export type RailwayDomainEmailForwardingRuleCreateInput = {
+  alias: Scalars['String']['input'];
+  destination: Scalars['String']['input'];
+  domain: Scalars['String']['input'];
+  workspaceId: Scalars['String']['input'];
+};
+
+export type RailwayDomainEmailForwardingRuleDeleteInput = {
+  alias: Scalars['String']['input'];
+  domain: Scalars['String']['input'];
+  workspaceId: Scalars['String']['input'];
+};
+
+export type RailwayDomainEmailForwardingRuleTestInput = {
+  alias: Scalars['String']['input'];
+  domain: Scalars['String']['input'];
+  workspaceId: Scalars['String']['input'];
+};
+
+export type RailwayDomainEmailForwardingRuleUpdateInput = {
+  alias: Scalars['String']['input'];
+  destination: Scalars['String']['input'];
+  domain: Scalars['String']['input'];
+  workspaceId: Scalars['String']['input'];
+};
+
+/** What removing forwarding took out of the zone. */
+export type RailwayDomainEmailForwardingTeardown = {
+  __typename?: 'RailwayDomainEmailForwardingTeardown';
+  addressesRemoved: Scalars['Int']['output'];
+  mailRecordsRemoved: Scalars['Int']['output'];
 };
 
 export type RailwayDomainNameservers = {
@@ -6510,6 +7048,24 @@ export type ResetPluginInput = {
   environmentId: Scalars['String']['input'];
 };
 
+/** The repo config file as of the most recent deployment that read it. */
+export type ResolvedFileConfig = {
+  __typename?: 'ResolvedFileConfig';
+  /** Commit the config was read from. */
+  commitHash?: Maybe<Scalars['String']['output']>;
+  /** Path of the config file that was read, or null when the repo has none. */
+  configFile?: Maybe<Scalars['String']['output']>;
+  /** Deployment this config was read from. */
+  deploymentId: Scalars['String']['output'];
+  /** Manifest parsed from the config file. Empty means the repo has no config file. */
+  fileManifest: Scalars['JSON']['output'];
+  /** Manifest property path to its location within the config file. */
+  propertyFileMapping: Scalars['JSON']['output'];
+  repo?: Maybe<Scalars['String']['output']>;
+  /** When that deployment was created. Surface this when it is older than the latest deployment, so a stale config is not presented as current. */
+  resolvedAt: Scalars['DateTime']['output'];
+};
+
 export type ResourceAccess = {
   __typename?: 'ResourceAccess';
   deployment: AccessRule;
@@ -6532,8 +7088,11 @@ export type SshSignupInfo = {
 export type Sandbox = {
   __typename?: 'Sandbox';
   createdAt: Scalars['DateTime']['output'];
+  /** Railway-provided public HTTP domains whose routes have been published. */
+  domains: Array<SandboxDomain>;
   environmentId: Scalars['String']['output'];
   id: Scalars['ID']['output'];
+  /** Minutes of inactivity before the sandbox is destroyed. 0 means it never idles out; null means unknown, including for a destroyed sandbox. */
   idleTimeoutMinutes?: Maybe<Scalars['Int']['output']>;
   networkIsolation: SandboxNetworkIsolation;
   region: Scalars['String']['output'];
@@ -6552,9 +7111,12 @@ export type SandboxCheckpoint = {
 
 export type SandboxCreateInput = {
   environmentId: Scalars['String']['input'];
+  /** Minutes of inactivity before the sandbox is destroyed. Any value <= 0 means never idle out (plan-gated). Defaults to the plan's default idle timeout. */
   idleTimeoutMinutes?: InputMaybe<Scalars['Int']['input']>;
-  /** Network access for the sandbox. Defaults to ISOLATED (no private network access). */
+  /** Network access for the sandbox. Defaults to ISOLATED (no private network access). Public domains require PRIVATE to be selected explicitly. */
   networkIsolation?: InputMaybe<SandboxNetworkIsolation>;
+  /** Railway-provided HTTP domains to publish, one per unique prefix and port. Supports up to 10 and requires explicitly selecting PRIVATE networking. Domain prefixes are generated when omitted. */
+  publicDomains?: InputMaybe<Array<SandboxDomainInput>>;
   /** Region to place the sandbox in (e.g. us-west2, us-east4-eqdc4a). Defaults to the platform default region when omitted. */
   region?: InputMaybe<Scalars['String']['input']>;
   /** Fork an existing running sandbox in this environment. Mutually exclusive with template. */
@@ -6562,6 +7124,24 @@ export type SandboxCreateInput = {
   template?: InputMaybe<SandboxTemplateInput>;
   /** Environment variables baked into the sandbox, available to every command. Values may contain Railway variable references (e.g. ${{shared.FOO}}, ${{ServiceName.BAR}}), resolved at create time. */
   variables?: InputMaybe<Scalars['EnvironmentVariables']['input']>;
+};
+
+/** One public domain on a sandbox. */
+export type SandboxDomain = {
+  __typename?: 'SandboxDomain';
+  /** Resolved FQDN. */
+  domain: Scalars['String']['output'];
+  /** Target port on the sandbox this domain routes to. */
+  port: Scalars['Int']['output'];
+  /** Label prefix requested when the sandbox was created. */
+  prefix: Scalars['String']['output'];
+};
+
+export type SandboxDomainInput = {
+  /** Target port on the sandbox, from 1 through 65535. */
+  port: Scalars['Int']['input'];
+  /** Optional DNS label prefix for the generated domain. When omitted, a prefix is generated from the project name. Custom prefixes must be lowercase alphanumeric with optional interior hyphens, up to 46 characters. */
+  prefix?: InputMaybe<Scalars['String']['input']>;
 };
 
 export type SandboxExecResult = {
@@ -6635,7 +7215,6 @@ export type SandboxTemplateBuildStatus =
   | 'READY';
 
 export type SandboxTemplateInput = {
-  baseImageDigest?: InputMaybe<Scalars['String']['input']>;
   /** Build a template by running these shell instructions on the base image. Mutually exclusive with name. */
   instructions?: InputMaybe<Array<Scalars['String']['input']>>;
   /** Boot from a saved checkpoint with this name (one captured from a sandbox). Mutually exclusive with instructions. */
@@ -6802,6 +7381,8 @@ export type ServiceInstance = Node & {
   drainingSeconds?: Maybe<Scalars['Int']['output']>;
   edgeConfig?: Maybe<EdgeConfig>;
   environmentId: Scalars['String']['output'];
+  /** Whether any deployment was ever created for this service instance, including deployments that have since been removed. Distinguishes a service that was torn down (all deployments removed) from one that has never deployed — latestDeployment and activeDeployments are null/empty for both. */
+  hasEverDeployed: Scalars['Boolean']['output'];
   healthcheckPath?: Maybe<Scalars['String']['output']>;
   healthcheckTimeout?: Maybe<Scalars['Int']['output']>;
   id: Scalars['ID']['output'];
@@ -6814,9 +7395,12 @@ export type ServiceInstance = Node & {
   numReplicas?: Maybe<Scalars['Int']['output']>;
   overlapSeconds?: Maybe<Scalars['Int']['output']>;
   preDeployCommand?: Maybe<Scalars['JSON']['output']>;
+  preDeployTimeoutSeconds?: Maybe<Scalars['Int']['output']>;
   railpackInfo?: Maybe<Scalars['RailpackInfo']['output']>;
   railwayConfigFile?: Maybe<Scalars['String']['output']>;
   region?: Maybe<Scalars['String']['output']>;
+  /** Config read from the repo's config file, taken from the most recent deployment that actually read it. Null when no deployment has resolved a config file yet. An empty `fileManifest` is a real answer and means the repo has no config file — do not read this off the latest deployment instead, since a deployment whose snapshot never completed carries no file config at all and is not the same as a repo without one. */
+  resolvedFileConfig?: Maybe<ResolvedFileConfig>;
   restartPolicyMaxRetries: Scalars['Int']['output'];
   restartPolicyType: RestartPolicyType;
   rootDirectory?: Maybe<Scalars['String']['output']>;
@@ -6873,6 +7457,7 @@ export type ServiceInstanceUpdateInput = {
   numReplicas?: InputMaybe<Scalars['Int']['input']>;
   overlapSeconds?: InputMaybe<Scalars['Int']['input']>;
   preDeployCommand?: InputMaybe<Array<Scalars['String']['input']>>;
+  preDeployTimeoutSeconds?: InputMaybe<Scalars['Int']['input']>;
   railwayConfigFile?: InputMaybe<Scalars['String']['input']>;
   region?: InputMaybe<Scalars['String']['input']>;
   registryCredentials?: InputMaybe<RegistryCredentialsInput>;
@@ -7793,16 +8378,13 @@ export type UserProfileResponse = {
   __typename?: 'UserProfileResponse';
   avatar?: Maybe<Scalars['String']['output']>;
   createdAt: Scalars['DateTime']['output'];
-  customerId?: Maybe<Scalars['String']['output']>;
   id: Scalars['String']['output'];
-  isTrialing?: Maybe<Scalars['Boolean']['output']>;
   name?: Maybe<Scalars['String']['output']>;
   profile: UserProfile;
   /** Gets all public projects for a user. */
   publicProjects: UserProfileResponsePublicProjectsConnection;
   /** @deprecated There are no personal templates anymore, they all belong to a workspace */
   publishedTemplates: Array<SimilarTemplate>;
-  state?: Maybe<Scalars['String']['output']>;
   totalDeploys: Scalars['Int']['output'];
   username?: Maybe<Scalars['String']['output']>;
 };
@@ -8119,6 +8701,7 @@ export type WorkflowStatus =
 
 export type Workspace = Node & {
   __typename?: 'Workspace';
+  accessGroups: WorkspaceAccessGroupsConnection;
   adoptionHistory: Array<AdoptionInfo>;
   adoptionLevel: Scalars['Float']['output'];
   /** @deprecated Deprecated regions are no longer supported. */
@@ -8152,6 +8735,7 @@ export type Workspace = Node & {
   /** Whether the current user's access is redacted due to pending 2FA requirement. Returns true if the user is a workspace member, workspace has 2FA enforcement enabled, and the current user needs to enable 2FA. */
   redactedDueTo2FAPending: Scalars['Boolean']['output'];
   referredUsers: Array<ReferralUser>;
+  restrictProjectVisibilityToGroups: Scalars['Boolean']['output'];
   slackChannelId?: Maybe<Scalars['String']['output']>;
   /** @deprecated Use plan field instead */
   subscriptionModel: SubscriptionModel;
@@ -8162,6 +8746,14 @@ export type Workspace = Node & {
   updatedAt: Scalars['DateTime']['output'];
   /** Get a list of user emails in the workspace who do not have verified 2FA enabled. Returns an empty array if all users have 2FA enabled. */
   usersWithout2FA: Array<Scalars['String']['output']>;
+};
+
+
+export type WorkspaceAccessGroupsArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
+  before?: InputMaybe<Scalars['String']['input']>;
+  first?: InputMaybe<Scalars['Int']['input']>;
+  last?: InputMaybe<Scalars['Int']['input']>;
 };
 
 
@@ -8183,6 +8775,18 @@ export type WorkspaceProjectsArgs = {
   before?: InputMaybe<Scalars['String']['input']>;
   first?: InputMaybe<Scalars['Int']['input']>;
   last?: InputMaybe<Scalars['Int']['input']>;
+};
+
+export type WorkspaceAccessGroupsConnection = {
+  __typename?: 'WorkspaceAccessGroupsConnection';
+  edges: Array<WorkspaceAccessGroupsConnectionEdge>;
+  pageInfo: PageInfo;
+};
+
+export type WorkspaceAccessGroupsConnectionEdge = {
+  __typename?: 'WorkspaceAccessGroupsConnectionEdge';
+  cursor: Scalars['String']['output'];
+  node: AccessGroup;
 };
 
 export type WorkspaceIdPConnection = {
@@ -8349,7 +8953,7 @@ export type CustomerTogglePayoutsToCreditsInput = {
   isWithdrawingToCredits: Scalars['Boolean']['input'];
 };
 
-export type RailwaySandboxFieldsFragment = { __typename?: 'Sandbox', id: string, status: SandboxStatus, networkIsolation: SandboxNetworkIsolation, environmentId: string, region: string, idleTimeoutMinutes?: number | null, createdAt: string };
+export type RailwaySandboxFieldsFragment = { __typename?: 'Sandbox', id: string, status: SandboxStatus, networkIsolation: SandboxNetworkIsolation, environmentId: string, region: string, idleTimeoutMinutes?: number | null, createdAt: string, domains: Array<{ __typename?: 'SandboxDomain', prefix: string, port: number, domain: string }> };
 
 export type RailwaySandboxQueryVariables = Exact<{
   environmentId: Scalars['String']['input'];
@@ -8357,7 +8961,7 @@ export type RailwaySandboxQueryVariables = Exact<{
 }>;
 
 
-export type RailwaySandboxQuery = { __typename?: 'Query', sandbox?: { __typename?: 'Sandbox', id: string, status: SandboxStatus, networkIsolation: SandboxNetworkIsolation, environmentId: string, region: string, idleTimeoutMinutes?: number | null, createdAt: string } | null };
+export type RailwaySandboxQuery = { __typename?: 'Query', sandbox?: { __typename?: 'Sandbox', id: string, status: SandboxStatus, networkIsolation: SandboxNetworkIsolation, environmentId: string, region: string, idleTimeoutMinutes?: number | null, createdAt: string, domains: Array<{ __typename?: 'SandboxDomain', prefix: string, port: number, domain: string }> } | null };
 
 export type RailwaySandboxesQueryVariables = Exact<{
   environmentId: Scalars['String']['input'];
@@ -8368,14 +8972,14 @@ export type RailwaySandboxesQueryVariables = Exact<{
 }>;
 
 
-export type RailwaySandboxesQuery = { __typename?: 'Query', sandboxes: { __typename?: 'QuerySandboxesConnection', edges: Array<{ __typename?: 'QuerySandboxesConnectionEdge', node: { __typename?: 'Sandbox', id: string, status: SandboxStatus, networkIsolation: SandboxNetworkIsolation, environmentId: string, region: string, idleTimeoutMinutes?: number | null, createdAt: string } }>, pageInfo: { __typename?: 'PageInfo', hasNextPage: boolean, endCursor?: string | null } } };
+export type RailwaySandboxesQuery = { __typename?: 'Query', sandboxes: { __typename?: 'QuerySandboxesConnection', edges: Array<{ __typename?: 'QuerySandboxesConnectionEdge', node: { __typename?: 'Sandbox', id: string, status: SandboxStatus, networkIsolation: SandboxNetworkIsolation, environmentId: string, region: string, idleTimeoutMinutes?: number | null, createdAt: string, domains: Array<{ __typename?: 'SandboxDomain', prefix: string, port: number, domain: string }> } }>, pageInfo: { __typename?: 'PageInfo', hasNextPage: boolean, endCursor?: string | null } } };
 
 export type RailwaySandboxCreateMutationVariables = Exact<{
   input: SandboxCreateInput;
 }>;
 
 
-export type RailwaySandboxCreateMutation = { __typename?: 'Mutation', sandboxCreate: { __typename?: 'Sandbox', id: string, status: SandboxStatus, networkIsolation: SandboxNetworkIsolation, environmentId: string, region: string, idleTimeoutMinutes?: number | null, createdAt: string } };
+export type RailwaySandboxCreateMutation = { __typename?: 'Mutation', sandboxCreate: { __typename?: 'Sandbox', id: string, status: SandboxStatus, networkIsolation: SandboxNetworkIsolation, environmentId: string, region: string, idleTimeoutMinutes?: number | null, createdAt: string, domains: Array<{ __typename?: 'SandboxDomain', prefix: string, port: number, domain: string }> } };
 
 export type RailwaySandboxDestroyMutationVariables = Exact<{
   id: Scalars['String']['input'];
@@ -8383,7 +8987,7 @@ export type RailwaySandboxDestroyMutationVariables = Exact<{
 }>;
 
 
-export type RailwaySandboxDestroyMutation = { __typename?: 'Mutation', sandboxDestroy?: { __typename?: 'Sandbox', id: string, status: SandboxStatus, networkIsolation: SandboxNetworkIsolation, environmentId: string, region: string, idleTimeoutMinutes?: number | null, createdAt: string } | null };
+export type RailwaySandboxDestroyMutation = { __typename?: 'Mutation', sandboxDestroy?: { __typename?: 'Sandbox', id: string, status: SandboxStatus, networkIsolation: SandboxNetworkIsolation, environmentId: string, region: string, idleTimeoutMinutes?: number | null, createdAt: string, domains: Array<{ __typename?: 'SandboxDomain', prefix: string, port: number, domain: string }> } | null };
 
 export type RailwaySandboxTemplateBuildFieldsFragment = { __typename?: 'SandboxTemplateBuild', id: string, status: SandboxTemplateBuildStatus, environmentId: string };
 
@@ -8445,13 +9049,13 @@ export type RailwayGenerateShellTokenMutationVariables = Exact<{
 
 export type RailwayGenerateShellTokenMutation = { __typename?: 'Mutation', generateShellToken: string };
 
-export const RailwaySandboxFieldsFragmentDoc = {"kind":"Document","definitions":[{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"Sandbox"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"networkIsolation"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}},{"kind":"Field","name":{"kind":"Name","value":"region"}},{"kind":"Field","name":{"kind":"Name","value":"idleTimeoutMinutes"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}}]}}]} as unknown as DocumentNode<RailwaySandboxFieldsFragment, unknown>;
+export const RailwaySandboxFieldsFragmentDoc = {"kind":"Document","definitions":[{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"Sandbox"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"networkIsolation"}},{"kind":"Field","name":{"kind":"Name","value":"domains"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"prefix"}},{"kind":"Field","name":{"kind":"Name","value":"port"}},{"kind":"Field","name":{"kind":"Name","value":"domain"}}]}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}},{"kind":"Field","name":{"kind":"Name","value":"region"}},{"kind":"Field","name":{"kind":"Name","value":"idleTimeoutMinutes"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}}]}}]} as unknown as DocumentNode<RailwaySandboxFieldsFragment, unknown>;
 export const RailwaySandboxTemplateBuildFieldsFragmentDoc = {"kind":"Document","definitions":[{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxTemplateBuildFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"SandboxTemplateBuild"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}}]}}]} as unknown as DocumentNode<RailwaySandboxTemplateBuildFieldsFragment, unknown>;
 export const RailwaySandboxCheckpointFieldsFragmentDoc = {"kind":"Document","definitions":[{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxCheckpointFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"SandboxCheckpoint"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"key"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}}]}}]} as unknown as DocumentNode<RailwaySandboxCheckpointFieldsFragment, unknown>;
-export const RailwaySandboxDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"RailwaySandbox"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"id"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandbox"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}},{"kind":"Argument","name":{"kind":"Name","value":"id"},"value":{"kind":"Variable","name":{"kind":"Name","value":"id"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"RailwaySandboxFields"}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"Sandbox"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"networkIsolation"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}},{"kind":"Field","name":{"kind":"Name","value":"region"}},{"kind":"Field","name":{"kind":"Name","value":"idleTimeoutMinutes"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}}]}}]} as unknown as DocumentNode<RailwaySandboxQuery, RailwaySandboxQueryVariables>;
-export const RailwaySandboxesDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"RailwaySandboxes"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"first"}},"type":{"kind":"NamedType","name":{"kind":"Name","value":"Int"}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"after"}},"type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"before"}},"type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"last"}},"type":{"kind":"NamedType","name":{"kind":"Name","value":"Int"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxes"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}},{"kind":"Argument","name":{"kind":"Name","value":"first"},"value":{"kind":"Variable","name":{"kind":"Name","value":"first"}}},{"kind":"Argument","name":{"kind":"Name","value":"after"},"value":{"kind":"Variable","name":{"kind":"Name","value":"after"}}},{"kind":"Argument","name":{"kind":"Name","value":"before"},"value":{"kind":"Variable","name":{"kind":"Name","value":"before"}}},{"kind":"Argument","name":{"kind":"Name","value":"last"},"value":{"kind":"Variable","name":{"kind":"Name","value":"last"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"edges"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"node"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"RailwaySandboxFields"}}]}}]}},{"kind":"Field","name":{"kind":"Name","value":"pageInfo"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"hasNextPage"}},{"kind":"Field","name":{"kind":"Name","value":"endCursor"}}]}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"Sandbox"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"networkIsolation"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}},{"kind":"Field","name":{"kind":"Name","value":"region"}},{"kind":"Field","name":{"kind":"Name","value":"idleTimeoutMinutes"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}}]}}]} as unknown as DocumentNode<RailwaySandboxesQuery, RailwaySandboxesQueryVariables>;
-export const RailwaySandboxCreateDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"RailwaySandboxCreate"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"SandboxCreateInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxCreate"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"RailwaySandboxFields"}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"Sandbox"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"networkIsolation"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}},{"kind":"Field","name":{"kind":"Name","value":"region"}},{"kind":"Field","name":{"kind":"Name","value":"idleTimeoutMinutes"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}}]}}]} as unknown as DocumentNode<RailwaySandboxCreateMutation, RailwaySandboxCreateMutationVariables>;
-export const RailwaySandboxDestroyDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"RailwaySandboxDestroy"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"id"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxDestroy"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"id"},"value":{"kind":"Variable","name":{"kind":"Name","value":"id"}}},{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"RailwaySandboxFields"}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"Sandbox"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"networkIsolation"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}},{"kind":"Field","name":{"kind":"Name","value":"region"}},{"kind":"Field","name":{"kind":"Name","value":"idleTimeoutMinutes"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}}]}}]} as unknown as DocumentNode<RailwaySandboxDestroyMutation, RailwaySandboxDestroyMutationVariables>;
+export const RailwaySandboxDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"RailwaySandbox"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"id"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandbox"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}},{"kind":"Argument","name":{"kind":"Name","value":"id"},"value":{"kind":"Variable","name":{"kind":"Name","value":"id"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"RailwaySandboxFields"}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"Sandbox"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"networkIsolation"}},{"kind":"Field","name":{"kind":"Name","value":"domains"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"prefix"}},{"kind":"Field","name":{"kind":"Name","value":"port"}},{"kind":"Field","name":{"kind":"Name","value":"domain"}}]}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}},{"kind":"Field","name":{"kind":"Name","value":"region"}},{"kind":"Field","name":{"kind":"Name","value":"idleTimeoutMinutes"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}}]}}]} as unknown as DocumentNode<RailwaySandboxQuery, RailwaySandboxQueryVariables>;
+export const RailwaySandboxesDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"RailwaySandboxes"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"first"}},"type":{"kind":"NamedType","name":{"kind":"Name","value":"Int"}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"after"}},"type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"before"}},"type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"last"}},"type":{"kind":"NamedType","name":{"kind":"Name","value":"Int"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxes"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}},{"kind":"Argument","name":{"kind":"Name","value":"first"},"value":{"kind":"Variable","name":{"kind":"Name","value":"first"}}},{"kind":"Argument","name":{"kind":"Name","value":"after"},"value":{"kind":"Variable","name":{"kind":"Name","value":"after"}}},{"kind":"Argument","name":{"kind":"Name","value":"before"},"value":{"kind":"Variable","name":{"kind":"Name","value":"before"}}},{"kind":"Argument","name":{"kind":"Name","value":"last"},"value":{"kind":"Variable","name":{"kind":"Name","value":"last"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"edges"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"node"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"RailwaySandboxFields"}}]}}]}},{"kind":"Field","name":{"kind":"Name","value":"pageInfo"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"hasNextPage"}},{"kind":"Field","name":{"kind":"Name","value":"endCursor"}}]}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"Sandbox"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"networkIsolation"}},{"kind":"Field","name":{"kind":"Name","value":"domains"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"prefix"}},{"kind":"Field","name":{"kind":"Name","value":"port"}},{"kind":"Field","name":{"kind":"Name","value":"domain"}}]}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}},{"kind":"Field","name":{"kind":"Name","value":"region"}},{"kind":"Field","name":{"kind":"Name","value":"idleTimeoutMinutes"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}}]}}]} as unknown as DocumentNode<RailwaySandboxesQuery, RailwaySandboxesQueryVariables>;
+export const RailwaySandboxCreateDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"RailwaySandboxCreate"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"SandboxCreateInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxCreate"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"RailwaySandboxFields"}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"Sandbox"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"networkIsolation"}},{"kind":"Field","name":{"kind":"Name","value":"domains"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"prefix"}},{"kind":"Field","name":{"kind":"Name","value":"port"}},{"kind":"Field","name":{"kind":"Name","value":"domain"}}]}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}},{"kind":"Field","name":{"kind":"Name","value":"region"}},{"kind":"Field","name":{"kind":"Name","value":"idleTimeoutMinutes"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}}]}}]} as unknown as DocumentNode<RailwaySandboxCreateMutation, RailwaySandboxCreateMutationVariables>;
+export const RailwaySandboxDestroyDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"RailwaySandboxDestroy"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"id"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxDestroy"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"id"},"value":{"kind":"Variable","name":{"kind":"Name","value":"id"}}},{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"RailwaySandboxFields"}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"Sandbox"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"networkIsolation"}},{"kind":"Field","name":{"kind":"Name","value":"domains"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"prefix"}},{"kind":"Field","name":{"kind":"Name","value":"port"}},{"kind":"Field","name":{"kind":"Name","value":"domain"}}]}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}},{"kind":"Field","name":{"kind":"Name","value":"region"}},{"kind":"Field","name":{"kind":"Name","value":"idleTimeoutMinutes"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}}]}}]} as unknown as DocumentNode<RailwaySandboxDestroyMutation, RailwaySandboxDestroyMutationVariables>;
 export const RailwaySandboxTemplateBuildDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"RailwaySandboxTemplateBuild"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"SandboxTemplateInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxTemplateBuild"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}},{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"RailwaySandboxTemplateBuildFields"}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxTemplateBuildFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"SandboxTemplateBuild"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}}]}}]} as unknown as DocumentNode<RailwaySandboxTemplateBuildMutation, RailwaySandboxTemplateBuildMutationVariables>;
 export const RailwaySandboxTemplateBuildStatusDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"RailwaySandboxTemplateBuildStatus"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"id"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"ID"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxTemplateBuild"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}},{"kind":"Argument","name":{"kind":"Name","value":"id"},"value":{"kind":"Variable","name":{"kind":"Name","value":"id"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"RailwaySandboxTemplateBuildFields"}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxTemplateBuildFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"SandboxTemplateBuild"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}}]}}]} as unknown as DocumentNode<RailwaySandboxTemplateBuildStatusQuery, RailwaySandboxTemplateBuildStatusQueryVariables>;
 export const RailwaySandboxCheckpointsDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"RailwaySandboxCheckpoints"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxCheckpoints"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"RailwaySandboxCheckpointFields"}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxCheckpointFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"SandboxCheckpoint"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"key"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}}]}}]} as unknown as DocumentNode<RailwaySandboxCheckpointsQuery, RailwaySandboxCheckpointsQueryVariables>;

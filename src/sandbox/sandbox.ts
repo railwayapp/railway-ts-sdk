@@ -21,6 +21,7 @@ import type {
   ForkOptions,
   ListOptions,
   SandboxCheckpointInfo,
+  SandboxDomain,
   SandboxInfo,
   SandboxNetworkIsolation,
   SandboxStatus,
@@ -54,6 +55,11 @@ export class Sandbox implements AsyncDisposable {
   /** Network access mode: `ISOLATED` (NAT egress only) or `PRIVATE` (joins the environment private network). */
   get networkIsolation(): SandboxNetworkIsolation {
     return this.#info.networkIsolation;
+  }
+
+  /** Railway-provided HTTP domains published for this sandbox. Empty when none were requested. */
+  get domains(): SandboxDomain[] {
+    return this.#info.domains;
   }
 
   get environmentId(): string {

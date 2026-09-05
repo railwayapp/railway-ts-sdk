@@ -209,6 +209,18 @@ describe("verbose logging", () => {
     );
   });
 
+  it("includes requested domains in verbose create progress", async () => {
+    await createSandbox({
+      networkIsolation: "PRIVATE",
+      domains: [{ port: 8080 }, { prefix: "api", port: 3000 }],
+      verbose: true,
+    });
+
+    expect(logged()).toContainEqual(
+      expect.stringContaining("domains=[8080,api:3000]"),
+    );
+  });
+
   it("is enabled by RAILWAY_VERBOSE=1", async () => {
     vi.stubEnv("RAILWAY_VERBOSE", "1");
 

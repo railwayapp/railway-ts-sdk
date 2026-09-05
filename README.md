@@ -218,7 +218,32 @@ sandbox.networkIsolation; // "ISOLATED" | "PRIVATE"
 ```
 
 `networkIsolation` is settable on `create`, `create(template)`, and `fork`, and is read
-back on every sandbox. It defaults to `ISOLATED` when omitted.
+back on every sandbox. It defaults to `ISOLATED` when omitted. Public domains require
+`PRIVATE`; see [Domains](#domains).
+
+## Domains
+
+Publish Railway-provided HTTP domains on a sandbox by passing `domains` at create time.
+Each entry needs a target `port`; `prefix` is optional and is generated from the project
+name when omitted. Public domains require `networkIsolation: "PRIVATE"`.
+
+```ts
+const sandbox = await Sandbox.create({
+  networkIsolation: "PRIVATE",
+  domains: [{ port: 8080 }, { prefix: "api", port: 3000 }],
+});
+
+sandbox.domains;
+// [
+//   { prefix: "my-project", port: 8080, domain: "my-project-xxx.up.railway.app" },
+//   { prefix: "api", port: 3000, domain: "api-xxx.up.railway.app" },
+// ]
+```
+
+`domains` is settable on `create`, `create(template)`, and `fork`. Forks do not inherit
+the source sandbox's domains; pass them again if the fork should be reachable. There is
+no API to add or remove domains after create. `connect` and `refresh` read back whatever
+routes are already published.
 
 ## Reconnecting and listing
 
