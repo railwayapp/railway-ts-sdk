@@ -24,12 +24,25 @@ const decoder = () => new TextDecoder();
  */
 const REATTACH_PLACEHOLDER_COMMAND = ":";
 
+/**
+ * Interactive stdin for a running exec, enabled with `ExecOptions.stdin: true`.
+ * Writes go to the command's process over the exec WebSocket; `end()` delivers
+ * EOF (commands like `cat` only exit after it).
+ */
+export interface ExecStdin {
+  /** Write to the command's stdin. Strings are UTF-8 encoded. */
+  write(data: string | Uint8Array): Promise<void>;
+  /** Half-close stdin (EOF) so commands that read stdin can finish. */
+  end(): Promise<void>;
+}
+
 /** Module-internal access to ExecHandle's private constructor. */
 let constructHandle: (args: {
   sessionName: Promise<string>;
   result: Promise<ExecResult>;
   kill: (signal: ExecSignal) => Promise<boolean>;
   detach: () => Promise<string>;
+  stdin: ExecStdin;
 }) => ExecHandle;
 
 /**
@@ -39,6 +52,11 @@ let constructHandle: (args: {
 export class ExecHandle implements Promise<ExecResult> {
   /** Durable session name for this exec; reattach via `exec({ sessionName })`. */
   readonly sessionName: Promise<string>;
+  /**
+   * Interactive stdin. Only live when the exec was started with
+   * `stdin: true`; otherwise `write()` rejects (stdin was EOF'd at start).
+   */
+  readonly stdin: ExecStdin;
   readonly [Symbol.toStringTag] = "ExecHandle";
   readonly #result: Promise<ExecResult>;
   readonly #kill: (signal: ExecSignal) => Promise<boolean>;
@@ -50,8 +68,10 @@ export class ExecHandle implements Promise<ExecResult> {
     result: Promise<ExecResult>;
     kill: (signal: ExecSignal) => Promise<boolean>;
     detach: () => Promise<string>;
+    stdin: ExecStdin;
   }) {
     this.sessionName = args.sessionName;
+    this.stdin = args.stdin;
     this.#result = args.result;
     this.#kill = args.kill;
     this.#detach = args.detach;
@@ -129,9 +149,13 @@ export interface ExecContext {
 
 interface ExecControl {
   connection?: ExecWsConnection;
+  /** Invoked once the socket is live; lets queued stdin writes proceed. */
+  onConnection?: (connection: ExecWsConnection) => void;
   pendingSignal?: ExecSignal;
   detached: boolean;
 }
+
+const stdinEncoder = new TextEncoder();
 
 /**
  * Runs an exec over the tcp-proxy `/ws/exec` bridge: a non-PTY session with
@@ -169,6 +193,40 @@ export function startExec(
 
   const control: ExecControl = { detached: false };
 
+  // stdin writes can land before the socket exists (token mint + connect are
+  // async); they wait on the live connection rather than being dropped.
+  let rejectConnection!: (reason: unknown) => void;
+  const connectionReady = new Promise<ExecWsConnection>((resolve, reject) => {
+    rejectConnection = reject;
+    control.onConnection = resolve;
+  });
+  // A handle held only for its result must not surface unhandled rejections.
+  connectionReady.catch(() => {});
+
+  const stdin: ExecStdin =
+    options.stdin === true
+      ? {
+          write: async data => {
+            const connection = await connectionReady;
+            connection.writeStdin(
+              typeof data === "string" ? stdinEncoder.encode(data) : data,
+            );
+          },
+          end: async () => {
+            const connection = await connectionReady;
+            connection.closeStdin();
+          },
+        }
+      : {
+          write: () =>
+            Promise.reject(
+              new RailwayError(
+                "stdin was EOF'd at exec start; pass `stdin: true` in ExecOptions to keep it open.",
+              ),
+            ),
+          end: () => Promise.resolve(),
+        };
+
   const kill = async (signal: ExecSignal): Promise<boolean> => {
     if (!control.connection) {
       control.pendingSignal = signal; // delivered once the socket exists
@@ -197,10 +255,11 @@ export function startExec(
     control,
   ).catch(error => {
     rejectSessionName(error);
+    rejectConnection(error);
     throw error;
   });
 
-  return constructHandle({ sessionName, result, kill, detach });
+  return constructHandle({ sessionName, result, kill, detach, stdin });
 }
 
 async function runExec(
@@ -336,6 +395,7 @@ async function runExec(
     },
   });
   control.connection = connection;
+  control.onConnection?.(connection);
 
   // A detach()/kill() that landed during token mint / connect has no socket
   // yet; honor it now that one exists.
@@ -345,8 +405,10 @@ async function runExec(
   }
   if (control.pendingSignal) connection.signal(control.pendingSignal);
 
-  // The SDK provides no stdin; EOF it so commands reading stdin can finish.
-  connection.closeStdin();
+  if (options.stdin !== true) {
+    // No interactive stdin requested; EOF it so commands reading stdin finish.
+    connection.closeStdin();
+  }
 
   if (options.timeoutSec !== undefined) {
     timer = setTimeout(() => {
