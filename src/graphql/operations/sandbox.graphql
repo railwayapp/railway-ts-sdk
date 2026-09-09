@@ -2,6 +2,11 @@ fragment RailwaySandboxFields on Sandbox {
   id
   status
   networkIsolation
+  domains {
+    prefix
+    port
+    domain
+  }
   environmentId
   region
   idleTimeoutMinutes

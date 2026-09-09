@@ -77,6 +77,7 @@ describe("Sandbox.create", () => {
     expect(sandbox.region).toBe("us-west2");
     expect(sandbox.idleTimeoutMinutes).toBe(5);
     expect(sandbox.networkIsolation).toBe("ISOLATED");
+    expect(sandbox.domains).toEqual([]);
     expect(sandbox.createdAt).toBe("2026-05-13T00:00:00.000Z");
     expect(sandbox.toJSON()).toEqual(sandboxInfo());
     expect(mock.calls[0]?.body.query).toContain("mutation RailwaySandboxCreate");
@@ -99,6 +100,39 @@ describe("Sandbox.create", () => {
     expect(sandbox.networkIsolation).toBe("PRIVATE");
     expect(mock.calls[0]?.body.variables).toEqual({
       input: { environmentId: "environment_123", networkIsolation: "PRIVATE" },
+    });
+  });
+
+  it("passes domains into the create input as publicDomains and reads them back", async () => {
+    const domains = [
+      { prefix: "web", port: 8080, domain: "web-xxx.up.railway.app" },
+      { prefix: "api", port: 3000, domain: "api-xxx.up.railway.app" },
+    ];
+    const mock = createFetchMock([
+      {
+        data: {
+          sandboxCreate: sandboxInfo({
+            networkIsolation: "PRIVATE",
+            domains,
+          }),
+        },
+      },
+    ]);
+
+    const sandbox = await Sandbox.create({
+      ...auth,
+      networkIsolation: "PRIVATE",
+      domains: [{ port: 8080 }, { prefix: "api", port: 3000 }],
+      fetch: mock.fetch,
+    });
+
+    expect(sandbox.domains).toEqual(domains);
+    expect(mock.calls[0]?.body.variables).toEqual({
+      input: {
+        environmentId: "environment_123",
+        networkIsolation: "PRIVATE",
+        publicDomains: [{ port: 8080 }, { prefix: "api", port: 3000 }],
+      },
     });
   });
 
@@ -735,6 +769,23 @@ describe("sandbox.fork", () => {
         environmentId: "environment_123",
         sourceSandboxId: "sandbox_123",
         networkIsolation: "PRIVATE",
+      },
+    });
+  });
+
+  it("passes domains into the fork input as publicDomains", async () => {
+    const { sandbox, calls } = await createThenQueue(forkResponse);
+    await sandbox.fork({
+      networkIsolation: "PRIVATE",
+      domains: [{ port: 8080 }, { prefix: "api", port: 3000 }],
+    });
+
+    expect(calls[1]?.body.variables).toEqual({
+      input: {
+        environmentId: "environment_123",
+        sourceSandboxId: "sandbox_123",
+        networkIsolation: "PRIVATE",
+        publicDomains: [{ port: 8080 }, { prefix: "api", port: 3000 }],
       },
     });
   });

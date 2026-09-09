@@ -83,6 +83,7 @@ export {
   type ForkOptions,
   type ListOptions,
   type SandboxCheckpointInfo,
+  type SandboxDomain,
   type SandboxFileEntry,
   type SandboxInfo,
   type SandboxNetworkIsolation,

@@ -27,6 +27,7 @@ export type {
   ForkOptions,
   ListOptions,
   SandboxCheckpointInfo,
+  SandboxDomain,
   SandboxFileEntry,
   SandboxInfo,
   SandboxNetworkIsolation,

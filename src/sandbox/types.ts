@@ -8,6 +8,7 @@ import type {
 export type SandboxStatus = RailwaySandboxFieldsFragment["status"];
 export type SandboxNetworkIsolation =
   RailwaySandboxFieldsFragment["networkIsolation"];
+export type SandboxDomain = RailwaySandboxFieldsFragment["domains"][number];
 export type SandboxInfo = RailwaySandboxFieldsFragment;
 
 /** Final outcome of an exec; identical shape for short and long-running commands. */
@@ -49,6 +50,11 @@ export type TemplateSource = CompiledTemplate | NamedTemplateRef;
 export interface SandboxCreationOptions {
   idleTimeoutMinutes?: number;
   networkIsolation?: SandboxNetworkIsolation;
+  /**
+   * Railway-provided HTTP domains to publish. Requires `networkIsolation: "PRIVATE"`.
+   * Prefix is generated from the project name when omitted.
+   */
+  domains?: Array<{ port: number; prefix?: string }>;
   /** Region where the sandbox should run. Uses the platform default when omitted. */
   region?: string;
   /** Runtime env baked into the sandbox, available to every command. Values may use Railway references (e.g. `${{shared.FOO}}`). */

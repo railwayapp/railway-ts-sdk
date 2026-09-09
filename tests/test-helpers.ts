@@ -54,6 +54,7 @@ export function sandboxInfo(overrides: Partial<SandboxInfo> = {}): SandboxInfo {
     id: "sandbox_123",
     status: "RUNNING",
     networkIsolation: "ISOLATED",
+    domains: [],
     environmentId: "environment_123",
     region: "us-west2",
     idleTimeoutMinutes: 5,
