@@ -47,11 +47,12 @@ describe.runIf(live)("fork + checkpoint e2e (live)", () => {
 
       await source.exec("echo mutated > /tmp/state.txt");
       const first = track(await Sandbox.create(name));
-      expect((await first.exec("cat /tmp/state.txt")).stdout).toBe("original\n");
+      // Check disk bytes directly; exec output can arrive with CRLF line endings.
+      expect(await first.files.read("/tmp/state.txt")).toBe("original\n");
 
       await first.exec("echo clobbered > /tmp/state.txt");
       const second = track(await Sandbox.create(name));
-      expect((await second.exec("cat /tmp/state.txt")).stdout).toBe("original\n");
+      expect(await second.files.read("/tmp/state.txt")).toBe("original\n");
 
       const updated = await Sandbox.renameCheckpoint(checkpoint.id, renamed);
       checkpointId = updated.id;

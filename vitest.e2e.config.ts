@@ -7,6 +7,7 @@ const filePriority = [
   "sandbox-lifecycle.e2e.test.ts",
   "sandbox-files.e2e.test.ts",
   "sandbox-exec.e2e.test.ts",
+  "sandbox-domains.e2e.test.ts",
   "sandbox-template.e2e.test.ts",
   "iac.e2e.test.ts",
 ];
