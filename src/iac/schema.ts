@@ -37,7 +37,8 @@ export type ServiceConfig = {
 
 /**
  * Tracing for the service in this environment. Railway serialises only the
- * switches that are on, so an omitted key, `false` and `null` all mean off.
+ * switches that are on, so an omitted key, `false` and `null` all mean off
+ * and none of them plans as drift.
  */
 export type ServiceTracing = {
   /** Trace requests to the service: the edge records a span per client-facing request and the next deploy provides the OpenTelemetry exporter variables. */
