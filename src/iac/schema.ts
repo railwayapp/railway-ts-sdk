@@ -32,6 +32,18 @@ export type ServiceConfig = {
     badge?: string | null;
     badgeVariant?: "primary" | "secondary" | "muted" | null;
   } | null;
+  tracing?: ServiceTracing | null;
+};
+
+/**
+ * Tracing for the service in this environment. Railway serialises only the
+ * switches that are on, so an omitted key, `false` and `null` all mean off.
+ */
+export type ServiceTracing = {
+  /** Trace requests to the service: the edge records a span per client-facing request and the next deploy provides the OpenTelemetry exporter variables. */
+  enabled?: boolean | null;
+  /** Instrument the service's processes with eBPF (OBI) for supported runtimes, no code changes. Only takes effect while `enabled` is true. */
+  autoInstrumentation?: boolean | null;
 };
 
 export type ServiceSource = {

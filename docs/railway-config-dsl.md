@@ -244,6 +244,8 @@ interface ServiceConfigInput {
   clusterRole?: ServiceConfig["clusterRole"];
   replicaConfig?: ServiceConfig["replicaConfig"];
   clusterDisplay?: ServiceConfig["clusterDisplay"];
+
+  tracing?: ServiceConfig["tracing"];
 }
 ```
 
@@ -338,6 +340,26 @@ service("tcp", {
   tcpProxies: ["5432"],
 });
 ```
+
+### Tracing
+
+Tracing is set per service and per environment.
+
+```ts
+service("web", {
+  tracing: { enabled: true, autoInstrumentation: true },
+});
+```
+
+`enabled` has the edge record a span per client-facing request and provides
+the OpenTelemetry exporter variables on the next deploy. `autoInstrumentation`
+instruments the service's processes with eBPF (OBI) for supported runtimes and
+only takes effect while `enabled` is true. Railway serialises only the switches
+that are on, so leaving the block out, `{ enabled: false }` and `null` all mean
+the same thing: no tracing, and no drift in `railway config plan`.
+
+Requires Railway CLI 5.63.0 or newer. Older CLIs drop the block when compiling
+the config.
 
 ### Environment variables
 
