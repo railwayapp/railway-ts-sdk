@@ -6,6 +6,7 @@ import {
   createRailwayContext,
   defineRailway,
   empty,
+  fn,
   github,
   group,
   image,
@@ -166,6 +167,18 @@ describe("Railway IaC authoring", () => {
       name: "uploads",
       config: { region: "sjc" },
     });
+  });
+
+  it("carries the tracing block through to the service node", () => {
+    // The CLI compiles `tracing` into `services[id].tracing` and treats a
+    // false or null switch as absent, so the SDK passes it through verbatim.
+    expect(service("web", { tracing: { enabled: true, autoInstrumentation: true } }).tracing).toEqual({
+      enabled: true,
+      autoInstrumentation: true,
+    });
+    expect(service("web", { tracing: { enabled: false } }).tracing).toEqual({ enabled: false });
+    expect(fn("worker", { tracing: { enabled: true } }).tracing).toEqual({ enabled: true });
+    expect("tracing" in service("web")).toBe(false);
   });
 
   it("stamps grouped resources with the group id", () => {

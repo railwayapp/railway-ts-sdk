@@ -102,6 +102,7 @@ export interface IntentServiceConfig {
   clusterRole?: ServiceConfig["clusterRole"];
   replicaConfig?: ServiceConfig["replicaConfig"];
   clusterDisplay?: ServiceConfig["clusterDisplay"];
+  tracing?: ServiceConfig["tracing"];
 }
 
 export type ServiceConfigInput = IntentServiceConfig;
@@ -181,6 +182,7 @@ export function service<const Env extends Record<string, string | VariableConfig
     ...(config.clusterRole ? { clusterRole: config.clusterRole } : {}),
     ...(config.replicaConfig ? { replicaConfig: config.replicaConfig } : {}),
     ...(config.clusterDisplay ? { clusterDisplay: config.clusterDisplay } : {}),
+    ...(config.tracing ? { tracing: config.tracing } : {}),
   }) as ServiceNode;
   return withVariableRefs(node) as ReferencableServiceNode<RailwayProvidedVariable | Extract<keyof Env, string>>;
 }
