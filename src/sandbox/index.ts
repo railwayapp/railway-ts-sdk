@@ -8,7 +8,7 @@ export {
   SandboxTemplateBuildError,
   SandboxTimeoutError,
 } from "./errors.js";
-export { ExecHandle } from "./exec.js";
+export { ExecHandle, type ExecStdin } from "./exec.js";
 export { SandboxFiles } from "./files.js";
 export type { SandboxTemplate } from "./template.js";
 export type {

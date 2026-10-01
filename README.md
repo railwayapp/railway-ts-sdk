@@ -109,6 +109,28 @@ const result = await sandbox.exec({ sessionName }, {
 See `examples/sandboxes/exec.ts` for detaching and reattaching by `sessionName`
 from a fresh `Sandbox.connect(id)`.
 
+By default stdin is EOF'd at start so commands that read it can finish. Pass
+`stdin: true` to keep it open and talk to the running command through
+`handle.stdin` — the duplex channel interactive processes (agent CLIs speaking
+JSON over stdio, REPLs) need. Many commands only exit after EOF, so finish with
+`stdin.end()`:
+
+```ts
+const handle = sandbox.exec("claude -p --input-format stream-json --output-format stream-json", {
+  stdin: true,
+  onStdout: chunk => process.stdout.write(chunk),
+});
+
+await handle.stdin.write(JSON.stringify(userMessage) + "\n");
+// … read the reply, then send follow-up turns down the same stdin …
+await handle.stdin.end(); // EOF — the command can now exit
+const result = await handle;
+```
+
+`stdin: true` also works on reattach: writes reach the still-running process.
+See `examples/sandboxes/stdin.ts` for a round-trip and a multi-turn
+request/response session.
+
 If the WebSocket cannot be established, `exec` rejects with
 `RailwayConnectionError`. In non-Node runtimes without a global `WebSocket`,
 pass an implementation via the `webSocketImpl` config option.

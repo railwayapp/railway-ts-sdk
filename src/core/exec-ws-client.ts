@@ -11,6 +11,7 @@ import type { RailwayWsSocket } from "./ws-socket.js";
  * by a leading byte; init, stdin-EOF, and exit are JSON text frames.
  */
 const STDOUT_FRAME = 0x01;
+const STDIN_FRAME = 0x02;
 const STDERR_FRAME = 0x03;
 
 /** Subprotocol the tcp-proxy bridges expect alongside the JWT. */
@@ -32,6 +33,8 @@ export interface ExecWsHandlers {
 }
 
 export interface ExecWsConnection {
+  /** Write bytes to the command's stdin (a tagged binary frame). */
+  writeStdin(bytes: Uint8Array): void;
   /** Half-close stdin (EOF) so commands that read stdin can finish. */
   closeStdin(): void;
   /** Deliver a signal to the command's process group (e.g. "TERM", "KILL"). */
@@ -64,6 +67,7 @@ export function connectExecWs(args: {
 
   return new Promise<ExecWsConnection>((resolve, reject) => {
     let opened = false;
+    let closed = false;
     const socket = new WS(config.tcpProxyWsEndpoint, [
       SHELL_SUBPROTOCOL,
       jwt,
@@ -85,10 +89,26 @@ export function connectExecWs(args: {
       if (resumeFromLastRead) data.resume_from_last_read = true;
       socket.send(JSON.stringify({ type: "init_exec", data }));
       resolve({
+        writeStdin: bytes => {
+          // Sends on a closed socket are silently dropped by some WebSocket
+          // impls; losing stdin bytes is a correctness bug, so fail loudly.
+          if (closed) {
+            throw new RailwayConnectionError({
+              message: "stdin write after the exec socket closed.",
+            });
+          }
+          const framed = new Uint8Array(1 + bytes.byteLength);
+          framed[0] = STDIN_FRAME;
+          framed.set(bytes, 1);
+          socket.send(framed);
+        },
         closeStdin: () => socket.send(JSON.stringify({ type: "stdin_close" })),
         signal: name =>
           socket.send(JSON.stringify({ type: "signal", data: { signal: name } })),
-        close: () => socket.close(1000, ""),
+        close: () => {
+          closed = true;
+          socket.close(1000, "");
+        },
       });
     };
 
@@ -99,6 +119,7 @@ export function connectExecWs(args: {
     };
 
     socket.onclose = event => {
+      closed = true;
       if (!opened) {
         reject(
           new RailwayConnectionError({
