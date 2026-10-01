@@ -273,6 +273,17 @@ Expands to Railway deploy/build config:
 }
 ```
 
+### Pre-deploy timeout
+
+`preDeployTimeoutSeconds` (1–3600) has no shorthand; set it under `deploy`. Unset means no limit.
+
+```ts
+service("api", {
+  preDeploy: "npx prisma migrate deploy",
+  deploy: { preDeployTimeoutSeconds: 600 },
+});
+```
+
 ### Replicas
 
 Prefer `replicas` for scaling intent.

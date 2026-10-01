@@ -99,6 +99,7 @@ export type BuildConfig = {
 export type DeployConfig = {
   startCommand?: string | null;
   preDeployCommand?: string[] | null;
+  preDeployTimeoutSeconds?: number | null;
   numReplicas?: number | null;
   healthcheckPath?: string | null;
   healthcheckTimeout?: number | null;
