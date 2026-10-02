@@ -17,7 +17,7 @@ export interface ExecResult {
   exitCode: number | null;
   stdout: string;
   stderr: string;
-  /** True when the server cut the output; the streams may be incomplete. */
+  /** True when captured stdout or stderr exceeded maxOutputBytes. Callbacks still receive all output. */
   truncated: boolean;
   /** True when the client-side `timeoutSec` deadline killed the command. */
   timedOut: boolean;
@@ -89,12 +89,34 @@ export type ExecTarget = string | ExecReattachTarget;
 /** Signal names accepted by `ExecHandle.kill()` (sent to the process group). */
 export type ExecSignal = "HUP" | "INT" | "QUIT" | "KILL" | "TERM";
 
+/** Host-to-command stdin. Await writes for backpressure; end sends EOF. */
+export interface ExecStdin {
+  write(data: string | Uint8Array): Promise<void>;
+  end(): Promise<void>;
+}
+
 export interface ExecOptions {
   /**
    * Kill the command after this many seconds and resolve with
-   * `timedOut: true`. Enforced client-side by closing the exec session.
+   * `timedOut: true` after the remote exit. Sends TERM, escalating to KILL
+   * after 5 seconds. Rejects if termination cannot be confirmed within 10
+   * seconds. The deadline starts when the exec connection opens.
    */
   timeoutSec?: number;
+  /** Abort setup or terminate and reject with the signal's reason. Unconfirmed termination rejects with a connection error. */
+  signal?: AbortSignal;
+  /** Keep stdin open for handle.stdin.write/end. Defaults to false (immediate EOF). */
+  stdin?: boolean;
+  /**
+   * Skip durable session creation. Cannot be reattached or detached. Fresh execs only.
+   * Requires negotiated runtime exec-control support, including signal delivery
+   * and process-group cleanup when the attachment disconnects.
+   */
+  ephemeral?: boolean;
+  /** Capture output in the result (default true). Set false for callback-only streaming. */
+  captureOutput?: boolean;
+  /** Maximum captured UTF-8 bytes per stream (default 8 MiB). Callbacks are not capped. */
+  maxOutputBytes?: number;
   /**
    * Working directory for the command (the sandbox default is `/`).
    * The exec fails if the directory does not exist.
@@ -107,9 +129,9 @@ export interface ExecOptions {
    * (`exec({ sessionName })`).
    */
   env?: Record<string, string>;
-  /** Receives each stdout chunk as it arrives. A throw rejects the exec. */
+  /** Receives each stdout chunk, even beyond the capture cap. A throw terminates and rejects the exec. */
   onStdout?: (chunk: string) => void;
-  /** Receives each stderr chunk as it arrives. A throw rejects the exec. */
+  /** Receives each stderr chunk, even beyond the capture cap. A throw terminates and rejects the exec. */
   onStderr?: (chunk: string) => void;
   /**
    * On reattach (`exec({ sessionName })`), set `true` to resume from the

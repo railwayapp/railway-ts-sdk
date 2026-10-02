@@ -8,6 +8,7 @@ import { requestGraphQL } from "../core/graphql-client.js";
 import {
   RailwaySandboxCreateDocument,
   RailwaySandboxDestroyDocument,
+  RailwaySandboxHeartbeatDocument,
   RailwaySandboxDocument,
   RailwaySandboxesDocument,
   RailwaySandboxCheckpointCreateDocument,
@@ -392,6 +393,18 @@ export class SandboxEngine {
       RailwaySandboxDestroyMutation,
       RailwaySandboxDestroyMutationVariables
     >(this.#config, RailwaySandboxDestroyDocument, variables);
+  }
+
+  async heartbeat(id: string): Promise<SandboxInfo> {
+    const data = await requestGraphQL(
+      this.#config,
+      RailwaySandboxHeartbeatDocument,
+      { id, environmentId: this.#config.environmentId },
+    );
+    if (!data.sandboxHeartbeat) {
+      throw new SandboxNotFoundError({ id, environmentId: this.environmentId });
+    }
+    return data.sandboxHeartbeat;
   }
 
   async get(id: string): Promise<SandboxInfo | null> {

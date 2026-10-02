@@ -17,12 +17,15 @@ export async function requestGraphQL<TResult, TVariables>(
   config: NormalizedRailwayClientConfig,
   document: TypedDocumentNode<TResult, TVariables>,
   variables: TVariables,
+  signal?: AbortSignal,
 ): Promise<TResult> {
+  signal?.throwIfAborted();
   const operation = operationName(document as DocumentNode);
   const start = Date.now();
   config.log(`→ ${operation} POST ${config.endpoint}`);
 
   const response = await config.fetch(config.endpoint, {
+    ...(signal ? { signal } : {}),
     method: "POST",
     headers: {
       Accept: "application/json",
@@ -37,6 +40,7 @@ export async function requestGraphQL<TResult, TVariables>(
   });
 
   const body = await parseGraphQLResponse<TResult>(response);
+  signal?.throwIfAborted();
   const errors = body?.errors ?? [];
   const elapsed = Date.now() - start;
 

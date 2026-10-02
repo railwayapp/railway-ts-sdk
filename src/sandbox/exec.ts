@@ -1,5 +1,5 @@
 import type { NormalizedRailwayClientConfig } from "../core/config.js";
-import { RailwayError } from "../core/errors.js";
+import { RailwayConnectionError, RailwayError } from "../core/errors.js";
 import {
   connectExecWs,
   type ExecWsConnection,
@@ -12,9 +12,17 @@ import {
   type RailwayGenerateShellTokenMutation,
   type RailwayGenerateShellTokenMutationVariables,
 } from "../generated/graphql.js";
-import type { ExecOptions, ExecResult, ExecSignal, ExecTarget } from "./types.js";
+import type {
+  ExecOptions,
+  ExecResult,
+  ExecSignal,
+  ExecStdin,
+  ExecTarget,
+} from "./types.js";
 
 const decoder = () => new TextDecoder();
+const DEFAULT_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
+const KILL_GRACE_MS = 5_000;
 
 /**
  * Reattach carries a durable session id, not a command, but the `/ws/exec`
@@ -30,6 +38,7 @@ let constructHandle: (args: {
   result: Promise<ExecResult>;
   kill: (signal: ExecSignal) => Promise<boolean>;
   detach: () => Promise<string>;
+  stdin: ExecStdin;
 }) => ExecHandle;
 
 /**
@@ -39,6 +48,8 @@ let constructHandle: (args: {
 export class ExecHandle implements Promise<ExecResult> {
   /** Durable session name for this exec; reattach via `exec({ sessionName })`. */
   readonly sessionName: Promise<string>;
+  /** Writable only when exec was started with stdin: true. */
+  readonly stdin: ExecStdin;
   readonly [Symbol.toStringTag] = "ExecHandle";
   readonly #result: Promise<ExecResult>;
   readonly #kill: (signal: ExecSignal) => Promise<boolean>;
@@ -50,8 +61,10 @@ export class ExecHandle implements Promise<ExecResult> {
     result: Promise<ExecResult>;
     kill: (signal: ExecSignal) => Promise<boolean>;
     detach: () => Promise<string>;
+    stdin: ExecStdin;
   }) {
     this.sessionName = args.sessionName;
+    this.stdin = args.stdin;
     this.#result = args.result;
     this.#kill = args.kill;
     this.#detach = args.detach;
@@ -131,6 +144,9 @@ interface ExecControl {
   connection?: ExecWsConnection;
   pendingSignal?: ExecSignal;
   detached: boolean;
+  finished: boolean;
+  terminating: boolean;
+  stdinController: AbortController;
 }
 
 /**
@@ -138,12 +154,8 @@ interface ExecControl {
  * separated stdout/stderr and a real exit code. A `shell`-scoped JWT (minted by
  * `generateShellToken`) authorizes the path.
  *
- * When durable sessions are enabled server-side, the VM-assigned id is surfaced
- * as `sessionName` and `exec({ sessionName })` reattaches to it (replaying the
- * retained output tail, then following live). `kill()`/`timeoutSec` close the
- * socket —
- * with durable on that only detaches (the process keeps running, reattachable);
- * with it off the session is torn down.
+ * Durable sessions survive disconnects. Only detach closes a live session
+ * without terminating it; timeout/abort send signals and await a remote exit.
  */
 export function startExec(
   context: ExecContext,
@@ -153,11 +165,27 @@ export function startExec(
   if (
     typeof target !== "string" &&
     (options.cwd !== undefined ||
+      options.ephemeral === true ||
       (options.env && Object.keys(options.env).length > 0))
   ) {
     throw new RailwayError(
-      "cwd/env apply only to fresh execs; a reattached session is already running.",
+      "cwd/env/ephemeral apply only to fresh execs; a reattached session is already running.",
     );
+  }
+  if (
+    options.timeoutSec !== undefined &&
+    (!Number.isFinite(options.timeoutSec) || options.timeoutSec <= 0 ||
+      options.timeoutSec * 1000 > 2_147_483_647)
+  ) {
+    throw new RangeError(
+      "timeoutSec must be positive and fit in a JavaScript timer.",
+    );
+  }
+  if (
+    options.maxOutputBytes !== undefined &&
+    (!Number.isSafeInteger(options.maxOutputBytes) || options.maxOutputBytes < 0)
+  ) {
+    throw new RangeError("maxOutputBytes must be a non-negative safe integer.");
   }
 
   let resolveSessionName!: (value: string) => void;
@@ -167,9 +195,27 @@ export function startExec(
     rejectSessionName = reject;
   });
 
-  const control: ExecControl = { detached: false };
+  const control: ExecControl = {
+    detached: false,
+    finished: false,
+    terminating: false,
+    stdinController: new AbortController(),
+  };
+  let resolveConnection!: (connection: ExecWsConnection) => void;
+  let rejectConnection!: (error: unknown) => void;
+  const ready = new Promise<ExecWsConnection>((resolve, reject) => {
+    resolveConnection = resolve;
+    rejectConnection = reject;
+  });
+  ready.catch(() => {});
+  if (options.ephemeral) {
+    rejectSessionName(
+      new RailwayError("Ephemeral execs have no durable session name."),
+    );
+  }
 
   const kill = async (signal: ExecSignal): Promise<boolean> => {
+    if (control.finished || control.detached) return false;
     if (!control.connection) {
       control.pendingSignal = signal; // delivered once the socket exists
       return true;
@@ -183,9 +229,55 @@ export function startExec(
   };
 
   const detach = async (): Promise<string> => {
+    // Prove that this command is reattachable before closing its only transport.
+    const name = await sessionName;
+    if (control.terminating) {
+      throw new RailwayError("Cannot detach an exec while it is terminating.");
+    }
     control.detached = true;
+    control.stdinController.abort(
+      new RailwayError("Exec stdin is no longer writable."),
+    );
     control.connection?.close();
-    return sessionName;
+    return name;
+  };
+
+  let stdinEnded = !options.stdin;
+  let stdinTail = Promise.resolve();
+  const assertWritable = () => {
+    if (control.finished || control.detached || control.terminating) {
+      throw new RailwayError("Exec stdin is no longer writable.");
+    }
+  };
+  const enqueueStdin = (
+    send: (connection: ExecWsConnection) => void | Promise<void>,
+  ) => {
+    stdinTail = stdinTail.then(async () => {
+      const connection = await ready;
+      assertWritable();
+      await send(connection);
+    });
+    stdinTail.catch(() => {});
+    return stdinTail;
+  };
+  const stdin: ExecStdin = {
+    async write(data) {
+      if (stdinEnded) {
+        throw new RailwayError(
+          "Exec stdin is closed; pass stdin: true to enable writes.",
+        );
+      }
+      assertWritable();
+      return enqueueStdin(connection => connection.writeStdin(
+        typeof data === "string" ? new TextEncoder().encode(data) : data,
+        control.stdinController.signal,
+      ));
+    },
+    async end() {
+      if (stdinEnded) return stdinTail;
+      stdinEnded = true;
+      return enqueueStdin(connection => connection.closeStdin());
+    },
   };
 
   const result = runExec(
@@ -195,12 +287,21 @@ export function startExec(
     resolveSessionName,
     rejectSessionName,
     control,
-  ).catch(error => {
-    rejectSessionName(error);
-    throw error;
-  });
+    resolveConnection,
+  ).then(
+    value => {
+      control.finished = true;
+      return value;
+    },
+    error => {
+      control.finished = true;
+      rejectConnection(error);
+      rejectSessionName(error);
+      throw error;
+    },
+  );
 
-  return constructHandle({ sessionName, result, kill, detach });
+  return constructHandle({ sessionName, result, kill, detach, stdin });
 }
 
 async function runExec(
@@ -210,23 +311,18 @@ async function runExec(
   onSessionName: (name: string) => void,
   onNoSessionName: (reason: unknown) => void,
   control: ExecControl,
+  onConnection: (connection: ExecWsConnection) => void,
 ): Promise<ExecResult> {
-  const reattach = typeof target !== "string";
-  const command = reattach
-    ? REATTACH_PLACEHOLDER_COMMAND
-    : loginShellCommand(target);
-  const sessionName = reattach ? target.sessionName : undefined;
+  options.signal?.throwIfAborted();
+  const init = execParameters(target, options);
 
-  // Resolve the session name once: to the resume name immediately on reattach,
-  // otherwise to the VM-assigned durable name when it arrives, falling back to a
-  // client id if durable sessions are off (no assigned name is ever sent).
-  let sessionNameResolved = false;
+  // Never fabricate a durable id when the server did not assign one.
+  let sessionNameResolved = options.ephemeral === true;
   const resolveSessionNameOnce = (name: string) => {
     if (sessionNameResolved) return;
     sessionNameResolved = true;
     onSessionName(name);
   };
-  if (reattach) resolveSessionNameOnce(sessionName!);
 
   const input: RailwayGenerateShellTokenMutationVariables["input"] = {
     environmentId: context.environmentId,
@@ -237,15 +333,21 @@ async function runExec(
   const tokenData = await requestGraphQL<
     RailwayGenerateShellTokenMutation,
     RailwayGenerateShellTokenMutationVariables
-  >(context.config, RailwayGenerateShellTokenDocument, { input });
+  >(context.config, RailwayGenerateShellTokenDocument, { input }, options.signal);
+  options.signal?.throwIfAborted();
   const jwt = tokenData.generateShellToken;
 
-  let stdout = "";
-  let stderr = "";
+  const maxBytes = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
+  const stdout = new OutputCapture(options.captureOutput !== false, maxBytes);
+  const stderr = new OutputCapture(options.captureOutput !== false, maxBytes);
   let exitCode: number | null = null;
   let timedOut = false;
   let settled = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let escalation: ReturnType<typeof setTimeout> | undefined;
+  let terminationDeadline: ReturnType<typeof setTimeout> | undefined;
+  let failure: { reason: unknown } | undefined;
+  let callbackFailed = false;
   const stdoutDecoder = decoder();
   const stderrDecoder = decoder();
 
@@ -255,10 +357,15 @@ async function runExec(
     resolveResult = resolve;
     rejectResult = reject;
   });
+  done.catch(() => {});
 
-  const settle = (outcome: ExecResult | { error: unknown }) => {
+  const settle = (outcome?: { error: unknown }) => {
     if (settled) return;
     settled = true;
+    control.finished = true;
+    control.stdinController.abort(
+      new RailwayError("Exec stdin connection is closed."),
+    );
     // Durable sessions assign a name up front; if none arrived by the time the
     // exec settles, the server can't do durable — fail `sessionName` rather than
     // hand back a fabricated id that can never reattach.
@@ -271,89 +378,192 @@ async function runExec(
       );
     }
     if (timer) clearTimeout(timer);
+    if (escalation) clearTimeout(escalation);
+    if (terminationDeadline) clearTimeout(terminationDeadline);
+    options.signal?.removeEventListener("abort", onAbort);
     try {
       control.connection?.close();
     } catch {
       // ignore
     }
-    if ("error" in outcome) rejectResult(outcome.error);
-    else resolveResult(outcome);
+    if (outcome) rejectResult(outcome.error);
+    else if (failure) rejectResult(failure.reason);
+    else resolveResult({
+      exitCode,
+      stdout: stdout.finish(),
+      stderr: stderr.finish(),
+      truncated: stdout.truncated || stderr.truncated,
+      timedOut,
+    });
+  };
+
+  const signalRemote = (signal: ExecSignal) => {
+    if (!control.connection) {
+      control.pendingSignal = signal;
+      return;
+    }
+    try {
+      control.connection.signal(signal);
+    } catch (error) {
+      settle({ error });
+    }
+  };
+
+  const terminate = (reason?: { reason: unknown }) => {
+    if (settled || control.detached) return;
+    failure ??= reason;
+    if (control.terminating || exitCode !== null) return;
+    control.terminating = true;
+    if (timer) clearTimeout(timer);
+    control.stdinController.abort(
+      new RailwayError("Exec stdin is no longer writable."),
+    );
+    // Keep the socket open: closing it merely detaches a durable process.
+    signalRemote("TERM");
+    if (settled) return;
+    escalation = setTimeout(() => signalRemote("KILL"), KILL_GRACE_MS);
+    terminationDeadline = setTimeout(() => settle({
+      error: new RailwayConnectionError({
+        message: "Exec termination was not confirmed within 10000ms; the command's outcome is unknown.",
+        cause: failure?.reason,
+      }),
+    }), KILL_GRACE_MS * 2);
+  };
+  const onAbort = () => terminate({ reason: options.signal?.reason });
+
+  const emit = (callback: ExecOptions["onStdout"], chunk: string) => {
+    if (!chunk || callbackFailed) return;
+    try {
+      callback?.(chunk);
+    } catch (reason) {
+      callbackFailed = true;
+      terminate({ reason });
+    }
   };
 
   const connection = await connectExecWs({
     config: context.config,
     jwt,
-    command,
-    ...(reattach
-      ? {}
-      : { cwd: options.cwd, env: options.env }),
-    ...(sessionName
-      ? {
-          sessionName,
-          resumeFromLastRead: options.resumeFromLastRead ?? false,
-        }
-      : {}),
+    ...init,
     handlers: {
+      onError: error => settle({
+        error: new ExecInterruptedError({
+          reason: error.message,
+          stdout: stdout.finish(),
+          stderr: stderr.finish(),
+          cause: failure?.reason ?? error,
+        }),
+      }),
+      onStdinError: error => terminate({ reason: error }),
       onDurableSession: name => resolveSessionNameOnce(name),
       onStdout: bytes => {
         if (settled) return;
-        try {
-          const chunk = stdoutDecoder.decode(bytes, { stream: true });
-          stdout += chunk;
-          options.onStdout?.(chunk);
-        } catch (error) {
-          settle({ error });
-        }
+        stdout.append(bytes);
+        emit(options.onStdout, stdoutDecoder.decode(bytes, { stream: true }));
       },
       onStderr: bytes => {
         if (settled) return;
-        try {
-          const chunk = stderrDecoder.decode(bytes, { stream: true });
-          stderr += chunk;
-          options.onStderr?.(chunk);
-        } catch (error) {
-          settle({ error });
-        }
+        stderr.append(bytes);
+        emit(options.onStderr, stderrDecoder.decode(bytes, { stream: true }));
       },
       onExit: code => {
+        if (settled) return;
         exitCode = code;
-        settle({ exitCode, stdout, stderr, truncated: false, timedOut });
+        emit(options.onStdout, stdoutDecoder.decode());
+        emit(options.onStderr, stderrDecoder.decode());
+        settle();
       },
       onClose: info => {
-        if (control.detached || timedOut) {
-          settle({ exitCode, stdout, stderr, truncated: false, timedOut });
+        if (control.detached) {
+          settle();
           return;
         }
         settle({
           error: new ExecInterruptedError({
             closeCode: info.code,
             reason: info.reason,
-            stdout,
-            stderr,
+            stdout: stdout.finish(),
+            stderr: stderr.finish(),
+            cause: failure?.reason,
           }),
         });
       },
     },
   });
   control.connection = connection;
+  onConnection(connection);
 
-  // A detach()/kill() that landed during token mint / connect has no socket
-  // yet; honor it now that one exists.
-  if (control.detached) {
+  // Handlers can settle before the connect continuation runs.
+  if (settled || control.detached) {
     connection.close();
     return done;
   }
-  if (control.pendingSignal) connection.signal(control.pendingSignal);
+  if (control.pendingSignal) signalRemote(control.pendingSignal);
+  options.signal?.addEventListener("abort", onAbort, { once: true });
+  if (options.signal?.aborted) onAbort();
 
-  // The SDK provides no stdin; EOF it so commands reading stdin can finish.
-  connection.closeStdin();
+  try {
+    if (!options.stdin) connection.closeStdin();
+  } catch (error) {
+    settle({ error });
+  }
 
-  if (options.timeoutSec !== undefined) {
+  if (!settled && !control.terminating && options.timeoutSec !== undefined) {
     timer = setTimeout(() => {
       timedOut = true;
-      connection.close();
+      terminate();
     }, options.timeoutSec * 1000);
   }
 
   return done;
+}
+
+/** Only fresh execs apply process settings; reattach uses the existing process. */
+function execParameters(target: ExecTarget, options: ExecOptions) {
+  return {
+    ...(options.signal ? { signal: options.signal } : {}),
+    ...(typeof target === "string"
+      ? {
+          command: loginShellCommand(target),
+          ...(options.ephemeral ? { ephemeral: true } : {}),
+          ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
+          ...(options.env ? { env: options.env } : {}),
+        }
+      : {
+          command: REATTACH_PLACEHOLDER_COMMAND,
+          sessionName: target.sessionName,
+          resumeFromLastRead: options.resumeFromLastRead ?? false,
+        }),
+  };
+}
+
+/** Retains a UTF-8 prefix without splitting the final character at the byte cap. */
+class OutputCapture {
+  truncated = false;
+  private text = "";
+  private bytes = 0;
+  private readonly decoder = new TextDecoder();
+  private finished = false;
+
+  constructor(
+    private readonly enabled: boolean,
+    private readonly maxBytes: number,
+  ) {}
+
+  append(bytes: Uint8Array): void {
+    if (!this.enabled) return;
+    const available = Math.min(bytes.length, this.maxBytes - this.bytes);
+    this.text += this.decoder.decode(bytes.subarray(0, available), { stream: true });
+    this.bytes += available;
+    if (available < bytes.length) this.truncated = true;
+  }
+
+  finish(): string {
+    if (!this.finished) {
+      const tail = this.decoder.decode();
+      if (!this.truncated) this.text += tail;
+      this.finished = true;
+    }
+    return this.text;
+  }
 }

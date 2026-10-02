@@ -52,12 +52,37 @@ try {
           lib: ["ES2023", "DOM", "DOM.Iterable"],
           noEmit: true,
         },
-        include: ["consumer.ts"],
+        include: ["consumer.ts", "exec-consumer.mts", "exec-consumer.cts"],
       },
       null,
       2,
     ),
   );
+  const execConsumer = `
+import { Sandbox, type ExecOptions, type ExecResult, type ExecStdin } from "railway";
+
+export async function run(sandbox: Sandbox, signal: AbortSignal): Promise<ExecResult> {
+  const options: ExecOptions = {
+    stdin: true,
+    ephemeral: true,
+    captureOutput: false,
+    maxOutputBytes: 1024,
+    timeoutSec: 30,
+    signal,
+    onStdout: chunk => { const text: string = chunk; void text; },
+  };
+  const handle = sandbox.exec("cat", options);
+  const stdin: ExecStdin = handle.stdin;
+  await stdin.write("hello");
+  await stdin.write(new Uint8Array([10]));
+  await stdin.end();
+  const refreshed: Sandbox = await sandbox.heartbeat();
+  void refreshed;
+  return await handle;
+}
+`;
+  writeFileSync(join(tempDir, "exec-consumer.mts"), execConsumer);
+  writeFileSync(join(tempDir, "exec-consumer.cts"), execConsumer);
   run(process.execPath, [
     join(root, "node_modules", "typescript", "bin", "tsc"),
     "-p",

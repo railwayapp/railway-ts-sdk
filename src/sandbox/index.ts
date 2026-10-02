@@ -19,6 +19,7 @@ export type {
   ExecReattachTarget,
   ExecResult,
   ExecSignal,
+  ExecStdin,
   ExecTarget,
   FileReadFormat,
   FileReadOptions,

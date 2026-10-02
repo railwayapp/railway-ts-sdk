@@ -11,12 +11,20 @@ import type { RailwayWsSocket } from "./ws-socket.js";
  * by a leading byte; init, stdin-EOF, and exit are JSON text frames.
  */
 const STDOUT_FRAME = 0x01;
+const STDIN_FRAME = 0x02;
 const STDERR_FRAME = 0x03;
+// /ws/exec keeps coder/websocket's default 32 KiB message limit (unlike
+// /ws/files). Leave room for the leading stdin tag within every message.
+const STDIN_CHUNK_BYTES = 16 * 1024;
+const SEND_HIGH_WATER_BYTES = 128 * 1024;
+const SEND_TIMEOUT_MS = 30_000;
 
 /** Subprotocol the tcp-proxy bridges expect alongside the JWT. */
 const SHELL_SUBPROTOCOL = "railway-shell";
 
 export interface ExecWsHandlers {
+  onError(error: RailwayConnectionError): void;
+  onStdinError(error: RailwayConnectionError): void;
   onStdout(bytes: Uint8Array): void;
   onStderr(bytes: Uint8Array): void;
   /** The command exited with this code. */
@@ -32,6 +40,8 @@ export interface ExecWsHandlers {
 }
 
 export interface ExecWsConnection {
+  /** Send stdin with bounded frames and WebSocket send-buffer backpressure. */
+  writeStdin(data: Uint8Array, signal: AbortSignal): Promise<void>;
   /** Half-close stdin (EOF) so commands that read stdin can finish. */
   closeStdin(): void;
   /** Deliver a signal to the command's process group (e.g. "TERM", "KILL"). */
@@ -57,52 +67,194 @@ export function connectExecWs(args: {
   sessionName?: string;
   /** Resume from the server's last-read cursor. Note some loss if previous clients read didn't keep up */
   resumeFromLastRead?: boolean;
+  ephemeral?: boolean;
+  /** Cancels connection establishment only; a live command must be signalled. */
+  signal?: AbortSignal;
   handlers: ExecWsHandlers;
 }): Promise<ExecWsConnection> {
-  const { config, jwt, command, cwd, env, sessionName, resumeFromLastRead, handlers } = args;
+  const {
+    config, jwt, command, cwd, env, sessionName, resumeFromLastRead,
+    ephemeral, signal, handlers,
+  } = args;
+  signal?.throwIfAborted();
   const WS: WebSocketConstructor = resolveWebSocketImpl(config);
 
   return new Promise<ExecWsConnection>((resolve, reject) => {
     let opened = false;
+    let closed = false;
+    let credits = 0;
+    let window = 0;
     const socket = new WS(config.tcpProxyWsEndpoint, [
       SHELL_SUBPROTOCOL,
       jwt,
     ]) as unknown as RailwayWsSocket;
     socket.binaryType = "arraybuffer";
+    const handshakeTimer = setTimeout(() => {
+      closed = true;
+      signal?.removeEventListener("abort", onAbort);
+      reject(new RailwayConnectionError({ message: "Exec capability negotiation timed out after 10000ms; no command was sent." }));
+      socket.close(1000, "");
+    }, 10_000);
 
-    socket.onopen = () => {
+    const assertOpen = () => {
+      if (closed) {
+        throw new RailwayConnectionError({
+          message: "Exec stdin connection is closed.",
+        });
+      }
+    };
+    const onAbort = () => {
+      closed = true;
+      clearTimeout(handshakeTimer);
+      signal?.removeEventListener("abort", onAbort);
+      reject(signal?.reason);
+      socket.close(1000, "");
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+
+    const start = () => {
+      if (closed || signal?.aborted) {
+        socket.close(1000, "");
+        return;
+      }
       opened = true;
+      clearTimeout(handshakeTimer);
+      signal?.removeEventListener("abort", onAbort);
       const data: {
         command: string;
         cwd?: string;
         env?: Record<string, string>;
         durable_session_name?: string;
         resume_from_last_read?: boolean;
+        ephemeral?: boolean;
       } = { command };
       if (cwd) data.cwd = cwd;
       if (env && Object.keys(env).length > 0) data.env = env;
       if (sessionName) data.durable_session_name = sessionName;
       if (resumeFromLastRead) data.resume_from_last_read = true;
-      socket.send(JSON.stringify({ type: "init_exec", data }));
+      if (ephemeral) data.ephemeral = true;
+      try {
+        socket.send(JSON.stringify({ type: "init_exec", data }));
+      } catch (error) {
+        closed = true;
+        reject(error);
+        socket.close(1000, "");
+        return;
+      }
       resolve({
-        closeStdin: () => socket.send(JSON.stringify({ type: "stdin_close" })),
-        signal: name =>
-          socket.send(JSON.stringify({ type: "signal", data: { signal: name } })),
-        close: () => socket.close(1000, ""),
+        async writeStdin(bytes, signal) {
+          signal.throwIfAborted();
+          assertOpen();
+          for (let offset = 0; offset < bytes.length; offset += STDIN_CHUNK_BYTES) {
+            const started = Date.now();
+            while (credits === 0 || (socket.bufferedAmount ?? 0) > SEND_HIGH_WATER_BYTES) {
+              signal.throwIfAborted();
+              assertOpen();
+              if (Date.now() - started >= SEND_TIMEOUT_MS) {
+                throw new RailwayConnectionError({
+                  message: "Exec stdin send buffer stalled for 30000ms.",
+                });
+              }
+              await new Promise(resolve => setTimeout(resolve, 10));
+            }
+            signal.throwIfAborted();
+            assertOpen();
+            const chunk = bytes.subarray(offset, offset + STDIN_CHUNK_BYTES);
+            const frame = new Uint8Array(chunk.length + 1);
+            frame[0] = STDIN_FRAME;
+            frame.set(chunk, 1);
+            credits--;
+            socket.send(frame);
+          }
+        },
+        closeStdin: () => {
+          assertOpen();
+          socket.send(JSON.stringify({ type: "stdin_close" }));
+        },
+        signal: name => {
+          assertOpen();
+          socket.send(JSON.stringify({ type: "signal", data: { signal: name } }));
+        },
+        close: () => {
+          closed = true;
+          socket.close(1000, "");
+        },
       });
     };
 
+    socket.onopen = () => {
+      if (closed) return;
+      // Negotiate BEFORE transmitting a command. An old proxy rejects the
+      // command-less hello, so unsupported peers cannot start an orphan exec.
+      try {
+        socket.send(JSON.stringify({ type: "exec_hello" }));
+      } catch (error) {
+        clearTimeout(handshakeTimer);
+        signal?.removeEventListener("abort", onAbort);
+        closed = true;
+        reject(error);
+        socket.close(1000, "");
+      }
+    };
+
     socket.onmessage = event => {
+      if (closed) return;
       const { data } = event;
-      if (data instanceof ArrayBuffer) handleBinaryFrame(data, handlers);
-      else if (typeof data === "string") handleTextFrame(data, handlers);
+      if (data instanceof ArrayBuffer) {
+        if (opened) handleBinaryFrame(data, handlers);
+        return;
+      }
+      if (typeof data !== "string") return;
+      const frame = parseControlFrame(data);
+      if (!frame) return;
+      if (!opened) {
+        if (frame.type !== "exec_capabilities") return;
+        try {
+          credits = window = negotiatedStdinWindow(frame.data);
+        } catch (error) {
+          clearTimeout(handshakeTimer);
+          signal?.removeEventListener("abort", onAbort);
+          closed = true;
+          reject(error);
+          socket.close(1000, "");
+          return;
+        }
+        start();
+        return;
+      }
+      switch (frame.type) {
+        case "stdin_credit":
+          if (validCreditGrant(frame.data?.chunks, window - credits)) {
+            credits += frame.data!.chunks!;
+          } else {
+            handlers.onError(new RailwayConnectionError({
+              message: "Invalid exec stdin credit frame.",
+            }));
+          }
+          break;
+        case "stdin_error":
+          handlers.onStdinError(new RailwayConnectionError({
+            message: "Remote exec stdin write failed.",
+          }));
+          break;
+        case "exit":
+          emitExit(frame.data, handlers);
+          break;
+        case "durable_session":
+          emitDurableSession(frame.data, handlers);
+          break;
+      }
     };
 
     socket.onclose = event => {
+      closed = true;
+      clearTimeout(handshakeTimer);
+      signal?.removeEventListener("abort", onAbort);
       if (!opened) {
         reject(
           new RailwayConnectionError({
-            message: `tcp-proxy exec WebSocket closed before opening (code ${event.code}${
+            message: `tcp-proxy exec WebSocket closed before exec control negotiation completed; no command was sent (code ${event.code}${
               event.reason ? `: ${event.reason}` : ""
             }).`,
             closeCode: event.code,
@@ -115,12 +267,16 @@ export function connectExecWs(args: {
 
     socket.onerror = event => {
       if (opened) return;
+      closed = true;
+      clearTimeout(handshakeTimer);
+      signal?.removeEventListener("abort", onAbort);
       reject(
         new RailwayConnectionError({
           message: "tcp-proxy exec WebSocket connection failed.",
           cause: event,
         }),
       );
+      socket.close(1000, "");
     };
   });
 }
@@ -134,30 +290,48 @@ function handleBinaryFrame(buffer: ArrayBuffer, handlers: ExecWsHandlers): void 
 }
 
 interface ControlFrameData {
+  version?: number;
+  stdin_chunk_bytes?: number;
+  stdin_chunks?: number;
+  chunks?: number;
   exit_code?: number;
   reason?: string;
   durable_session_name?: string;
 }
 
-/** Text frame: JSON control message — exit, or a durable session assignment. */
-function handleTextFrame(text: string, handlers: ExecWsHandlers): void {
-  let frame: { type?: string; data?: ControlFrameData };
+function parseControlFrame(text: string): { type?: string; data?: ControlFrameData } | undefined {
   try {
-    frame = JSON.parse(text);
+    return JSON.parse(text) ?? undefined;
   } catch {
-    return;
+    return undefined;
   }
-  if (frame.type === "exit") emitExit(frame.data, handlers);
-  else if (frame.type === "durable_session") {
-    emitDurableSession(frame.data, handlers);
+}
+
+function validCreditGrant(chunks: unknown, available: number): chunks is number {
+  return typeof chunks === "number" && Number.isSafeInteger(chunks) &&
+    chunks > 0 && chunks <= available;
+}
+
+function negotiatedStdinWindow(data: ControlFrameData | undefined): number {
+  if (data?.version !== 2 || data.stdin_chunk_bytes !== STDIN_CHUNK_BYTES ||
+    !validCreditGrant(data.stdin_chunks, 64)) {
+    throw new RailwayConnectionError({
+      message: "Unsupported exec control capabilities; no command was sent.",
+    });
   }
+  return data.stdin_chunks;
 }
 
 function emitExit(
   data: ControlFrameData | undefined,
   handlers: ExecWsHandlers,
 ): void {
-  handlers.onExit(data?.exit_code ?? 0, data?.reason ?? "");
+  const code = data?.exit_code;
+  if (typeof code !== "number" || !Number.isInteger(code) || code < -1 || code > 2_147_483_647) {
+    handlers.onError(new RailwayConnectionError({ message: "Exec exit frame has no valid remote exit code; the command's outcome is unknown." }));
+    return;
+  }
+  handlers.onExit(code, data?.reason ?? "");
 }
 
 function emitDurableSession(

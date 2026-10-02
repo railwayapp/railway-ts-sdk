@@ -223,6 +223,12 @@ export class Sandbox implements AsyncDisposable {
     await this.#engine.destroy(this.id);
   }
 
+  /** Reset the idle countdown and refresh this handle. Does not change the configured timeout. */
+  async heartbeat(): Promise<this> {
+    this.#info = await this.#engine.heartbeat(this.id);
+    return this;
+  }
+
   /** Re-reads the sandbox to refresh `status` and other fields in place. */
   async refresh(): Promise<this> {
     const info = await this.#engine.get(this.id);

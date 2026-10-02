@@ -57,6 +57,12 @@ mutation RailwaySandboxDestroy($id: String!, $environmentId: String!) {
   }
 }
 
+mutation RailwaySandboxHeartbeat($id: String!, $environmentId: String!) {
+  sandboxHeartbeat(id: $id, environmentId: $environmentId) {
+    ...RailwaySandboxFields
+  }
+}
+
 fragment RailwaySandboxTemplateBuildFields on SandboxTemplateBuild {
   id
   status

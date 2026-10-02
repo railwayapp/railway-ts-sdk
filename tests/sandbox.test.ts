@@ -203,7 +203,7 @@ describe("sandbox instance", () => {
     expect(mock.calls[1]?.body.query).toContain(
       "mutation RailwayGenerateShellToken",
     );
-    expect(socket.sentText[0]).toEqual({
+    expect(socket.sentText.find(f => f.type === "init_exec")).toEqual({
       type: "init_exec",
       data: { command: "bash -lc 'pwd'" },
     });
@@ -247,6 +247,28 @@ describe("sandbox instance", () => {
       id: "sandbox_123",
       environmentId: "environment_123",
     });
+  });
+
+  it("heartbeats the scoped sandbox and updates the handle", async () => {
+    const mock = createFetchMock([
+      { data: { sandboxCreate: sandboxInfo() } },
+      { data: { sandboxHeartbeat: sandboxInfo({ idleTimeoutMinutes: 30 }) } },
+    ]);
+    const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch });
+    await expect(sandbox.heartbeat()).resolves.toBe(sandbox);
+    expect(sandbox.idleTimeoutMinutes).toBe(30);
+    expect(mock.calls[1]?.body.query).toContain("mutation RailwaySandboxHeartbeat");
+    expect(mock.calls[1]?.body.variables).toEqual({ id: sandbox.id, environmentId: "environment_123" });
+  });
+
+  it("reports a missing sandbox on heartbeat without changing the handle", async () => {
+    const mock = createFetchMock([
+      { data: { sandboxCreate: sandboxInfo() } },
+      { data: { sandboxHeartbeat: null } },
+    ]);
+    const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch });
+    await expect(sandbox.heartbeat()).rejects.toBeInstanceOf(SandboxNotFoundError);
+    expect(sandbox.status).toBe("RUNNING");
   });
 });
 

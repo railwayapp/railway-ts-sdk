@@ -37,6 +37,28 @@ mise run example:quickstart
 
 Unit tests must stay offline and must not call Railway.
 
+## Live sandbox checks
+
+With `RAILWAY_API_TOKEN` and `RAILWAY_ENVIRONMENT_ID` set in `.env` or the
+environment, run `mise run e2e` to exercise real sandbox creation, files,
+execution, forks, checkpoints, and template builds. Use a dedicated test project.
+
+Repeat the exec suite across boot paths with:
+
+```bash
+RAILWAY_E2E_SANDBOX_SOURCE=fresh mise run e2e tests/sandbox-exec.e2e.test.ts
+RAILWAY_E2E_SANDBOX_SOURCE=fork RAILWAY_E2E_PRIVATE=1 mise run e2e tests/sandbox-exec.e2e.test.ts
+RAILWAY_E2E_SANDBOX_SOURCE=template mise run e2e tests/sandbox-exec.e2e.test.ts
+RAILWAY_E2E_SANDBOX_SOURCE=checkpoint RAILWAY_E2E_PRIVATE=1 mise run e2e tests/sandbox-exec.e2e.test.ts
+```
+
+The default boot path is `fresh`; `RAILWAY_E2E_PRIVATE=1` opts into private
+networking. Fork/checkpoint scenarios destroy the source before the exec suite
+runs. Teardown destroys test sandboxes and named checkpoints; recipe builds may
+leave reusable cached checkpoints. Live conformance tests include ephemeral
+cancellation, which currently fails because the runtime only routes signals to
+durable execs. Keep this failure visible when validating runtime changes.
+
 ## Package checks
 
 `mise run package-check` builds the package, then validates the npm artifact with:
