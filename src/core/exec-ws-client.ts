@@ -241,6 +241,19 @@ export function connectExecWs(args: {
         case "exit":
           emitExit(frame.data, handlers);
           break;
+        // The proxy's typed failure (exit_unconfirmed, output_failed, ...),
+        // sent just before it closes. The outcome is unknown, not an exit.
+        case "error":
+          handlers.onError(new RailwayConnectionError({
+            message: `tcp-proxy exec error (${
+              typeof frame.data?.code === "string" ? frame.data.code : "unknown"
+            })${
+              typeof frame.data?.message === "string" && frame.data.message
+                ? `: ${frame.data.message}`
+                : ""
+            }.`,
+          }));
+          break;
         case "durable_session":
           emitDurableSession(frame.data, handlers);
           break;
@@ -297,6 +310,8 @@ interface ControlFrameData {
   exit_code?: number;
   reason?: string;
   durable_session_name?: string;
+  code?: string;
+  message?: string;
 }
 
 function parseControlFrame(text: string): { type?: string; data?: ControlFrameData } | undefined {

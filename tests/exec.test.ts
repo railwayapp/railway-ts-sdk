@@ -120,6 +120,18 @@ describe("exec", () => {
     });
   });
 
+  it("surfaces a proxy error frame as an unknown outcome, not an exit", async () => {
+    const { handle, socket } = await execSocket("cmd");
+    socket.serverStdout("partial");
+    await tick();
+    socket.serverFrame({ type: "error", data: { code: "exit_unconfirmed", message: "exit status not received" } });
+    await expect(handle).rejects.toMatchObject({
+      name: "ExecInterruptedError",
+      stdout: "partial",
+      message: expect.stringContaining("exit_unconfirmed"),
+    });
+  });
+
   it("mints a shell-scoped token and opens /ws/exec with the command init frame", async () => {
     const { mock, handle, socket } = await execSocket("echo hi");
     expect(handle).toBeInstanceOf(ExecHandle);
