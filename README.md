@@ -203,6 +203,16 @@ If the WebSocket cannot be established, `exec` rejects with
 `RailwayConnectionError`. In non-Node runtimes without a global `WebSocket`,
 pass an implementation via the `webSocketImpl` config option.
 
+### Running a command without a WebSocket
+
+Where outbound WebSockets aren't available, `run` sends the command in one HTTPS request
+and returns the same result shape as `exec`. It has no streaming, stdin, or cancellation;
+`timeoutSec` is enforced by the server.
+
+```ts
+const { exitCode, stdout } = await sandbox.run("node --version", { timeoutSec: 30 });
+```
+
 ## Files
 
 `sandbox.files` reads and writes files in the sandbox filesystem. Content streams in
@@ -271,8 +281,23 @@ const fork = await base.fork();
 await fork.exec("npm test"); // sees the installed deps, isolated from base
 ```
 
-`Sandbox.create(source)` is the same operation in static form. Pass `idleTimeoutMinutes` to
-override the fork's idle timeout. The source must be `RUNNING`.
+`Sandbox.create(source)` is the same operation in static form. Pass `idleTimeoutMinutes` or
+`resources` to override the fork's own settings; neither is copied from the source. The
+source must be `RUNNING`.
+
+## CPU and memory
+
+Pass `resources` to size a sandbox. Each omitted field uses your workspace's sandbox
+default, and values above the workspace's VM maximum are rejected. It works the same for
+`create`, templates, checkpoints, and `fork`.
+
+```ts
+const sandbox = await Sandbox.create({ resources: { cpu: 2, memoryGB: 4 } });
+const small = await sandbox.fork({ resources: { cpu: 0.5, memoryGB: 1 } });
+```
+
+`cpu` is in vCPUs and accepts fractions; `memoryGB` is decimal gigabytes
+(1 GB = 1,000,000,000 bytes).
 
 ## Regions
 
@@ -284,17 +309,17 @@ const sandbox = await Sandbox.create({ region: "us-east4-eqdc4a" });
 console.log(sandbox.region);
 ```
 
-Region selection works for blank sandboxes, templates, saved checkpoints, and forks.
-Blockstore-backed disks can boot in a different region from their source:
+Forks, templates and saved checkpoints boot where their data lives: a fork runs in its
+source sandbox's region, and a checkpoint or template in the region it was captured or
+built in. Omitting `region` picks that region automatically; requesting a different one
+is rejected.
 
 ```ts
-const remoteFork = await sandbox.fork({ region: "europe-west4-drams3a" });
-const localFork = await sandbox.fork({ region: sandbox.region });
+const fork = await sandbox.fork(); // same region as `sandbox`
 ```
 
-Omitting `region` uses the platform default, including for forks; it does not implicitly
-inherit the source sandbox's region. Region identifiers are strings validated by Railway,
-so the SDK does not keep a fixed region enum.
+Region identifiers are strings validated by Railway, so the SDK does not keep a fixed
+region enum.
 
 ## Network isolation
 
@@ -346,6 +371,13 @@ Schedule heartbeats at an interval shorter than `idleTimeoutMinutes` while your
 application needs the sandbox. This does not change its configured timeout or
 revive a sandbox that has already been destroyed.
 
+To keep a sandbox until you destroy it, create it with `idleTimeoutMinutes: 0`. Only some
+plans allow this; on others, `create` fails with the allowed range.
+
+```ts
+const sandbox = await Sandbox.create({ idleTimeoutMinutes: 0 });
+```
+
 ## Reconnecting and listing
 
 A sandbox outlives the process that created it, so you can reattach to it by id.
@@ -355,6 +387,15 @@ const sandbox = await Sandbox.connect("sbx_abc123");
 await sandbox.exec("cat /tmp/state.json");
 
 const all = await Sandbox.list();
+```
+
+List the shells and exec sessions inside a sandbox, running or recently exited, and
+reattach to one by name:
+
+```ts
+const sessions = await sandbox.sessions(); // null if the sandbox can't report sessions
+const build = sessions?.find(s => s.kind === "EXEC" && s.running);
+if (build) await sandbox.exec({ sessionName: build.name }, { onStdout: c => process.stdout.write(c) });
 ```
 
 `connect` throws `SandboxNotFoundError` if the sandbox does not exist in the

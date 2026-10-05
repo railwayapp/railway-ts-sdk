@@ -46,16 +46,61 @@ export interface NamedTemplateRef {
 
 export type TemplateSource = CompiledTemplate | NamedTemplateRef;
 
-/** Knobs shared by every sandbox-creating call: `create`, `create(template)`, and `fork`. */
+/** vCPU and memory for one sandbox. Omitted fields use the workspace's sandbox default. */
+export interface SandboxResources {
+  /** vCPUs; fractional values such as `0.5` are allowed. Capped at the workspace's VM maximum. */
+  cpu?: number;
+  /** Memory in decimal GB (1 GB = 1,000,000,000 bytes). Capped at the workspace's VM maximum. */
+  memoryGB?: number;
+}
+
+/** A shell or exec session inside a sandbox, live or recently exited. */
+export interface SandboxSessionInfo {
+  /** Stable session name; pass it as `exec({ sessionName })` to reattach. */
+  name: string;
+  kind: "SHELL" | "EXEC";
+  /** Whether the session's process is still alive. */
+  running: boolean;
+  /** Exit code once the process has exited; null while it runs. */
+  exitCode: number | null;
+  /** When the process exited (ISO timestamp); null while it runs. */
+  exitedAt: string | null;
+  /** Whether a client is connected right now. */
+  attached: boolean;
+  /** The command an exec session runs; empty for an interactive shell. */
+  command: string;
+  /** For a shell, whether a foreground program holds the terminal; null when unknown or not a shell. */
+  foregroundActive: boolean | null;
+  createdAt: string | null;
+}
+
+/** Options for `sandbox.run`, the one-request HTTPS exec. */
+export interface RunOptions {
+  /** Server-side deadline in seconds. */
+  timeoutSec?: number;
+}
+
+/** Knobs shared by every sandbox-creating call: `create`, `create(template)`, `create(checkpoint)`, and `fork`. */
 export interface SandboxCreationOptions {
+  /**
+   * Minutes without activity before the sandbox is destroyed. Defaults to the
+   * plan's default. `0` (or any value <= 0) means never idle out; only some plans
+   * allow it, and create fails with the allowed range otherwise.
+   */
   idleTimeoutMinutes?: number;
+  /** vCPU and memory. Forks and checkpoint restores take their own value, not the source's. */
+  resources?: SandboxResources;
   networkIsolation?: SandboxNetworkIsolation;
   /**
    * Railway-provided HTTP domains to publish. Requires `networkIsolation: "PRIVATE"`.
    * Prefix is generated from the project name when omitted.
    */
   domains?: Array<{ port: number; prefix?: string }>;
-  /** Region where the sandbox should run. Uses the platform default when omitted. */
+  /**
+   * Region where the sandbox should run. Uses the platform default when omitted.
+   * Forks, templates and checkpoints boot where their data lives; omit this for
+   * them, since a different region is rejected.
+   */
   region?: string;
   /** Runtime env baked into the sandbox, available to every command. Values may use Railway references (e.g. `${{shared.FOO}}`). */
   env?: Record<string, string>;

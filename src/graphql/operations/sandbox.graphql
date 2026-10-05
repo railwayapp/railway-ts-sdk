@@ -124,3 +124,43 @@ mutation RailwaySandboxCheckpointRename(
 mutation RailwaySandboxCheckpointDelete($environmentId: String!, $id: ID!) {
   sandboxCheckpointDelete(environmentId: $environmentId, id: $id)
 }
+
+query RailwaySandboxSessions($environmentId: String!, $id: String!) {
+  sandboxSessions(environmentId: $environmentId, id: $id) {
+    edges {
+      node {
+        name
+        kind
+        runState {
+          running
+          exitCode
+          exitedAt
+        }
+        attached
+        command
+        foregroundActive
+        createdAt
+      }
+    }
+  }
+}
+
+mutation RailwaySandboxExec(
+  $environmentId: String!
+  $id: String!
+  $command: String!
+  $timeoutSec: Int
+) {
+  sandboxExec(
+    environmentId: $environmentId
+    id: $id
+    command: $command
+    timeoutSec: $timeoutSec
+  ) {
+    exitCode
+    stdout
+    stderr
+    truncated
+    timedOut
+  }
+}

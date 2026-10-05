@@ -7,6 +7,8 @@ import {
 import { requestGraphQL } from "../core/graphql-client.js";
 import {
   RailwaySandboxCreateDocument,
+  RailwaySandboxExecDocument,
+  RailwaySandboxSessionsDocument,
   RailwaySandboxDestroyDocument,
   RailwaySandboxHeartbeatDocument,
   RailwaySandboxDocument,
@@ -29,6 +31,10 @@ import {
   type RailwaySandboxCreateMutationVariables,
   type RailwaySandboxDestroyMutation,
   type RailwaySandboxDestroyMutationVariables,
+  type RailwaySandboxExecMutation,
+  type RailwaySandboxExecMutationVariables,
+  type RailwaySandboxSessionsQuery,
+  type RailwaySandboxSessionsQueryVariables,
   type RailwaySandboxesQuery,
   type RailwaySandboxesQueryVariables,
   type RailwaySandboxQuery,
@@ -53,10 +59,14 @@ import type {
   ExecOptions,
   ExecTarget,
   ForkOptions,
+  ExecResult,
   ListOptions,
+  RunOptions,
   SandboxCheckpointInfo,
   SandboxCreationOptions,
   SandboxInfo,
+  SandboxResources,
+  SandboxSessionInfo,
   SandboxTemplateBuildInfo,
   TemplateSource,
 } from "./types.js";
@@ -126,6 +136,9 @@ export class SandboxEngine {
     }
     if (options.networkIsolation !== undefined) {
       input.networkIsolation = options.networkIsolation;
+    }
+    if (options.resources !== undefined) {
+      input.resources = validResources(options.resources);
     }
     if (options.domains !== undefined) {
       input.publicDomains = options.domains;
@@ -242,6 +255,54 @@ export class SandboxEngine {
     });
 
     return data.sandboxCheckpointRename;
+  }
+
+  /** Sessions in the sandbox, or null when its runtime cannot list them. */
+  async sessions(sandboxId: string): Promise<SandboxSessionInfo[] | null> {
+    const data = await requestGraphQL<
+      RailwaySandboxSessionsQuery,
+      RailwaySandboxSessionsQueryVariables
+    >(this.#config, RailwaySandboxSessionsDocument, {
+      environmentId: this.#config.environmentId,
+      id: sandboxId,
+    });
+    if (data.sandboxSessions == null) return null;
+    return data.sandboxSessions.edges.map(({ node }) => ({
+      name: node.name,
+      kind: node.kind,
+      running: node.runState.running,
+      exitCode: node.runState.running ? null : node.runState.exitCode,
+      exitedAt: node.runState.exitedAt ?? null,
+      attached: node.attached,
+      command: node.command,
+      foregroundActive: node.foregroundActive ?? null,
+      createdAt: node.createdAt ?? null,
+    }));
+  }
+
+  /** One-request exec over HTTPS: no streaming, stdin, or cancellation. */
+  async run(
+    sandboxId: string,
+    command: string,
+    options: RunOptions = {},
+  ): Promise<ExecResult> {
+    if (
+      options.timeoutSec !== undefined &&
+      !(Number.isInteger(options.timeoutSec) && options.timeoutSec > 0)
+    ) {
+      throw new RangeError("timeoutSec must be a positive integer.");
+    }
+    this.#config.log(`run (http) in sandbox ${sandboxId}`);
+    const data = await requestGraphQL<
+      RailwaySandboxExecMutation,
+      RailwaySandboxExecMutationVariables
+    >(this.#config, RailwaySandboxExecDocument, {
+      environmentId: this.#config.environmentId,
+      id: sandboxId,
+      command,
+      ...(options.timeoutSec !== undefined ? { timeoutSec: options.timeoutSec } : {}),
+    });
+    return { ...data.sandboxExec };
   }
 
   async deleteCheckpoint(id: string): Promise<void> {
@@ -490,4 +551,18 @@ export function engineFromOptions(options: SandboxOptions = {}): SandboxEngine {
   const base = normalizeRailwayClientConfig(options);
   const environmentId = resolveEnvironmentId(options.environmentId);
   return new SandboxEngine({ ...base, environmentId });
+}
+
+/** Rejects values the platform would refuse anyway, before a create is spent on them. */
+function validResources(resources: SandboxResources): SandboxResources {
+  for (const key of ["cpu", "memoryGB"] as const) {
+    const value = resources[key];
+    if (value !== undefined && !(Number.isFinite(value) && value > 0)) {
+      throw new RangeError(`resources.${key} must be a positive number.`);
+    }
+  }
+  return {
+    ...(resources.cpu !== undefined ? { cpu: resources.cpu } : {}),
+    ...(resources.memoryGB !== undefined ? { memoryGB: resources.memoryGB } : {}),
+  };
 }

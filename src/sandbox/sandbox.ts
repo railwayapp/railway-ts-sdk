@@ -17,13 +17,16 @@ import type {
   CreateOptions,
   ExecOptions,
   ExecReattachTarget,
+  ExecResult,
   ExecTarget,
   ForkOptions,
   ListOptions,
+  RunOptions,
   SandboxCheckpointInfo,
   SandboxDomain,
   SandboxInfo,
   SandboxNetworkIsolation,
+  SandboxSessionInfo,
   SandboxStatus,
 } from "./types.js";
 
@@ -208,8 +211,9 @@ export class Sandbox implements AsyncDisposable {
 
   /**
    * Capture this sandbox's current disk into a reusable named checkpoint,
-   * bootable as soon as this resolves. The sandbox must be running and the
-   * name unused. Boot new sandboxes from it with `Sandbox.create(name)`.
+   * bootable as soon as this resolves. The sandbox must be running. Reusing an
+   * existing name replaces that checkpoint. Boot new sandboxes from it with
+   * `Sandbox.create(name)`; they start in this sandbox's region.
    */
   async checkpoint(name: string): Promise<SandboxCheckpointInfo> {
     const trimmed = name.trim();
@@ -221,6 +225,24 @@ export class Sandbox implements AsyncDisposable {
 
   async destroy(): Promise<void> {
     await this.#engine.destroy(this.id);
+  }
+
+  /**
+   * Shells and exec sessions in this sandbox, running or recently exited.
+   * Reattach to one with `exec({ sessionName })`. Resolves null when the
+   * sandbox's runtime cannot report sessions.
+   */
+  async sessions(): Promise<SandboxSessionInfo[] | null> {
+    return this.#engine.sessions(this.id);
+  }
+
+  /**
+   * Run a command in one HTTPS request and get its result. No streaming, stdin,
+   * or cancellation: use it where WebSockets are unavailable, and `exec`
+   * everywhere else.
+   */
+  async run(command: string, options: RunOptions = {}): Promise<ExecResult> {
+    return this.#engine.run(this.id, command, options);
   }
 
   /** Reset the idle countdown and refresh this handle. Does not change the configured timeout. */

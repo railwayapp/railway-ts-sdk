@@ -147,25 +147,36 @@ export type ActiveFeatureFlag =
   | 'ACTIVITY_FEED_HISTORY'
   | 'AGENT_BOOTSTRAPS'
   | 'AGENT_BYOK'
+  | 'AGENT_BYOK_ANTHROPIC'
+  | 'AGENT_BYOK_CHATGPT'
+  | 'AGENT_BYOK_FIREWORKS'
+  | 'AGENT_BYOK_OPENAI'
+  | 'AGENT_BYOK_OPENROUTER'
   | 'AGENT_CONNECTORS'
+  | 'AGENT_TASKS'
   | 'CHAT_SANDBOX'
+  | 'CLEARANCE'
   | 'CLOUD_AGENTS'
+  | 'CLOUD_AGENT_BUILDER'
   | 'CLOUD_AGENT_CHAT'
   | 'CS_MCP_EXPRESS'
-  | 'DEBUG_SMART_DIAGNOSIS'
   | 'EMAIL_FORWARDING'
+  | 'HA_FOR_MONGO'
   | 'IN_DASHBOARD_SUPPORT'
   | 'MAGIC_CONFIG'
   | 'MYSQL_PITR'
   | 'PRIORITY_BOARDING'
-  | 'PROJECT_SANDBOXES'
-  | 'TEMPLATE_CHAT'
+  | 'RAILWAY_AGENT_DASHBOARD'
+  | 'RAILWAY_AGENT_FEED'
+  | 'TRACING'
   | 'USAGE_INSIGHTS'
   | 'VM_STORAGE_TRACES';
 
 export type ActivePlatformFlag =
   | 'AGENT_USAGE_CH_INGEST'
   | 'ALERT_SUS_USERS_CRON_KILLSWITCH'
+  | 'BLOCK_TRIAL_RESTRICTION_APPEALS'
+  | 'BUILDER_V4_ROLLOUT'
   | 'BUILD_DEPLOY_QUEUE_V2'
   | 'CAC_T0_KILLSWITCH'
   | 'CANVAS_CROSS_ENV_GUARD_ENFORCE'
@@ -185,21 +196,33 @@ export type ActivePlatformFlag =
   | 'IN_DASHBOARD_SUPPORT'
   | 'KAFKA_EPHEMERAL_ENVIRONMENT_UPDATES'
   | 'LOGS_LONG_WINDOW_CHUNKING'
+  | 'MCP_OAUTH_AUDIENCE_ENFORCE'
+  | 'MCP_OAUTH_CIMD'
+  | 'MCP_OAUTH_SCOPE_CHALLENGES'
+  | 'MCP_OAUTH_TOKEN_ROUTE_FENCE'
+  | 'NEW_PROJECT_PAGE'
   | 'NEW_STRIPE_WEBHOOK_VERSION_ROLLOUT'
   | 'NUDGES'
+  | 'NUDGE_BACKUP_SCHEDULE_MISSING'
+  | 'NUDGE_FIRST_DEPLOY_FAILED'
   | 'NUDGE_PUBLIC_DB_URL_WITHIN_PROJECT'
   | 'NUDGE_RESUBSCRIBE_AFTER_DEAD_INVOICE'
+  | 'NUDGE_UPGRADE_TO_PRO'
   | 'OAUTH_DCR_KILLSWITCH'
   | 'PRE_DEPLOY_TIMEOUT_KILLSWITCH'
   | 'PROJECT_HISTORY_DUAL_WRITE'
-  | 'PROJECT_HISTORY_READ_FROM_CH'
+  | 'RADAR_HTTP_PATTERN_DETECTION'
+  | 'RELAY_SPEND_RESERVATION_KILLSWITCH'
   | 'REMOVE_DEPLOYMENT_COMPACT'
   | 'SERVICEINSTANCE_DATALOADER_FOR_STATIC_URL'
   | 'SPLIT_USAGE_QUERIES'
   | 'SSH_ANON_PROVISIONING'
+  | 'SSH_TRIAL_GUEST_IDLE_SLEEP'
+  | 'STRIPE_INTERACTIVE_SUBSCRIPTION_ON_SESSION'
   | 'STRIPE_METERS_NEW_ACCOUNTS'
   | 'STRIPE_METERS_SHADOW_ENABLED'
-  | 'UNIFIED_TOKENS_AUTHORIZATION_SHADOW'
+  | 'STRIPE_WEBHOOK_DISPUTE_CANCELLATION'
+  | 'TRIAL_RELAY_MODEL_ALLOWLIST_KILLSWITCH'
   | 'UPDATED_VM_QUERIES'
   | 'USAGE_CH_READS'
   | 'VM_COUPON_MIGRATION'
@@ -207,14 +230,15 @@ export type ActivePlatformFlag =
   | 'WORKSPACE_MCP_KILLSWITCH';
 
 export type ActiveProjectFeatureFlag =
-  | 'PLACEHOLDER';
+  | 'PLACEHOLDER'
+  | 'RBS_VOLUMES';
 
 export type ActiveServiceFeatureFlag =
+  | 'BUILDER_V4'
   | 'COPY_VOLUME_TO_ENVIRONMENT'
-  | 'ENABLE_DOCKER_EXTENSION'
   | 'PLACEHOLDER'
   | 'SKIPPED_BUILDS'
-  | 'USE_VM_RUNTIME';
+  | 'USE_DEPLOYMENT_VMS';
 
 export type AdoptionInfo = Node & {
   __typename?: 'AdoptionInfo';
@@ -515,6 +539,43 @@ export type ChangeSetPreview = {
   effects: Scalars['JSON']['output'];
 };
 
+/** A Railway Authentication machine token: gets non-human callers past the sign-in on a project's protected services. The token itself is only returned when it's created. */
+export type ClearanceToken = {
+  __typename?: 'ClearanceToken';
+  createdAt: Scalars['DateTime']['output'];
+  creator?: Maybe<ClearanceTokenCreator>;
+  /** Null means every environment of the project. */
+  environmentId?: Maybe<Scalars['String']['output']>;
+  environmentName?: Maybe<Scalars['String']['output']>;
+  expiresAt: Scalars['DateTime']['output'];
+  id: Scalars['String']['output'];
+  name: Scalars['String']['output'];
+};
+
+export type ClearanceTokenCreateInput = {
+  /** Limit the token to one persistent environment. Omit for every environment, including PR environments made later. */
+  environmentId?: InputMaybe<Scalars['String']['input']>;
+  /** Days until the token expires: 1 to 365, default 90. */
+  expiresInDays?: InputMaybe<Scalars['Int']['input']>;
+  name: Scalars['String']['input'];
+  projectId: Scalars['String']['input'];
+};
+
+export type ClearanceTokenCreatePayload = {
+  __typename?: 'ClearanceTokenCreatePayload';
+  clearanceToken: ClearanceToken;
+  /** The token. Shown this once; it isn't stored. */
+  token: Scalars['String']['output'];
+};
+
+export type ClearanceTokenCreator = {
+  __typename?: 'ClearanceTokenCreator';
+  avatar?: Maybe<Scalars['String']['output']>;
+  email: Scalars['String']['output'];
+  id: Scalars['String']['output'];
+  name?: Maybe<Scalars['String']['output']>;
+};
+
 export type CliAuthEventTrackInput = {
   agentSessionId?: InputMaybe<Scalars['String']['input']>;
   arch?: InputMaybe<Scalars['String']['input']>;
@@ -555,18 +616,19 @@ export type CliEventTrackInput = {
 /** A persistent cloud agent for running coding harnesses. */
 export type CloudAgent = {
   __typename?: 'CloudAgent';
-  /** WebSocket endpoint of the in-VM harness gate, for the dashboard chat. Survives sleep: the domain is stable across sleep and wake, and the observation keeps it. Null only on agents created before the gate existed, or before their first observation lands. */
+  /** WebSocket endpoint of the in-VM harness gate, for the dashboard chat. Survives sleep: the domain is stable across sleep and wake. Prefers the machine observation; when that carries no gate domain it falls back to the domain network-cp actively serves, so an agent whose observation lagged still offers chat. Null on agents created before the gate existed, or asleep/absent machines. */
   agentWsUrl?: Maybe<Scalars['String']['output']>;
   /** Target ID for console or command execution. Null while unavailable. */
   consoleTargetId?: Maybe<Scalars['String']['output']>;
   createdAt: Scalars['DateTime']['output'];
-  /** The first of the agent machine's public domains. Stable across sleep and wake; returns no endpoints while the machine sleeps. */
+  /** The agent machine's public HTTP domain (port 8080) — the live preview. Prefers the observation (falling back to the first declared domain when 8080 was never requested); when the observation carries no domains it falls back to the domain network-cp actively serves on 8080, so a preview shows even when the observation lagged. Returns null while the machine sleeps. */
   domain?: Maybe<Scalars['String']['output']>;
   /** Every public domain on the agent's machine, one per port, in the order the machine declared them. */
   domains: Array<CloudAgentDomain>;
   environmentId: Scalars['String']['output'];
   id: Scalars['ID']['output'];
   name: Scalars['String']['output'];
+  project: Project;
   projectId: Scalars['String']['output'];
   /** Region the agent's machine runs in. Null briefly after creation, before the machine has been placed. */
   region?: Maybe<Scalars['String']['output']>;
@@ -597,15 +659,29 @@ export type CloudAgentCheckpointStatus =
   | 'IN_PROGRESS'
   | 'SUCCEEDED';
 
+/** Opt-in public code endpoint, provisioned only when creating a cloud agent. */
+export type CloudAgentCodeEndpointInput = {
+  /** Target port. Defaults to 4096; must be 1024-65535, excluding 8080 and 8790. */
+  port?: InputMaybe<Scalars['Int']['input']>;
+};
+
 export type CloudAgentCreateInput = {
   /** Create the cloud agent from an existing checkpoint. */
   cloudAgentCheckpointId?: InputMaybe<Scalars['String']['input']>;
+  /** Provision a code-* domain. Omit to disable, including when restoring a checkpoint or bootstrap. */
+  codeEndpoint?: InputMaybe<CloudAgentCodeEndpointInput>;
   environmentId: Scalars['String']['input'];
   name?: InputMaybe<Scalars['String']['input']>;
   /** Region to run the agent in, e.g. us-west2. Defaults to the checkpoint's region when booting from one, else the workspace's preferred region. */
   region?: InputMaybe<Scalars['String']['input']>;
   source?: InputMaybe<CloudAgentSourceInput>;
   variables?: InputMaybe<Scalars['JSON']['input']>;
+};
+
+export type CloudAgentDeployResult = {
+  __typename?: 'CloudAgentDeployResult';
+  deploymentId: Scalars['String']['output'];
+  serviceId: Scalars['String']['output'];
 };
 
 /** One public domain on an agent's machine. */
@@ -617,6 +693,31 @@ export type CloudAgentDomain = {
   port: Scalars['Int']['output'];
   /** Label prefix the machine declared, e.g. app. */
   prefix: Scalars['String']['output'];
+};
+
+export type CloudAgentFeedbackInput = {
+  activeTools: Array<Scalars['String']['input']>;
+  agentVersion: Scalars['String']['input'];
+  cloudAgentId: Scalars['String']['input'];
+  description: Scalars['String']['input'];
+  elapsedMs?: InputMaybe<Scalars['Float']['input']>;
+  lastProgressAgeMs?: InputMaybe<Scalars['Float']['input']>;
+  model: Scalars['String']['input'];
+  reportId: Scalars['String']['input'];
+  reportedAtMs: Scalars['Float']['input'];
+  runId?: InputMaybe<Scalars['String']['input']>;
+  runStartedAtMs?: InputMaybe<Scalars['Float']['input']>;
+  sessionId: Scalars['String']['input'];
+  sessionName?: InputMaybe<Scalars['String']['input']>;
+  state: Scalars['String']['input'];
+  steps: Scalars['Int']['input'];
+  tuiVersion: Scalars['String']['input'];
+};
+
+export type CloudAgentRepository = {
+  __typename?: 'CloudAgentRepository';
+  path: Scalars['String']['output'];
+  repo: Scalars['String']['output'];
 };
 
 /** The state of one coding agent session in a cloud agent. */
@@ -658,8 +759,11 @@ export type CloudAgentSource = {
   __typename?: 'CloudAgentSource';
   /** Requested ref; null = the repo's default branch. */
   branch?: Maybe<Scalars['String']['output']>;
+  /** Selected checkout directory; null means /app. */
+  dir?: Maybe<Scalars['String']['output']>;
   /** owner/repo. */
   repo: Scalars['String']['output'];
+  repos?: Maybe<Array<CloudAgentRepository>>;
   /** Service the repo was resolved from, when given. */
   serviceId?: Maybe<Scalars['String']['output']>;
   /** Clone progress. Failed never blocks the agent; only CLONING should hold a launch. */
@@ -672,7 +776,7 @@ export type CloudAgentSourceInput = {
   branch?: InputMaybe<Scalars['String']['input']>;
   /** GitHub repo as owner/repo. */
   repo?: InputMaybe<Scalars['String']['input']>;
-  /** Resolve the repo from this service's connected source. */
+  /** Resolve the repo from this service's source. */
   serviceId?: InputMaybe<Scalars['String']['input']>;
 };
 
@@ -696,6 +800,164 @@ export type CloudAgentStatus =
   | 'RUNNING'
   | 'SLEEPING'
   | 'STARTING';
+
+/** Task lifecycle and correlation. Read cloudAgentTask for the latest session response. */
+export type CloudAgentTask = {
+  __typename?: 'CloudAgentTask';
+  cloudAgentId?: Maybe<Scalars['ID']['output']>;
+  completedAt?: Maybe<Scalars['DateTime']['output']>;
+  createdAt: Scalars['DateTime']['output'];
+  createdVia: CloudAgentTaskVia;
+  error?: Maybe<Scalars['String']['output']>;
+  externalRef?: Maybe<Scalars['String']['output']>;
+  id: Scalars['ID']['output'];
+  metadata?: Maybe<Scalars['JSON']['output']>;
+  promptPreview?: Maybe<Scalars['String']['output']>;
+  requestedByUserId?: Maybe<Scalars['ID']['output']>;
+  sessionId?: Maybe<Scalars['String']['output']>;
+  startedAt?: Maybe<Scalars['DateTime']['output']>;
+  status: CloudAgentTaskStatus;
+  structuredOutput?: Maybe<Scalars['JSON']['output']>;
+  /** The turn's closing text, once it has finished. */
+  text?: Maybe<Scalars['String']['output']>;
+};
+
+export type CloudAgentTaskCancelResult = {
+  __typename?: 'CloudAgentTaskCancelResult';
+  /** The status when cancel was requested. Poll cloudAgentTask for the outcome. */
+  status: CloudAgentTaskStatus;
+  taskId: Scalars['ID']['output'];
+};
+
+export type CloudAgentTaskDispatchInput = {
+  agentName?: InputMaybe<Scalars['String']['input']>;
+  /** Explicit agent reuse. Omit all targets to create a fresh agent. */
+  cloudAgentId?: InputMaybe<Scalars['String']['input']>;
+  /** Up to 32 entries of {type, text?, ...scalar attributes} the model reads beside the prompt as background, not instructions: earlier messages, the page a user was on, a log excerpt. On a continued conversation, send only what is new since the last task: earlier turns are already in the session. */
+  context?: InputMaybe<Scalars['JSON']['input']>;
+  /** Your conversation's id (e.g. linear:DEMO-1). The first task starts an agent; later tasks with the same key continue its session, each waiting for the one before it to finish. Mutually exclusive with replyToTaskId and cloudAgentId/sessionId. */
+  conversationKey?: InputMaybe<Scalars['String']['input']>;
+  environmentId: Scalars['String']['input'];
+  externalRef?: InputMaybe<Scalars['String']['input']>;
+  idempotencyKey?: InputMaybe<Scalars['String']['input']>;
+  metadata?: InputMaybe<Scalars['JSON']['input']>;
+  mode?: InputMaybe<CloudAgentTaskMode>;
+  /** JSON Schema object for structured output; requires PROMPT mode. */
+  outputSchema?: InputMaybe<Scalars['JSON']['input']>;
+  projectId: Scalars['String']['input'];
+  prompt: Scalars['String']['input'];
+  /** Continue this task's original agent/session. Mutually exclusive with cloudAgentId/sessionId. */
+  replyToTaskId?: InputMaybe<Scalars['String']['input']>;
+  /** Existing session to continue; requires cloudAgentId. */
+  sessionId?: InputMaybe<Scalars['String']['input']>;
+  source?: InputMaybe<CloudAgentSourceInput>;
+  /** Also send task.progress callbacks, at most one per task every 15 seconds. */
+  webhookProgress?: InputMaybe<Scalars['Boolean']['input']>;
+  webhookSecret?: InputMaybe<Scalars['String']['input']>;
+  webhookUrl?: InputMaybe<Scalars['String']['input']>;
+};
+
+export type CloudAgentTaskHandle = {
+  __typename?: 'CloudAgentTaskHandle';
+  cloudAgentId: Scalars['ID']['output'];
+  replayed: Scalars['Boolean']['output'];
+  sessionId: Scalars['String']['output'];
+  status: CloudAgentTaskStatus;
+  taskId: Scalars['ID']['output'];
+};
+
+/** A question the task's run is waiting on: a tool approval or an MCP server's form. */
+export type CloudAgentTaskInteraction = {
+  __typename?: 'CloudAgentTaskInteraction';
+  actions: Array<CloudAgentTaskInteractionAction>;
+  expiresAt?: Maybe<Scalars['String']['output']>;
+  /** Elicitation: the form fields to fill for ACCEPT. */
+  fields?: Maybe<Scalars['JSON']['output']>;
+  kind: Scalars['String']['output'];
+  message?: Maybe<Scalars['String']['output']>;
+  requestId: Scalars['ID']['output'];
+  requestedAt?: Maybe<Scalars['String']['output']>;
+  /** Elicitation: the MCP server asking. */
+  server?: Maybe<Scalars['String']['output']>;
+  /** Approval: a preview of the tool call's arguments. */
+  summary?: Maybe<Scalars['JSON']['output']>;
+  /** Approval: the tool waiting to run. */
+  tool?: Maybe<Scalars['String']['output']>;
+};
+
+export type CloudAgentTaskInteractionAction =
+  | 'ACCEPT'
+  | 'ALLOW'
+  | 'CANCEL'
+  | 'DECLINE'
+  | 'DENY';
+
+export type CloudAgentTaskMode =
+  | 'FOLLOW_UP'
+  | 'PROMPT'
+  | 'STEER';
+
+export type CloudAgentTaskPage = {
+  __typename?: 'CloudAgentTaskPage';
+  nextCursor?: Maybe<Scalars['String']['output']>;
+  tasks: Array<CloudAgentTask>;
+};
+
+export type CloudAgentTaskProgress = {
+  __typename?: 'CloudAgentTaskProgress';
+  attempt?: Maybe<Scalars['Int']['output']>;
+  steps: Scalars['Int']['output'];
+  todos?: Maybe<Scalars['JSON']['output']>;
+  /** Tools running now, by name. */
+  tools: Array<Scalars['String']['output']>;
+  updatedAt: Scalars['String']['output'];
+};
+
+export type CloudAgentTaskRespondInput = {
+  action: CloudAgentTaskInteractionAction;
+  /** Who gave the answer, for the audit log (e.g. linear:<userId>). Not verified. */
+  answeredBy?: InputMaybe<Scalars['String']['input']>;
+  /** ACCEPT only: the form values, keyed by field name. */
+  content?: InputMaybe<Scalars['JSON']['input']>;
+  /** pendingInteractions[].requestId */
+  requestId: Scalars['String']['input'];
+  taskId: Scalars['String']['input'];
+};
+
+export type CloudAgentTaskRespondResult = {
+  __typename?: 'CloudAgentTaskRespondResult';
+  outcome: Scalars['String']['output'];
+  taskId: Scalars['ID']['output'];
+};
+
+export type CloudAgentTaskResult = {
+  __typename?: 'CloudAgentTaskResult';
+  cloudAgentId: Scalars['ID']['output'];
+  completedAt?: Maybe<Scalars['String']['output']>;
+  error?: Maybe<Scalars['String']['output']>;
+  externalRef?: Maybe<Scalars['String']['output']>;
+  metadata?: Maybe<Scalars['JSON']['output']>;
+  /** Answer these with cloudAgentTaskRespond. */
+  pendingInteractions: Array<CloudAgentTaskInteraction>;
+  progress?: Maybe<CloudAgentTaskProgress>;
+  sessionId: Scalars['String']['output'];
+  sessionState?: Maybe<Scalars['String']['output']>;
+  status: CloudAgentTaskStatus;
+  structuredOutput?: Maybe<Scalars['JSON']['output']>;
+  taskId: Scalars['ID']['output'];
+  text?: Maybe<Scalars['String']['output']>;
+};
+
+export type CloudAgentTaskStatus =
+  | 'AWAITING_INPUT'
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'PENDING'
+  | 'RUNNING';
+
+export type CloudAgentTaskVia =
+  | 'API'
+  | 'MCP';
 
 export type CnameCheck = {
   __typename?: 'CnameCheck';
@@ -1260,6 +1522,7 @@ export type EdgeConfig = {
   overrides: Scalars['JSON']['output'];
   purgeEpoch: Scalars['Int']['output'];
   purgeEpochByKind: Scalars['JSON']['output'];
+  tracing?: Maybe<EdgeTracingConfig>;
   underAttackModeUntil?: Maybe<Scalars['Int']['output']>;
 };
 
@@ -1272,6 +1535,12 @@ export type EdgeRuleDiagnostic = {
   code: Scalars['String']['output'];
   message: Scalars['String']['output'];
   path: Scalars['String']['output'];
+};
+
+export type EdgeTracingConfig = {
+  __typename?: 'EdgeTracingConfig';
+  enabled: Scalars['Boolean']['output'];
+  sampleRate?: Maybe<Scalars['Float']['output']>;
 };
 
 export type EgressGateway = {
@@ -1327,6 +1596,16 @@ export type Environment = Node & {
   __typename?: 'Environment';
   canAccess: Scalars['Boolean']['output'];
   canvasGroupRefs: Scalars['JSON']['output'];
+  /** Services whose edge caching was turned off when the Railway Authentication default last turned on. */
+  clearanceCachingTurnedOff: Array<Scalars['String']['output']>;
+  /** Whether Railway Authentication protects this environment's services that have no setting of their own. */
+  clearanceDefault: Scalars['Boolean']['output'];
+  clearanceDefaultUpdatedAt?: Maybe<Scalars['DateTime']['output']>;
+  /** When the current Railway Authentication default last finished reaching every service that inherits it. */
+  clearancePropagatedAt?: Maybe<Scalars['DateTime']['output']>;
+  clearancePropagationError?: Maybe<Scalars['String']['output']>;
+  /** How many of the environment's services follow its Railway Authentication default, and how many have their own on or off. */
+  clearanceServiceCounts: EnvironmentClearanceServiceCounts;
   config: Scalars['EnvironmentConfig']['output'];
   /** Opaque snapshot token of the environment's IaC-relevant config. Echo it back as baseConfigEtag on environmentApplyChangeSet for optimistic concurrency. */
   configEtag: Scalars['String']['output'];
@@ -1392,6 +1671,19 @@ export type EnvironmentVolumeInstancesArgs = {
   before?: InputMaybe<Scalars['String']['input']>;
   first?: InputMaybe<Scalars['Int']['input']>;
   last?: InputMaybe<Scalars['Int']['input']>;
+};
+
+export type EnvironmentClearanceDefaultUpdateInput = {
+  enabled: Scalars['Boolean']['input'];
+  environmentId: Scalars['String']['input'];
+  projectId: Scalars['String']['input'];
+};
+
+export type EnvironmentClearanceServiceCounts = {
+  __typename?: 'EnvironmentClearanceServiceCounts';
+  inheriting: Scalars['Int']['output'];
+  off: Scalars['Int']['output'];
+  on: Scalars['Int']['output'];
 };
 
 export type EnvironmentConfigPlanCommentUpsertInput = {
@@ -1847,6 +2139,14 @@ export type HttpMetricsSample = {
   value: Scalars['Float']['output'];
 };
 
+export type IacPartialOwnershipResult = {
+  __typename?: 'IacPartialOwnershipResult';
+  /** Resource addresses whose ownership changed. */
+  affectedResources: Array<Scalars['String']['output']>;
+  /** The environment's complete ownership map after the change. */
+  iacPartials: Scalars['JSON']['output'];
+};
+
 export type Incident = {
   __typename?: 'Incident';
   createdAt?: Maybe<Scalars['DateTime']['output']>;
@@ -2131,6 +2431,10 @@ export type Mutation = {
   canvasViewMerge: Scalars['Boolean']['output'];
   /** Clears the recorded progress of a finished PITR enable/disable rollout so the Backups page starts fresh. A rollout still in progress cannot be cleared. */
   clearPitrHaWorkflowProgress: Scalars['Boolean']['output'];
+  /** Creates a Railway Authentication token for a project's protected services and returns it once. Requires a workspace admin and the workspace's Railway Authentication entitlement. */
+  clearanceTokenCreate: ClearanceTokenCreatePayload;
+  /** Revokes a Railway Authentication token. Requires a workspace admin; works without the entitlement. Revoking a revoked token succeeds. */
+  clearanceTokenRevoke: Scalars['Boolean']['output'];
   /** Track CLI authentication-attempt outcomes (signup / sign-in funnel) */
   cliAuthEventTrack: Scalars['Boolean']['output'];
   /** Track events from the Railway CLI */
@@ -2143,6 +2447,10 @@ export type Mutation = {
   cloudAgentCreate: CloudAgent;
   /** Delete a cloud agent. */
   cloudAgentDelete: Scalars['Boolean']['output'];
+  /** Build the agent's code inside its own VM and deploy it. Creates the named service (default: the agent's name) or reuses it. Needs an agent booted with the builder. */
+  cloudAgentDeploy: CloudAgentDeployResult;
+  /** Send lightweight agent feedback to Railway. Returns the report ID after delivery. */
+  cloudAgentFeedbackCreate: Scalars['String']['output'];
   /** Duplicate a running cloud agent. */
   cloudAgentFork: CloudAgent;
   /** Mint a short-lived (5m) JWT for the agent's harness WebSocket (see agentWsUrl). The in-VM gate verifies signature/exp/aud and pins it to this agent. Mint one per dial; the token only has to survive the upgrade. */
@@ -2151,6 +2459,14 @@ export type Mutation = {
   cloudAgentSleep: CloudAgent;
   /** Report the current coding-agent session state. */
   cloudAgentStateReport: Scalars['Boolean']['output'];
+  /** Stop a task. Before its prompt is sent it never starts; after, only its own run is aborted. The task ends failed with "The task was cancelled". A finished task is left as is. */
+  cloudAgentTaskCancel: CloudAgentTaskCancelResult;
+  /** Start a task and return its handle. Creates a fresh agent by default; replyToTaskId continues the original conversation. */
+  cloudAgentTaskDispatch: CloudAgentTaskHandle;
+  /** Recover the latest task response from the agent. May wake the VM. */
+  cloudAgentTaskRecover: CloudAgentTaskResult;
+  /** Answer a question the task is waiting on. Never wakes the VM; poll cloudAgentTask for the outcome. */
+  cloudAgentTaskRespond: CloudAgentTaskRespondResult;
   /** Wake a sleeping cloud agent. */
   cloudAgentWake: CloudAgent;
   /** Creates a new custom domain. */
@@ -2187,6 +2503,10 @@ export type Mutation = {
   deploymentTriggerDelete: Scalars['Boolean']['output'];
   /** Updates a deployment trigger. */
   deploymentTriggerUpdate: DeploymentTrigger;
+  /** Forget the box `ssh dev.new` lands you in; the next connection creates a new one. */
+  devNewLandingTargetClear: Scalars['Boolean']['output'];
+  /** Make this cloud agent the box `ssh dev.new` lands you in. Replaces any previous choice. */
+  devNewLandingTargetSet: CloudAgent;
   /** Disables point-in-time recovery on an HA database cluster with the same rolling rollout as enable. The backup bucket is left intact, so existing backup history is preserved. */
   disablePitrForHaCluster: TemplateDeployPayload;
   /** Disables CDN for a service, soft-deleting the edge config. */
@@ -2213,12 +2533,18 @@ export type Mutation = {
   enableServiceCdn: EdgeConfig;
   /** Experimental: applies an intent-level RailwayChangeSet and returns operation results. */
   environmentApplyChangeSet: ChangeSetApplyResult;
+  /** Sets whether Railway Authentication protects an environment's services that have no setting of their own, and pushes it to them. Requires a workspace admin; turning it on also requires the workspace's Railway Authentication entitlement. Services with edge caching on that it protects have their caching turned off. */
+  environmentClearanceDefaultUpdate: Scalars['Boolean']['output'];
   /** Posts or updates a `railway config plan` comment on a GitHub pull request under the Railway app identity. The caller proves it runs in the target repo with a GitHub Actions OIDC token; the comment body is composed server-side from the structured plan. */
   environmentConfigPlanCommentUpsert: EnvironmentConfigPlanCommentUpsertResult;
   /** Creates a new environment. */
   environmentCreate: Environment;
   /** Deletes an environment. */
   environmentDelete: Scalars['Boolean']['output'];
+  /** Release resources from a named IaC partial without deleting, redeploying, or changing them. Omit resources to release the entire partial. Whole-project management is possible once no named partials remain. A later named-partial apply can claim released resources again. */
+  environmentIacPartialRelease: IacPartialOwnershipResult;
+  /** Transfer resources between named IaC partials without deleting, redeploying, or changing them. Omit resources to transfer the entire source partial. The destination may be a new or existing partial. */
+  environmentIacPartialTransfer: IacPartialOwnershipResult;
   /** Commit the provided patch to the environment. */
   environmentPatchCommit: Scalars['String']['output'];
   /** Commits the staged changes for a single environment. */
@@ -2322,18 +2648,32 @@ export type Mutation = {
   pluginUpdate: Plugin;
   /** Update the email preferences for a user */
   preferencesUpdate: Preferences;
-  /** Create or get a private network. */
+  /**
+   * Removed. Private networks and endpoints are managed by the platform; enable private networking on the environment instead.
+   * @deprecated Removed. Private networks and endpoints are managed by the platform; enable private networking on the environment instead.
+   */
   privateNetworkCreateOrGet: PrivateNetwork;
-  /** Create or get a private network endpoint. */
+  /**
+   * Removed. Private networks and endpoints are managed by the platform; enable private networking on the environment instead.
+   * @deprecated Removed. Private networks and endpoints are managed by the platform; enable private networking on the environment instead.
+   */
   privateNetworkEndpointCreateOrGet: PrivateNetworkEndpoint;
-  /** Delete a private network endpoint. */
+  /**
+   * Removed. Private networks and endpoints are managed by the platform; enable private networking on the environment instead.
+   * @deprecated Removed. Private networks and endpoints are managed by the platform; enable private networking on the environment instead.
+   */
   privateNetworkEndpointDelete: Scalars['Boolean']['output'];
   /** Rename a private network endpoint. */
   privateNetworkEndpointRename: Scalars['Boolean']['output'];
-  /** Delete all private networks for an environment. */
+  /**
+   * Removed. Private networks and endpoints are managed by the platform; enable private networking on the environment instead.
+   * @deprecated Removed. Private networks and endpoints are managed by the platform; enable private networking on the environment instead.
+   */
   privateNetworksForEnvironmentDelete: Scalars['Boolean']['output'];
   /** Claims a project. */
   projectClaim: Project;
+  /** Sets whether environments created from now on start with Railway Authentication protecting services that have no setting of their own. Existing environments are unchanged. Requires a workspace admin; turning it on also requires the workspace's Railway Authentication entitlement. */
+  projectClearanceDefaultUpdate: Scalars['Boolean']['output'];
   /** Creates a new project. */
   projectCreate: Project;
   /** Deletes a project. */
@@ -2462,6 +2802,8 @@ export type Mutation = {
   serviceInstanceAutoUpdateSnooze: Scalars['Boolean']['output'];
   /** Undo an active auto-update skip for a service instance, applied immediately (no config staging, no redeploy). The recurring maintenance window and update policy are untouched — the next scheduled occurrence fires normally again. */
   serviceInstanceAutoUpdateSnoozeClear: Scalars['Boolean']['output'];
+  /** Sets a service instance's own Railway Authentication setting: on, off, or none (follow the environment's default). Requires a workspace admin; ending up on also requires the workspace's Railway Authentication entitlement and edge caching off. */
+  serviceInstanceClearanceUpdate: Scalars['Boolean']['output'];
   /** Deploy a service instance */
   serviceInstanceDeploy: Scalars['Boolean']['output'];
   /** Deploy a service instance. Returns a deployment ID */
@@ -2506,7 +2848,7 @@ export type Mutation = {
   sshPublicKeyCreate: SshPublicKey;
   /** Deletes an SSH public key. */
   sshPublicKeyDelete: Scalars['Boolean']['output'];
-  /** Approve an SSH signup: register the offered SSH key on the authenticated account so the agent is recognized. */
+  /** Approve an SSH signup: register the offered SSH key on the authenticated account so the agent is recognized. When the key owns an anonymous trial box, claims that trial into workspaceId and re-owns the key. */
   sshSignupApprove: Scalars['Boolean']['output'];
   /**
    * Creates a new TCP proxy for a service instance.
@@ -2604,7 +2946,7 @@ export type Mutation = {
   volumeInstanceUpdate: Scalars['Boolean']['output'];
   /** Update a persistent volume in a project */
   volumeUpdate: Volume;
-  /** Test a webhook URL by sending a sample payload. Returns the HTTP status code. */
+  /** Test a webhook URL by sending a sample payload. Returns the HTTP status code. Custom headers come from `headers`, plus the stored headers of `notificationRuleId` for names not passed. */
   webhookTest: Scalars['Int']['output'];
   /** Delete a workspace and all data associated with it */
   workspaceDelete: Scalars['Boolean']['output'];
@@ -2736,6 +3078,16 @@ export type MutationClearPitrHaWorkflowProgressArgs = {
 };
 
 
+export type MutationClearanceTokenCreateArgs = {
+  input: ClearanceTokenCreateInput;
+};
+
+
+export type MutationClearanceTokenRevokeArgs = {
+  id: Scalars['String']['input'];
+};
+
+
 export type MutationCliAuthEventTrackArgs = {
   input: CliAuthEventTrackInput;
 };
@@ -2767,6 +3119,19 @@ export type MutationCloudAgentDeleteArgs = {
 };
 
 
+export type MutationCloudAgentDeployArgs = {
+  id: Scalars['ID']['input'];
+  path?: InputMaybe<Scalars['String']['input']>;
+  regions?: InputMaybe<Scalars['JSON']['input']>;
+  serviceName?: InputMaybe<Scalars['String']['input']>;
+};
+
+
+export type MutationCloudAgentFeedbackCreateArgs = {
+  input: CloudAgentFeedbackInput;
+};
+
+
 export type MutationCloudAgentForkArgs = {
   id: Scalars['ID']['input'];
   name?: InputMaybe<Scalars['String']['input']>;
@@ -2787,6 +3152,27 @@ export type MutationCloudAgentSleepArgs = {
 
 export type MutationCloudAgentStateReportArgs = {
   input: CloudAgentStateReportInput;
+};
+
+
+export type MutationCloudAgentTaskCancelArgs = {
+  taskId: Scalars['String']['input'];
+};
+
+
+export type MutationCloudAgentTaskDispatchArgs = {
+  input: CloudAgentTaskDispatchInput;
+};
+
+
+export type MutationCloudAgentTaskRecoverArgs = {
+  cloudAgentId: Scalars['String']['input'];
+  sessionId: Scalars['String']['input'];
+};
+
+
+export type MutationCloudAgentTaskRespondArgs = {
+  input: CloudAgentTaskRespondInput;
 };
 
 
@@ -2885,6 +3271,11 @@ export type MutationDeploymentTriggerUpdateArgs = {
 };
 
 
+export type MutationDevNewLandingTargetSetArgs = {
+  cloudAgentId: Scalars['ID']['input'];
+};
+
+
 export type MutationDisablePitrForHaClusterArgs = {
   input: DisablePitrForHaClusterInput;
 };
@@ -2957,6 +3348,11 @@ export type MutationEnvironmentApplyChangeSetArgs = {
 };
 
 
+export type MutationEnvironmentClearanceDefaultUpdateArgs = {
+  input: EnvironmentClearanceDefaultUpdateInput;
+};
+
+
 export type MutationEnvironmentConfigPlanCommentUpsertArgs = {
   input: EnvironmentConfigPlanCommentUpsertInput;
 };
@@ -2972,10 +3368,28 @@ export type MutationEnvironmentDeleteArgs = {
 };
 
 
+export type MutationEnvironmentIacPartialReleaseArgs = {
+  baseConfigEtag?: InputMaybe<Scalars['String']['input']>;
+  environmentId: Scalars['String']['input'];
+  partial: Scalars['String']['input'];
+  resources?: InputMaybe<Array<Scalars['String']['input']>>;
+};
+
+
+export type MutationEnvironmentIacPartialTransferArgs = {
+  baseConfigEtag?: InputMaybe<Scalars['String']['input']>;
+  environmentId: Scalars['String']['input'];
+  fromPartial: Scalars['String']['input'];
+  resources?: InputMaybe<Array<Scalars['String']['input']>>;
+  toPartial: Scalars['String']['input'];
+};
+
+
 export type MutationEnvironmentPatchCommitArgs = {
   commitMessage?: InputMaybe<Scalars['String']['input']>;
   environmentId: Scalars['String']['input'];
   patch?: InputMaybe<Scalars['EnvironmentConfig']['input']>;
+  skipDeploys?: InputMaybe<Scalars['Boolean']['input']>;
 };
 
 
@@ -3221,6 +3635,11 @@ export type MutationPrivateNetworksForEnvironmentDeleteArgs = {
 export type MutationProjectClaimArgs = {
   id: Scalars['String']['input'];
   workspaceId: Scalars['String']['input'];
+};
+
+
+export type MutationProjectClearanceDefaultUpdateArgs = {
+  input: ProjectClearanceDefaultUpdateInput;
 };
 
 
@@ -3549,6 +3968,11 @@ export type MutationServiceInstanceAutoUpdateSnoozeClearArgs = {
 };
 
 
+export type MutationServiceInstanceClearanceUpdateArgs = {
+  input: ServiceInstanceClearanceUpdateInput;
+};
+
+
 export type MutationServiceInstanceDeployArgs = {
   commitSha?: InputMaybe<Scalars['String']['input']>;
   environmentId: Scalars['String']['input'];
@@ -3672,6 +4096,7 @@ export type MutationSshPublicKeyDeleteArgs = {
 
 export type MutationSshSignupApproveArgs = {
   code: Scalars['String']['input'];
+  workspaceId?: InputMaybe<Scalars['String']['input']>;
 };
 
 
@@ -3889,6 +4314,8 @@ export type MutationVolumeUpdateArgs = {
 
 
 export type MutationWebhookTestArgs = {
+  headers?: InputMaybe<Array<WebhookHeaderInput>>;
+  notificationRuleId?: InputMaybe<Scalars['String']['input']>;
   payload: Scalars['String']['input'];
   url: Scalars['String']['input'];
 };
@@ -4061,6 +4488,7 @@ export type Node = {
 
 export type NotificationChannel = Node & {
   __typename?: 'NotificationChannel';
+  /** Webhook header values are write-only: the read side carries header names with null values. */
   config: Scalars['NotificationChannelConfig']['output'];
   createdAt: Scalars['DateTime']['output'];
   id: Scalars['ID']['output'];
@@ -4412,6 +4840,8 @@ export type PlanLimitOverride = Node & {
 export type PlatformFeatureFlag =
   | 'AGENT_USAGE_CH_INGEST'
   | 'ALERT_SUS_USERS_CRON_KILLSWITCH'
+  | 'BLOCK_TRIAL_RESTRICTION_APPEALS'
+  | 'BUILDER_V4_ROLLOUT'
   | 'BUILD_DEPLOY_QUEUE_V2'
   | 'CAC_T0_KILLSWITCH'
   | 'CANVAS_CROSS_ENV_GUARD_ENFORCE'
@@ -4431,21 +4861,33 @@ export type PlatformFeatureFlag =
   | 'IN_DASHBOARD_SUPPORT'
   | 'KAFKA_EPHEMERAL_ENVIRONMENT_UPDATES'
   | 'LOGS_LONG_WINDOW_CHUNKING'
+  | 'MCP_OAUTH_AUDIENCE_ENFORCE'
+  | 'MCP_OAUTH_CIMD'
+  | 'MCP_OAUTH_SCOPE_CHALLENGES'
+  | 'MCP_OAUTH_TOKEN_ROUTE_FENCE'
+  | 'NEW_PROJECT_PAGE'
   | 'NEW_STRIPE_WEBHOOK_VERSION_ROLLOUT'
   | 'NUDGES'
+  | 'NUDGE_BACKUP_SCHEDULE_MISSING'
+  | 'NUDGE_FIRST_DEPLOY_FAILED'
   | 'NUDGE_PUBLIC_DB_URL_WITHIN_PROJECT'
   | 'NUDGE_RESUBSCRIBE_AFTER_DEAD_INVOICE'
+  | 'NUDGE_UPGRADE_TO_PRO'
   | 'OAUTH_DCR_KILLSWITCH'
   | 'PRE_DEPLOY_TIMEOUT_KILLSWITCH'
   | 'PROJECT_HISTORY_DUAL_WRITE'
-  | 'PROJECT_HISTORY_READ_FROM_CH'
+  | 'RADAR_HTTP_PATTERN_DETECTION'
+  | 'RELAY_SPEND_RESERVATION_KILLSWITCH'
   | 'REMOVE_DEPLOYMENT_COMPACT'
   | 'SERVICEINSTANCE_DATALOADER_FOR_STATIC_URL'
   | 'SPLIT_USAGE_QUERIES'
   | 'SSH_ANON_PROVISIONING'
+  | 'SSH_TRIAL_GUEST_IDLE_SLEEP'
+  | 'STRIPE_INTERACTIVE_SUBSCRIPTION_ON_SESSION'
   | 'STRIPE_METERS_NEW_ACCOUNTS'
   | 'STRIPE_METERS_SHADOW_ENABLED'
-  | 'UNIFIED_TOKENS_AUTHORIZATION_SHADOW'
+  | 'STRIPE_WEBHOOK_DISPUTE_CANCELLATION'
+  | 'TRIAL_RELAY_MODEL_ALLOWLIST_KILLSWITCH'
   | 'UPDATED_VM_QUERIES'
   | 'USAGE_CH_READS'
   | 'VM_COUPON_MIGRATION'
@@ -4637,6 +5079,10 @@ export type Project = Node & {
   baseEnvironmentId?: Maybe<Scalars['String']['output']>;
   botPrEnvironments: Scalars['Boolean']['output'];
   buckets: ProjectBucketsConnection;
+  /** Whether environments created from now on start with Railway Authentication protecting services that have no setting of their own. Existing environments keep their own default. */
+  clearanceDefaultForNewEnvironments: Scalars['Boolean']['output'];
+  /** The project's Railway Authentication tokens that still work (not revoked, not expired), newest first. */
+  clearanceTokens: Array<ClearanceToken>;
   createdAt: Scalars['DateTime']['output'];
   deletedAt?: Maybe<Scalars['DateTime']['output']>;
   /** @deprecated Use environment.deploymentTriggers for properly scoped access control */
@@ -4667,6 +5113,10 @@ export type Project = Node & {
   team?: Maybe<Team>;
   /** @deprecated Use workspaceId */
   teamId?: Maybe<Scalars['String']['output']>;
+  /** @deprecated Tracing is set per service instance: read ServiceInstance.tracingEnabled. True when any instance in the project is traced. */
+  tracingEnabled: Scalars['Boolean']['output'];
+  /** @deprecated The edge traces every client-facing request; there is no sample rate. Always null. */
+  tracingSampleRate?: Maybe<Scalars['Float']['output']>;
   updatedAt: Scalars['DateTime']['output'];
   /** Highest project-scoped role the current user holds on this project, through a direct project permission or an access group. Does not include the workspace role. */
   viewerRole?: Maybe<ProjectRole>;
@@ -4759,6 +5209,11 @@ export type ProjectBucketsConnectionEdge = {
   __typename?: 'ProjectBucketsConnectionEdge';
   cursor: Scalars['String']['output'];
   node: Bucket;
+};
+
+export type ProjectClearanceDefaultUpdateInput = {
+  enabled: Scalars['Boolean']['input'];
+  projectId: Scalars['String']['input'];
 };
 
 export type ProjectComplianceInfo = {
@@ -4868,6 +5323,7 @@ export type ProjectHistoryEntry = {
   outcome: Scalars['String']['output'];
   parentRef?: Maybe<Scalars['String']['output']>;
   payload?: Maybe<Scalars['JSON']['output']>;
+  serviceIds: Array<Scalars['String']['output']>;
   severity: EventSeverity;
   source: Scalars['String']['output'];
   workflowId?: Maybe<Scalars['String']['output']>;
@@ -5226,6 +5682,10 @@ export type Query = {
   cloudAgentCheckpoints: QueryCloudAgentCheckpointsConnection;
   /** Shell and exec sessions running on a cloud agent's VM that you can reconnect to. Null if the agent has no running machine. */
   cloudAgentConsoleSessions?: Maybe<QueryCloudAgentConsoleSessionsConnection>;
+  /** Read a task turn without waking the VM: the latest on the agent/session, or taskId's. */
+  cloudAgentTask: CloudAgentTaskResult;
+  /** List task records in an environment, newest first. Filter to one agent, or with sessionId to one session's turns. */
+  cloudAgentTasks: CloudAgentTaskPage;
   /** Cloud agents in an environment. */
   cloudAgents: Array<CloudAgent>;
   /** Get compliance agreements for a workspace including HIPAA BAA and GDPR DPA status. */
@@ -5248,6 +5708,8 @@ export type Query = {
   deploymentTriggers: QueryDeploymentTriggersConnection;
   /** Get all deployments */
   deployments: QueryDeploymentsConnection;
+  /** The cloud agent `ssh dev.new` lands you in, or null when the next connection will create one. */
+  devNewLandingTarget?: Maybe<CloudAgent>;
   /** Fetch individual DNS query logs for an environment */
   dnsQueryLogs: Array<DnsQueryLog>;
   /**
@@ -5459,7 +5921,7 @@ export type Query = {
   signals: Array<Signal>;
   /** Gets SSH public keys. If workspaceId is provided, returns the keys owned by that workspace (requires workspace MEMBER access). Under a workspace-scoped API token, workspaceId defaults to the token's workspace when omitted; otherwise returns the authenticated user's personal keys. */
   sshPublicKeys: QuerySshPublicKeysConnection;
-  /** Details for an SSH signup confirm page: the SSH key fingerprint to verify before binding it to the account. */
+  /** Details for an SSH signup confirm page: the SSH key fingerprint to verify before binding it to the account, and the trial box it owns if any. */
   sshSignupInfo: SshSignupInfo;
   /** All TCP proxies for a service instance */
   tcpProxies: Array<TcpProxy>;
@@ -5485,6 +5947,12 @@ export type Query = {
   templates: QueryTemplatesConnection;
   /** Count all published templates. */
   templatesCount: Scalars['Int']['output'];
+  /** The spans of one trace, oldest first. Only spans belonging to the environment are returned */
+  trace: Array<TraceSpan>;
+  /** Traces of an environment with at least one span matching the filter, newest first */
+  traces: Array<TraceSummary>;
+  /** Span activity per service of an environment within retention; a service absent from the list has produced no spans at all */
+  tracingStatus: Array<ServiceTracingStatus>;
   /** Get all trusted domains for a workspace */
   trustedDomains: QueryTrustedDomainsConnection;
   /** Gets the TwoFactorInfo for the authenticated user. */
@@ -5632,6 +6100,23 @@ export type QueryCloudAgentConsoleSessionsArgs = {
   cloudAgentId: Scalars['ID']['input'];
   first?: InputMaybe<Scalars['Int']['input']>;
   last?: InputMaybe<Scalars['Int']['input']>;
+};
+
+
+export type QueryCloudAgentTaskArgs = {
+  cloudAgentId: Scalars['String']['input'];
+  sessionId: Scalars['String']['input'];
+  taskId?: InputMaybe<Scalars['String']['input']>;
+};
+
+
+export type QueryCloudAgentTasksArgs = {
+  cloudAgentId?: InputMaybe<Scalars['String']['input']>;
+  cursor?: InputMaybe<Scalars['String']['input']>;
+  environmentId: Scalars['String']['input'];
+  limit?: InputMaybe<Scalars['Int']['input']>;
+  sessionId?: InputMaybe<Scalars['String']['input']>;
+  status?: InputMaybe<CloudAgentTaskStatus>;
 };
 
 
@@ -6412,6 +6897,28 @@ export type QueryTemplatesArgs = {
 };
 
 
+export type QueryTraceArgs = {
+  environmentId: Scalars['String']['input'];
+  maxSpans?: InputMaybe<Scalars['Int']['input']>;
+  traceId: Scalars['String']['input'];
+};
+
+
+export type QueryTracesArgs = {
+  endDate?: InputMaybe<Scalars['String']['input']>;
+  environmentId: Scalars['String']['input'];
+  filter?: InputMaybe<Scalars['String']['input']>;
+  limit?: InputMaybe<Scalars['Int']['input']>;
+  serviceId?: InputMaybe<Scalars['String']['input']>;
+  startDate?: InputMaybe<Scalars['String']['input']>;
+};
+
+
+export type QueryTracingStatusArgs = {
+  environmentId: Scalars['String']['input'];
+};
+
+
 export type QueryTrustedDomainsArgs = {
   after?: InputMaybe<Scalars['String']['input']>;
   before?: InputMaybe<Scalars['String']['input']>;
@@ -7176,9 +7683,26 @@ export type RestartPolicyType =
   | 'NEVER'
   | 'ON_FAILURE';
 
+export type SshSignupClaimableWorkspace = {
+  __typename?: 'SSHSignupClaimableWorkspace';
+  id: Scalars['String']['output'];
+  name: Scalars['String']['output'];
+};
+
 export type SshSignupInfo = {
   __typename?: 'SSHSignupInfo';
+  claimableWorkspaces: Array<SshSignupClaimableWorkspace>;
   fingerprint: Scalars['String']['output'];
+  trial?: Maybe<SshSignupTrial>;
+};
+
+/** The anonymous trial box the offered SSH key currently owns; approving the signup claims it. */
+export type SshSignupTrial = {
+  __typename?: 'SSHSignupTrial';
+  buildExpiresAt?: Maybe<Scalars['DateTime']['output']>;
+  cloudAgentId?: Maybe<Scalars['String']['output']>;
+  projectId: Scalars['String']['output'];
+  projectName: Scalars['String']['output'];
 };
 
 export type Sandbox = {
@@ -7215,6 +7739,8 @@ export type SandboxCreateInput = {
   publicDomains?: InputMaybe<Array<SandboxDomainInput>>;
   /** Region to place the sandbox in (e.g. us-west2, us-east4-eqdc4a). Defaults to the platform default region when omitted. */
   region?: InputMaybe<Scalars['String']['input']>;
+  /** Creation-time CPU and memory, including for forks and checkpoint restores. Each omitted or null field uses the workspace's sandbox default; explicit values must not exceed its independent VM maximum. */
+  resources?: InputMaybe<SandboxResourcesInput>;
   /** Fork an existing running sandbox in this environment. Mutually exclusive with template. */
   sourceSandboxId?: InputMaybe<Scalars['String']['input']>;
   template?: InputMaybe<SandboxTemplateInput>;
@@ -7255,6 +7781,13 @@ export type SandboxNetworkIsolation =
   | 'ISOLATED'
   /** Joins the environment's private network. */
   | 'PRIVATE';
+
+export type SandboxResourcesInput = {
+  /** Positive vCPU for the new sandbox; fractional values are supported. Omitted or null uses the workspace's sandbox default. Must not exceed its VM maximum. */
+  cpu?: InputMaybe<Scalars['Float']['input']>;
+  /** Memory in decimal GB (1 GB = 1,000,000,000 bytes), rounded to whole bytes. Must be at least 1 byte and at most the workspace's VM maximum. Omitted or null uses its sandbox default. */
+  memoryGB?: InputMaybe<Scalars['Float']['input']>;
+};
 
 /** A resumable session inside a sandbox: an interactive shell or a one-off exec command. */
 export type SandboxSession = {
@@ -7323,6 +7856,8 @@ export type SandboxTemplateInput = {
 
 export type Service = Node & {
   __typename?: 'Service';
+  /** @deprecated Set per service instance: read ServiceInstance.autoInstrumentationEnabled. Reports the production environment's instance. */
+  autoInstrumentationEnabled: Scalars['Boolean']['output'];
   createdAt: Scalars['DateTime']['output'];
   deletedAt?: Maybe<Scalars['DateTime']['output']>;
   /** @deprecated Use environment.deployments for properly scoped access control */
@@ -7344,6 +7879,8 @@ export type Service = Node & {
   templateId?: Maybe<Scalars['String']['output']>;
   templateServiceId?: Maybe<Scalars['String']['output']>;
   templateThreadSlug?: Maybe<Scalars['String']['output']>;
+  /** @deprecated Tracing is set per service instance: read ServiceInstance.tracingEnabled. Reports the production environment's instance. */
+  tracingEnabled?: Maybe<Scalars['Boolean']['output']>;
   updatedAt: Scalars['DateTime']['output'];
 };
 
@@ -7467,8 +8004,14 @@ export type ServiceInstance = Node & {
   __typename?: 'ServiceInstance';
   /** All currently active (deployed and running) deployments for this service instance */
   activeDeployments: Array<Deployment>;
+  /** Instrument the service's processes with eBPF (OBI) for supported runtimes, no code changes. Only active while tracingEnabled is true. */
+  autoInstrumentationEnabled: Scalars['Boolean']['output'];
   buildCommand?: Maybe<Scalars['String']['output']>;
   builder: Builder;
+  /** This service's own Railway Authentication setting. Null means no setting of its own: it follows the environment's default (see clearanceEffective). */
+  clearance?: Maybe<Scalars['Boolean']['output']>;
+  /** Whether Railway Authentication protects this service's HTTP domains: its own setting, else its environment's default. */
+  clearanceEffective: Scalars['Boolean']['output'];
   createdAt: Scalars['DateTime']['output'];
   cronSchedule?: Maybe<Scalars['String']['output']>;
   deletedAt?: Maybe<Scalars['DateTime']['output']>;
@@ -7506,6 +8049,8 @@ export type ServiceInstance = Node & {
   sleepApplication?: Maybe<Scalars['Boolean']['output']>;
   source?: Maybe<ServiceSource>;
   startCommand?: Maybe<Scalars['String']['output']>;
+  /** Trace requests to the service in this environment: the edge records a span per client-facing request to its domains and the next deploy provides the OpenTelemetry exporter variables. */
+  tracingEnabled: Scalars['Boolean']['output'];
   updatedAt: Scalars['DateTime']['output'];
   upstreamUrl?: Maybe<Scalars['String']['output']>;
   watchPatterns: Array<Scalars['String']['output']>;
@@ -7530,6 +8075,14 @@ export type ServiceInstanceAutoDeployUpdateResult = {
   enabled: Scalars['Boolean']['output'];
 };
 
+export type ServiceInstanceClearanceUpdateInput = {
+  /** On or off. Null (or omitted) removes the service's own setting so it follows the environment's default. */
+  enabled?: InputMaybe<Scalars['Boolean']['input']>;
+  environmentId: Scalars['String']['input'];
+  projectId: Scalars['String']['input'];
+  serviceId: Scalars['String']['input'];
+};
+
 export type ServiceInstanceLimitsUpdateInput = {
   environmentId: Scalars['String']['input'];
   /** Amount of memory in GB to allocate to the service instance */
@@ -7540,6 +8093,8 @@ export type ServiceInstanceLimitsUpdateInput = {
 };
 
 export type ServiceInstanceUpdateInput = {
+  /** Instrument the service's processes with eBPF (OBI) while its tracing is on. Reaches running containers within about a minute, no redeploy needed. */
+  autoInstrumentationEnabled?: InputMaybe<Scalars['Boolean']['input']>;
   buildCommand?: InputMaybe<Scalars['String']['input']>;
   builder?: InputMaybe<Builder>;
   cronSchedule?: InputMaybe<Scalars['String']['input']>;
@@ -7563,6 +8118,8 @@ export type ServiceInstanceUpdateInput = {
   sleepApplication?: InputMaybe<Scalars['Boolean']['input']>;
   source?: InputMaybe<ServiceSourceInput>;
   startCommand?: InputMaybe<Scalars['String']['input']>;
+  /** Trace requests to the service in this environment. Takes effect at the edge within seconds and in the app on the next deploy. */
+  tracingEnabled?: InputMaybe<Scalars['Boolean']['input']>;
   watchPatterns?: InputMaybe<Array<Scalars['String']['input']>>;
 };
 
@@ -7599,6 +8156,16 @@ export type ServiceSource = {
 export type ServiceSourceInput = {
   image?: InputMaybe<Scalars['String']['input']>;
   repo?: InputMaybe<Scalars['String']['input']>;
+};
+
+/** Whether a service's requests are producing spans, per exporting hop. The edge tracing a request says nothing about the app behind it. */
+export type ServiceTracingStatus = {
+  __typename?: 'ServiceTracingStatus';
+  /** When the edge last exported a span for a request to the service; null when it never has within retention */
+  lastEdgeSpanAt?: Maybe<Scalars['DateTime']['output']>;
+  /** When the service's own app last exported a span; null when it never has within retention */
+  lastServiceSpanAt?: Maybe<Scalars['DateTime']['output']>;
+  serviceId: Scalars['String']['output'];
 };
 
 export type ServiceUpdateInput = {
@@ -8108,6 +8675,8 @@ export type Template = Node & {
   metadata: Scalars['TemplateMetadata']['output'];
   name: Scalars['String']['output'];
   projects: Scalars['Int']['output'];
+  /** The active restriction stopping this workspace publishing templates, so a restricted author can be sent to the page that explains it and takes the appeal. Null when publishing is not restricted, and for anyone but the template's owner: the `template` query is public, and whether a workspace is under an abuse restriction is not. */
+  publishingRestrictionId?: Maybe<Scalars['String']['output']>;
   readme?: Maybe<Scalars['String']['output']>;
   recentProjects: Scalars['Int']['output'];
   serializedConfig?: Maybe<Scalars['SerializedTemplateConfig']['output']>;
@@ -8158,6 +8727,7 @@ export type TemplateDeployInput = {
 
 export type TemplateDeployPayload = {
   __typename?: 'TemplateDeployPayload';
+  operationId?: Maybe<Scalars['String']['output']>;
   projectId: Scalars['String']['output'];
   workflowId?: Maybe<Scalars['String']['output']>;
 };
@@ -8188,7 +8758,7 @@ export type TemplateDeployService = {
 
 export type TemplateDeployV2Input = {
   environmentId?: InputMaybe<Scalars['String']['input']>;
-  /** Use an existing service as the cluster root instead of creating a new one. Used for HA cluster conversion where an existing postgres becomes the primary. */
+  /** Use an existing service as the cluster root instead of creating a new one. A live cluster edge is resolved to the root it fronts. Used for HA cluster conversion where an existing postgres becomes the primary. */
   existingRootServiceId?: InputMaybe<Scalars['String']['input']>;
   projectId?: InputMaybe<Scalars['String']['input']>;
   serializedConfig: Scalars['SerializedTemplateConfig']['input'];
@@ -8293,6 +8863,83 @@ export type TemplateStatus =
   | 'HIDDEN'
   | 'PUBLISHED'
   | 'UNPUBLISHED';
+
+/** One span of a trace */
+export type TraceSpan = {
+  __typename?: 'TraceSpan';
+  /** Which hop exported the span: edge, proxy or service */
+  component: Scalars['String']['output'];
+  deploymentId?: Maybe<Scalars['String']['output']>;
+  deploymentInstanceId?: Maybe<Scalars['String']['output']>;
+  durationMs: Scalars['Float']['output'];
+  events: Array<TraceSpanEvent>;
+  /** INTERNAL, SERVER, CLIENT, PRODUCER, CONSUMER or UNSPECIFIED */
+  kind: Scalars['String']['output'];
+  links: Array<TraceSpanLink>;
+  name: Scalars['String']['output'];
+  /** Absent on a root span */
+  parentSpanId?: Maybe<Scalars['String']['output']>;
+  /** Resource attributes as exported, without the railway.* keys Railway promotes into typed fields */
+  resourceAttributes: Scalars['JSON']['output'];
+  /** Railway service the span belongs to, when known */
+  serviceId?: Maybe<Scalars['String']['output']>;
+  /** The exporter's service.name resource attribute */
+  serviceName: Scalars['String']['output'];
+  spanAttributes: Scalars['JSON']['output'];
+  /** 16 lower-case hex characters */
+  spanId: Scalars['String']['output'];
+  /** ISO timestamp */
+  startedAt: Scalars['String']['output'];
+  /** UNSET, OK or ERROR */
+  statusCode: Scalars['String']['output'];
+  statusMessage: Scalars['String']['output'];
+  traceId: Scalars['String']['output'];
+};
+
+/** A timestamped event on a span */
+export type TraceSpanEvent = {
+  __typename?: 'TraceSpanEvent';
+  attributes: Scalars['JSON']['output'];
+  name: Scalars['String']['output'];
+  timestamp: Scalars['String']['output'];
+};
+
+/** A link from a span to a span in another trace */
+export type TraceSpanLink = {
+  __typename?: 'TraceSpanLink';
+  spanId: Scalars['String']['output'];
+  traceId: Scalars['String']['output'];
+};
+
+/** One trace of an environment: the request as a whole, summarised from its spans */
+export type TraceSummary = {
+  __typename?: 'TraceSummary';
+  /** From the earliest span start to the latest span end */
+  durationMs: Scalars['Float']['output'];
+  /** Spans with an error status */
+  errorCount: Scalars['Int']['output'];
+  /** Whether the edge exported any span of the trace */
+  hasEdge: Scalars['Boolean']['output'];
+  /** Which hop exported the root span: edge (hikari), proxy (tcp-proxy) or service */
+  rootComponent: Scalars['String']['output'];
+  /** The root span's server.address, when it set one */
+  rootServerAddress?: Maybe<Scalars['String']['output']>;
+  /** Railway service the root span belongs to */
+  rootServiceId: Scalars['String']['output'];
+  /** The root span's service.name */
+  rootServiceName: Scalars['String']['output'];
+  /** Name of the root span, or of the earliest span when the root is missing */
+  rootSpanName: Scalars['String']['output'];
+  /** The root span's url.path, when it set one */
+  rootUrlPath?: Maybe<Scalars['String']['output']>;
+  /** service.name of the earliest span a service exported; null when the request never reached one */
+  serviceName?: Maybe<Scalars['String']['output']>;
+  spanCount: Scalars['Int']['output'];
+  /** Start of the earliest span (ISO timestamp) */
+  startedAt: Scalars['String']['output'];
+  /** W3C trace id, 32 lower-case hex characters */
+  traceId: Scalars['String']['output'];
+};
 
 export type TrustedDomain = {
   __typename?: 'TrustedDomain';
@@ -8766,6 +9413,11 @@ export type VolumeVolumeInstancesConnectionEdge = {
   node: VolumeInstance;
 };
 
+export type WebhookHeaderInput = {
+  name: Scalars['String']['input'];
+  value: Scalars['String']['input'];
+};
+
 export type WithdrawalPlatformTypes =
   | 'BMAC'
   | 'GITHUB'
@@ -8774,6 +9426,10 @@ export type WithdrawalPlatformTypes =
 
 export type WorkflowId = {
   __typename?: 'WorkflowId';
+  /** Why MySQL archive continuity could not be verified. The restore remains allowed and its image performs the authoritative replay check. */
+  archiveContinuityUnverifiedReason?: Maybe<Scalars['String']['output']>;
+  /** For MySQL PITR restores, whether archive continuity was verified before the workflow started. */
+  archiveContinuityVerified?: Maybe<Scalars['Boolean']['output']>;
   workflowId?: Maybe<Scalars['String']['output']>;
 };
 
@@ -9139,6 +9795,24 @@ export type RailwaySandboxCheckpointDeleteMutationVariables = Exact<{
 
 export type RailwaySandboxCheckpointDeleteMutation = { __typename?: 'Mutation', sandboxCheckpointDelete: boolean };
 
+export type RailwaySandboxSessionsQueryVariables = Exact<{
+  environmentId: Scalars['String']['input'];
+  id: Scalars['String']['input'];
+}>;
+
+
+export type RailwaySandboxSessionsQuery = { __typename?: 'Query', sandboxSessions?: { __typename?: 'QuerySandboxSessionsConnection', edges: Array<{ __typename?: 'QuerySandboxSessionsConnectionEdge', node: { __typename?: 'SandboxSession', name: string, kind: SandboxSessionKind, attached: boolean, command: string, foregroundActive?: boolean | null, createdAt?: string | null, runState: { __typename?: 'SandboxSessionRunState', running: boolean, exitCode: number, exitedAt?: string | null } } }> } | null };
+
+export type RailwaySandboxExecMutationVariables = Exact<{
+  environmentId: Scalars['String']['input'];
+  id: Scalars['String']['input'];
+  command: Scalars['String']['input'];
+  timeoutSec?: InputMaybe<Scalars['Int']['input']>;
+}>;
+
+
+export type RailwaySandboxExecMutation = { __typename?: 'Mutation', sandboxExec: { __typename?: 'SandboxExecResult', exitCode: number, stdout: string, stderr: string, truncated: boolean, timedOut: boolean } };
+
 export type RailwayGenerateShellTokenMutationVariables = Exact<{
   input: ShellTokenInput;
 }>;
@@ -9160,4 +9834,6 @@ export const RailwaySandboxCheckpointsDocument = {"kind":"Document","definitions
 export const RailwaySandboxCheckpointCreateDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"RailwaySandboxCheckpointCreate"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"name"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"sandboxId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxCheckpointCreate"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}},{"kind":"Argument","name":{"kind":"Name","value":"name"},"value":{"kind":"Variable","name":{"kind":"Name","value":"name"}}},{"kind":"Argument","name":{"kind":"Name","value":"sandboxId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"sandboxId"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"RailwaySandboxCheckpointFields"}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxCheckpointFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"SandboxCheckpoint"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"key"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}}]}}]} as unknown as DocumentNode<RailwaySandboxCheckpointCreateMutation, RailwaySandboxCheckpointCreateMutationVariables>;
 export const RailwaySandboxCheckpointRenameDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"RailwaySandboxCheckpointRename"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"id"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"ID"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"name"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxCheckpointRename"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}},{"kind":"Argument","name":{"kind":"Name","value":"id"},"value":{"kind":"Variable","name":{"kind":"Name","value":"id"}}},{"kind":"Argument","name":{"kind":"Name","value":"name"},"value":{"kind":"Variable","name":{"kind":"Name","value":"name"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"RailwaySandboxCheckpointFields"}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxCheckpointFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"SandboxCheckpoint"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"key"}},{"kind":"Field","name":{"kind":"Name","value":"environmentId"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}}]}}]} as unknown as DocumentNode<RailwaySandboxCheckpointRenameMutation, RailwaySandboxCheckpointRenameMutationVariables>;
 export const RailwaySandboxCheckpointDeleteDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"RailwaySandboxCheckpointDelete"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"id"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"ID"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxCheckpointDelete"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}},{"kind":"Argument","name":{"kind":"Name","value":"id"},"value":{"kind":"Variable","name":{"kind":"Name","value":"id"}}}]}]}}]} as unknown as DocumentNode<RailwaySandboxCheckpointDeleteMutation, RailwaySandboxCheckpointDeleteMutationVariables>;
+export const RailwaySandboxSessionsDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"RailwaySandboxSessions"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"id"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxSessions"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}},{"kind":"Argument","name":{"kind":"Name","value":"id"},"value":{"kind":"Variable","name":{"kind":"Name","value":"id"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"edges"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"node"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"name"}},{"kind":"Field","name":{"kind":"Name","value":"kind"}},{"kind":"Field","name":{"kind":"Name","value":"runState"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"running"}},{"kind":"Field","name":{"kind":"Name","value":"exitCode"}},{"kind":"Field","name":{"kind":"Name","value":"exitedAt"}}]}},{"kind":"Field","name":{"kind":"Name","value":"attached"}},{"kind":"Field","name":{"kind":"Name","value":"command"}},{"kind":"Field","name":{"kind":"Name","value":"foregroundActive"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}}]}}]}}]}}]}}]} as unknown as DocumentNode<RailwaySandboxSessionsQuery, RailwaySandboxSessionsQueryVariables>;
+export const RailwaySandboxExecDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"RailwaySandboxExec"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"id"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"command"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"timeoutSec"}},"type":{"kind":"NamedType","name":{"kind":"Name","value":"Int"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxExec"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}},{"kind":"Argument","name":{"kind":"Name","value":"id"},"value":{"kind":"Variable","name":{"kind":"Name","value":"id"}}},{"kind":"Argument","name":{"kind":"Name","value":"command"},"value":{"kind":"Variable","name":{"kind":"Name","value":"command"}}},{"kind":"Argument","name":{"kind":"Name","value":"timeoutSec"},"value":{"kind":"Variable","name":{"kind":"Name","value":"timeoutSec"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"exitCode"}},{"kind":"Field","name":{"kind":"Name","value":"stdout"}},{"kind":"Field","name":{"kind":"Name","value":"stderr"}},{"kind":"Field","name":{"kind":"Name","value":"truncated"}},{"kind":"Field","name":{"kind":"Name","value":"timedOut"}}]}}]}}]} as unknown as DocumentNode<RailwaySandboxExecMutation, RailwaySandboxExecMutationVariables>;
 export const RailwayGenerateShellTokenDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"RailwayGenerateShellToken"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"ShellTokenInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"generateShellToken"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}]}]}}]} as unknown as DocumentNode<RailwayGenerateShellTokenMutation, RailwayGenerateShellTokenMutationVariables>;
