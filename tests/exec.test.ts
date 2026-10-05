@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { deriveTcpProxyWsEndpoint } from "../src/core/config.js";
+import { ExecControlUnsupportedError } from "../src/core/errors.js";
 import {
   ExecHandle,
   Sandbox,
@@ -68,11 +69,48 @@ describe("deriveTcpProxyWsEndpoint", () => {
 });
 
 describe("exec", () => {
-  it("rejects unsupported peers before sending a command", async () => {
-    const { handle, socket } = await execSocket("side-effect", {}, undefined, { manualCapabilities: true });
+  it("falls back to a legacy connection when the proxy predates exec control", async () => {
+    const { handle, ws, socket } = await execSocket("echo hi", {}, [shellToken("jwt_a"), shellToken("jwt_b")], { legacyPeer: true });
     expect(socket.sentText).toEqual([{ type: "exec_hello" }]);
-    socket.serverClose(1000, "old proxy");
-    await expect(handle).rejects.toThrow(/no command was sent/);
+    await vi.waitFor(() => expect(ws.sockets).toHaveLength(2));
+    const legacy = ws.sockets[1]!;
+    await vi.waitFor(() => expect(legacy.sentText.map(f => f.type)).toEqual(["init_exec", "stdin_close"]));
+    // The command is sent once, as the first frame, on a fresh token.
+    expect(legacy.protocols.at(-1)).toBe("jwt_b");
+    expect(legacy.sentText[0]).toMatchObject({ type: "init_exec", data: { command: expect.stringContaining("echo hi") } });
+    expect(ws.sockets.flatMap(s => s.sentText).filter(f => f.type === "init_exec")).toHaveLength(1);
+    legacy.serverStdout("hi\n");
+    legacy.serverExit(0);
+    await expect(handle).resolves.toMatchObject({ exitCode: 0, stdout: "hi\n" });
+  });
+
+  it.each([
+    [{ stdin: true }, /requires\. No command was sent/],
+    [{ ephemeral: true }, /requires\. No command was sent/],
+    [{ stdin: true, ephemeral: true }, /stdin and ephemeral require\. No command/],
+  ] as const)("refuses %o on a proxy without exec control, sending no command", async (options, message) => {
+    const { handle, ws } = await execSocket("side-effect", options, undefined, { legacyPeer: true });
+    await expect(handle).rejects.toThrow(ExecControlUnsupportedError);
+    await expect(handle).rejects.toThrow(message);
+    expect(ws.sockets).toHaveLength(1);
+    expect(ws.sockets[0]!.sentText).toEqual([{ type: "exec_hello" }]);
+  });
+
+  it("does not fall back when negotiation times out", async () => {
+    vi.useFakeTimers();
+    try {
+      const { sandbox, ws } = await wsSandbox([shellToken("jwt_abc")], { manualCapabilities: true });
+      const handle = sandbox.exec("side-effect");
+      handle.catch(() => {});
+      await vi.advanceTimersByTimeAsync(10_001);
+      const error = (await handle.catch(e => e)) as Error;
+      expect(error.message).toMatch(/timed out/);
+      expect(error).not.toBeInstanceOf(ExecControlUnsupportedError);
+      expect(ws.sockets).toHaveLength(1);
+      expect(ws.sockets[0]!.sentText).toEqual([{ type: "exec_hello" }]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("aborts capability negotiation without sending a command", async () => {

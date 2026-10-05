@@ -161,6 +161,11 @@ the handle rejects with `RailwayConnectionError`; a dropped connection rejects w
 `ExecInterruptedError`. Both mean the command's outcome is unknown. The `timeoutSec`
 clock starts after capability negotiation and transmission of `init_exec`.
 
+Exec control (credit-bounded stdin, ephemeral execs, confirmed exits) is negotiated
+before any command is sent. Against an older tcp-proxy, a plain `exec` retries once
+without it; `stdin: true` and `ephemeral: true` reject with
+`ExecControlUnsupportedError` instead, and no command runs.
+
 ### Ephemeral and durable sessions
 
 For commands that do not need durable logs or reattachment, pass `ephemeral: true`:

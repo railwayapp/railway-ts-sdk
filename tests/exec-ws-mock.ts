@@ -36,7 +36,14 @@ export interface MockExecSocket {
   serverClose(code: number, reason?: string): void;
 }
 
-export function createExecWsMock(options: { manualOpen?: boolean; manualCapabilities?: boolean; manualCredits?: boolean; onSend?: (frame: { type: string }) => void } = {}): ExecWsMock {
+export function createExecWsMock(options: {
+  manualOpen?: boolean;
+  manualCapabilities?: boolean;
+  manualCredits?: boolean;
+  /** Behave like a proxy that predates exec control: a bare exec_hello closes the session. */
+  legacyPeer?: boolean;
+  onSend?: (frame: { type: string }) => void;
+} = {}): ExecWsMock {
   const sockets: Socket[] = [];
   let waiters: ((socket: Socket) => void)[] = [];
 
@@ -80,6 +87,10 @@ export function createExecWsMock(options: { manualOpen?: boolean; manualCapabili
         const frame = JSON.parse(data);
         this.sentText.push(frame);
         options.onSend?.(frame);
+        if (frame.type === "exec_hello" && options.legacyPeer) {
+          this.serverClose(1000, "session ended");
+          return;
+        }
         if (frame.type === "exec_hello" && !options.manualCapabilities) {
           this.serverFrame({ type: "exec_capabilities", data: { version: 2, stdin_chunks: 8, stdin_chunk_bytes: 16384 } });
         }

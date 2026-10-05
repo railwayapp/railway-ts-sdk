@@ -3,7 +3,7 @@ import {
   type NormalizedRailwayClientConfig,
   type WebSocketConstructor,
 } from "./config.js";
-import { RailwayConnectionError } from "./errors.js";
+import { ExecControlUnsupportedError, RailwayConnectionError } from "./errors.js";
 import type { RailwayWsSocket } from "./ws-socket.js";
 
 /**
@@ -40,6 +40,11 @@ export interface ExecWsHandlers {
 }
 
 export interface ExecWsConnection {
+  /**
+   * True when the proxy negotiated exec control (credit-bounded stdin, typed
+   * errors, confirmed exits). False on a legacy connection.
+   */
+  readonly negotiated: boolean;
   /** Send stdin with bounded frames and WebSocket send-buffer backpressure. */
   writeStdin(data: Uint8Array, signal: AbortSignal): Promise<void>;
   /** Half-close stdin (EOF) so commands that read stdin can finish. */
@@ -68,13 +73,18 @@ export function connectExecWs(args: {
   /** Resume from the server's last-read cursor. Note some loss if previous clients read didn't keep up */
   resumeFromLastRead?: boolean;
   ephemeral?: boolean;
+  /**
+   * Skip `exec_hello` and send `init_exec` first, for a proxy that predates exec
+   * control. Stdin is then bounded only by the local send buffer.
+   */
+  legacy?: boolean;
   /** Cancels connection establishment only; a live command must be signalled. */
   signal?: AbortSignal;
   handlers: ExecWsHandlers;
 }): Promise<ExecWsConnection> {
   const {
     config, jwt, command, cwd, env, sessionName, resumeFromLastRead,
-    ephemeral, signal, handlers,
+    ephemeral, legacy = false, signal, handlers,
   } = args;
   signal?.throwIfAborted();
   const WS: WebSocketConstructor = resolveWebSocketImpl(config);
@@ -82,6 +92,7 @@ export function connectExecWs(args: {
   return new Promise<ExecWsConnection>((resolve, reject) => {
     let opened = false;
     let closed = false;
+    let helloSent = false;
     let credits = 0;
     let window = 0;
     const socket = new WS(config.tcpProxyWsEndpoint, [
@@ -143,6 +154,7 @@ export function connectExecWs(args: {
         return;
       }
       resolve({
+        negotiated: !legacy,
         async writeStdin(bytes, signal) {
           signal.throwIfAborted();
           assertOpen();
@@ -185,10 +197,17 @@ export function connectExecWs(args: {
 
     socket.onopen = () => {
       if (closed) return;
+      if (legacy) {
+        // No flow control to negotiate: stdin is paced by bufferedAmount alone.
+        credits = window = Number.POSITIVE_INFINITY;
+        start();
+        return;
+      }
       // Negotiate BEFORE transmitting a command. An old proxy rejects the
       // command-less hello, so unsupported peers cannot start an orphan exec.
       try {
         socket.send(JSON.stringify({ type: "exec_hello" }));
+        helloSent = true;
       } catch (error) {
         clearTimeout(handshakeTimer);
         signal?.removeEventListener("abort", onAbort);
@@ -265,8 +284,11 @@ export function connectExecWs(args: {
       clearTimeout(handshakeTimer);
       signal?.removeEventListener("abort", onAbort);
       if (!opened) {
+        // A proxy that predates exec control reads the hello as a command-less
+        // init and closes; nothing ran, so the caller may retry in legacy mode.
+        const ErrorType = helloSent ? ExecControlUnsupportedError : RailwayConnectionError;
         reject(
-          new RailwayConnectionError({
+          new ErrorType({
             message: `tcp-proxy exec WebSocket closed before exec control negotiation completed; no command was sent (code ${event.code}${
               event.reason ? `: ${event.reason}` : ""
             }).`,

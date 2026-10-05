@@ -1,5 +1,5 @@
 import type { NormalizedRailwayClientConfig } from "../core/config.js";
-import { RailwayConnectionError, RailwayError } from "../core/errors.js";
+import { ExecControlUnsupportedError, RailwayConnectionError, RailwayError } from "../core/errors.js";
 import {
   connectExecWs,
   type ExecWsConnection,
@@ -330,12 +330,15 @@ async function runExec(
     kind: "sandbox",
     scope: "shell",
   };
-  const tokenData = await requestGraphQL<
-    RailwayGenerateShellTokenMutation,
-    RailwayGenerateShellTokenMutationVariables
-  >(context.config, RailwayGenerateShellTokenDocument, { input }, options.signal);
-  options.signal?.throwIfAborted();
-  const jwt = tokenData.generateShellToken;
+  const mintShellToken = async () => {
+    const tokenData = await requestGraphQL<
+      RailwayGenerateShellTokenMutation,
+      RailwayGenerateShellTokenMutationVariables
+    >(context.config, RailwayGenerateShellTokenDocument, { input }, options.signal);
+    options.signal?.throwIfAborted();
+    return tokenData.generateShellToken;
+  };
+  const jwt = await mintShellToken();
 
   const maxBytes = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
   const stdout = new OutputCapture(options.captureOutput !== false, maxBytes);
@@ -441,11 +444,7 @@ async function runExec(
     }
   };
 
-  const connection = await connectExecWs({
-    config: context.config,
-    jwt,
-    ...init,
-    handlers: {
+  const handlers: Parameters<typeof connectExecWs>[0]["handlers"] = {
       onError: error => settle({
         error: new ExecInterruptedError({
           reason: error.message,
@@ -488,8 +487,31 @@ async function runExec(
           }),
         });
       },
-    },
-  });
+  };
+  let connection: ExecWsConnection;
+  try {
+    connection = await connectExecWs({ config: context.config, jwt, ...init, handlers });
+  } catch (error) {
+    if (!(error instanceof ExecControlUnsupportedError)) throw error;
+    // The proxy predates exec control and refused the bare hello, so nothing ran.
+    // Writable stdin and ephemeral execs depend on it; a plain exec does not.
+    const required = [options.stdin && "stdin", options.ephemeral && "ephemeral"].filter(Boolean);
+    if (required.length > 0) {
+      throw new ExecControlUnsupportedError({
+        message: `This tcp-proxy does not support exec control, which ${required.join(" and ")} require${required.length > 1 ? "" : "s"}. No command was sent.`,
+        ...(error.closeCode !== undefined ? { closeCode: error.closeCode } : {}),
+        cause: error,
+      });
+    }
+    context.config.log("exec: tcp-proxy predates exec control; retrying in legacy mode");
+    connection = await connectExecWs({
+      config: context.config,
+      jwt: await mintShellToken(),
+      ...init,
+      legacy: true,
+      handlers,
+    });
+  }
   control.connection = connection;
   onConnection(connection);
 

@@ -105,12 +105,15 @@ export interface ExecOptions {
   timeoutSec?: number;
   /** Abort setup or terminate and reject with the signal's reason. Unconfirmed termination rejects with a connection error. */
   signal?: AbortSignal;
-  /** Keep stdin open for handle.stdin.write/end. Defaults to false (immediate EOF). */
+  /**
+   * Keep stdin open for handle.stdin.write/end. Defaults to false (immediate EOF).
+   * Requires exec control; an older tcp-proxy rejects with ExecControlUnsupportedError.
+   */
   stdin?: boolean;
   /**
    * Skip durable session creation. Cannot be reattached or detached. Fresh execs only.
-   * Requires negotiated runtime exec-control support, including signal delivery
-   * and process-group cleanup when the attachment disconnects.
+   * Requires exec control (signal delivery and process-group cleanup when the
+   * attachment disconnects); an older tcp-proxy rejects with ExecControlUnsupportedError.
    */
   ephemeral?: boolean;
   /** Capture output in the result (default true). Set false for callback-only streaming. */

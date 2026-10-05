@@ -36,6 +36,12 @@ export class RailwayConnectionError extends RailwayError {
   }
 }
 
+/**
+ * The tcp-proxy closed the exec socket in answer to `exec_hello` without
+ * advertising capabilities: it predates exec control. No command was sent.
+ */
+export class ExecControlUnsupportedError extends RailwayConnectionError {}
+
 /** Stable code backboard sets in error extensions when an apply's base config is stale. */
 export const STALE_ENVIRONMENT_BASE_CODE = "STALE_ENVIRONMENT_BASE";
 

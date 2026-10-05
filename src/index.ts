@@ -4,6 +4,7 @@ export {
   type RailwayClientConfig,
 } from "./core/config.js";
 export {
+  ExecControlUnsupportedError,
   RailwayAuthError,
   RailwayConnectionError,
   RailwayError,
