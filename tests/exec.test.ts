@@ -558,15 +558,15 @@ describe("exec", () => {
     expect(onStdout).toHaveBeenCalledWith("all the output");
   });
 
-  it("bounds capture by default and flushes the decoder on exit", async () => {
+  it("captures all output by default and flushes the decoder on exit", async () => {
     const { handle, socket } = await execSocket("agent");
     socket.serverStdout("x".repeat(8 * 1024 * 1024 + 1));
     socket.serverStderr(new Uint8Array([0xe2]));
     socket.serverExit(0);
     const result = await handle;
-    expect(result.stdout.length).toBe(8 * 1024 * 1024);
+    expect(result.stdout.length).toBe(8 * 1024 * 1024 + 1);
     expect(result.stderr).toBe("\uFFFD");
-    expect(result.truncated).toBe(true);
+    expect(result.truncated).toBe(false);
   });
 
   it("sends ephemeral mode and refuses to advertise a reattachable session", async () => {

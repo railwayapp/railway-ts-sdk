@@ -114,11 +114,11 @@ send buffer to drain. A buffer stalled for 30 seconds rejects the write. A resol
 write means the bytes were queued to the transport, not that the command consumed
 them. Await writes rather than queueing an unbounded number of them.
 
-Results capture up to **8 MiB per stream** by default. Set `maxOutputBytes` to
-adjust this limit; `truncated` reports when the captured prefix was capped. Output
-callbacks continue receiving the full stream, including output beyond the cap.
-Set `captureOutput: false` for long-lived agents or log consumers: callbacks still
-run, but the result's `stdout` and `stderr` are empty and `truncated` is false.
+Results capture the full output by default. For long-lived agents, dev servers, or
+log followers, set `captureOutput: false`: callbacks still receive every chunk, but
+nothing is retained, so memory stays flat however long the command runs. To keep a
+bounded prefix instead, set `maxOutputBytes`; `truncated` reports when it was cut.
+Callbacks always receive the full stream.
 Callbacks run synchronously; a thrown error terminates the command before the
 handle rejects.
 

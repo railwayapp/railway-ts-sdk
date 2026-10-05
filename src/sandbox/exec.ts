@@ -26,7 +26,6 @@ import type {
 } from "./types.js";
 
 const decoder = () => new TextDecoder();
-const DEFAULT_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 /** TERM to KILL escalation. */
 const KILL_GRACE_MS = 5_000;
 /** How long termination may take to produce a confirmed exit before the outcome is unknown. */
@@ -360,7 +359,9 @@ async function runExec(
   };
   const jwt = await mintShellToken();
 
-  const maxBytes = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
+  // Unbounded unless the caller asks for a cap, as in 3.12. Long-running or
+  // streamed commands should pass `captureOutput: false` instead.
+  const maxBytes = options.maxOutputBytes ?? Number.POSITIVE_INFINITY;
   const stdout = new OutputCapture(options.captureOutput !== false, maxBytes);
   const stderr = new OutputCapture(options.captureOutput !== false, maxBytes);
   let exitCode: number | null = null;

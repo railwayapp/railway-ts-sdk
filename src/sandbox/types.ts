@@ -173,7 +173,10 @@ export interface ExecOptions {
   ephemeral?: boolean;
   /** Capture output in the result (default true). Set false for callback-only streaming. */
   captureOutput?: boolean;
-  /** Maximum captured UTF-8 bytes per stream (default 8 MiB). Callbacks are not capped. */
+  /**
+   * Maximum captured UTF-8 bytes per stream; unbounded by default. Past it the
+   * result sets `truncated`. Callbacks are not capped.
+   */
   maxOutputBytes?: number;
   /**
    * Working directory for the command (the sandbox default is `/`).
