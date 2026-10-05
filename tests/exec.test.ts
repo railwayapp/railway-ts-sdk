@@ -571,7 +571,7 @@ describe("exec", () => {
     const { handle, socket } = await execSocket("find .", { ephemeral: true });
     expect(socket.sentText.find(f => f.type === "init_exec")?.data).toMatchObject({ ephemeral: true });
     await expect(handle.sessionName).rejects.toThrow(/Ephemeral/);
-    await expect(handle.detach()).rejects.toThrow(/Ephemeral/);
+    await expect(handle.detach()).rejects.toThrow(/cannot be detached/);
     expect(socket.readyState).toBe(1);
     socket.serverExit(0);
     await handle;

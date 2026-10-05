@@ -238,6 +238,9 @@ export function startExec(
   };
 
   const detach = async (): Promise<string> => {
+    if (options.ephemeral) {
+      throw new RailwayError("Ephemeral execs cannot be detached; omit `ephemeral` to run a durable command.");
+    }
     // Prove that this command is reattachable before closing its only transport.
     const name = await sessionName;
     if (control.terminating) {

@@ -185,7 +185,8 @@ See `examples/sandboxes/exec.ts` for detaching and reattaching by `sessionName`
 from a fresh `Sandbox.connect(id)`.
 
 `handle.detach()` closes the connection while leaving the durable command running.
-It resolves with the session name and settles the handle with output captured so far.
+It resolves with the session name and settles the handle with output captured so far;
+`exitCode` is `null` because the command has not exited.
 The server must assign a durable session before detaching is possible. To resume
 writing stdin after reattaching, pass `stdin: true`; stdin must not have been ended
 by a previous connection.
@@ -196,6 +197,11 @@ session, or the reconnect fails too, it rejects with `ExecNotStartedError` (a
 `RailwayConnectionError`) and the close reason. No command ran in either case. In non-Node runtimes without a global `WebSocket`,
 pass an implementation via the `webSocketImpl` config option.
 
+The server ends an exec session whose client stops answering keepalives, so a process
+whose event loop is blocked for tens of seconds can lose a running exec (it rejects
+with `ExecInterruptedError`). Keep heavy synchronous work off the thread that streams
+exec output.
+
 ### Running a command without a WebSocket
 
 Where a WebSocket isn't practical, such as a short-lived serverless function or a harness
@@ -203,7 +209,9 @@ that only makes HTTP calls, `execHttp` sends the command in one HTTPS request
 and returns `{ exitCode, stdout, stderr, truncated, timedOut }`. It has no streaming,
 stdin, or cancellation. Each stream is cut at 16,000 bytes, and the server enforces
 `timeoutSec` (2 minutes by default, 10 at most); a timed-out command reports
-`exitCode: -1`. Use `exec` for anything larger or longer.
+`exitCode: -1` with the stdout so far discarded. Use `exec` for anything larger or longer.
+`sandbox.files` still uses a WebSocket, so an HTTP-only caller writes files through the
+command itself (for example a heredoc).
 
 ```ts
 const { exitCode, stdout } = await sandbox.execHttp("node --version", { timeoutSec: 30 });
@@ -293,7 +301,7 @@ const small = await sandbox.fork({ resources: { cpu: 0.5, memoryGB: 1 } });
 ```
 
 `cpu` is in vCPUs and accepts fractions; `memoryGB` is decimal gigabytes
-(1 GB = 1,000,000,000 bytes).
+(1 GB = 1,000,000,000 bytes) and is a minimum: the guest reports somewhat more.
 
 ## Regions
 
@@ -386,13 +394,17 @@ const all = await Sandbox.list();
 ```
 
 List the shells and exec sessions inside a sandbox, running or recently exited, and
-reattach to one by name:
+reattach to one by the name you saved from `handle.sessionName`:
 
 ```ts
 const sessions = await sandbox.sessions(); // null if the sandbox can't report sessions
-const build = sessions?.find(s => s.kind === "EXEC" && s.running);
-if (build) await sandbox.exec({ sessionName: build.name }, { onStdout: c => process.stdout.write(c) });
+const server = sessions?.find(s => s.name === savedSessionName && s.running);
+if (server) await sandbox.exec({ sessionName: server.name }, { onStdout: c => process.stdout.write(c) });
 ```
+
+Every exec appears in the list, including short finished ones, so match on the saved
+name rather than on `kind` or `command`. `command` shows the login-shell wrapper the
+command ran in (for example `bash -lc 'node server.js'`).
 
 `connect` throws `SandboxNotFoundError` if the sandbox does not exist in the
 environment. `sandbox.refresh()` re-reads the sandbox to update `status` and the other
@@ -526,6 +538,7 @@ then an environment variable, then a default. Pass explicit values to override.
 | `environmentId` | `RAILWAY_ENVIRONMENT_ID` | _(required)_ |
 | `endpoint` | `RAILWAY_GRAPHQL_ENDPOINT` | `https://backboard.railway.com/graphql/v2` |
 | `fetch` | n/a | `globalThis.fetch` |
+| `webSocketImpl` | n/a | `globalThis.WebSocket` (pass the `ws` package where none exists) |
 | `verbose` | `RAILWAY_VERBOSE` | `false` |
 
 A token read from `RAILWAY_TOKEN` is treated as a [project token](https://docs.railway.com/integrations/api#project-token)
