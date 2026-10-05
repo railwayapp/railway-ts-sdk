@@ -145,21 +145,19 @@ describe("exec", () => {
     }
   });
 
-  it("waits out the server's routing window, then fails without retry or fallback", async () => {
+  it("waits for the server without a client timeout, as in 3.12; abort ends the wait", async () => {
     vi.useFakeTimers();
     try {
+      const controller = new AbortController();
       const { sandbox, ws } = await wsSandbox([shellToken("jwt_abc")], { manualCapabilities: true });
-      const handle = sandbox.exec("side-effect");
+      const handle = sandbox.exec("side-effect", { signal: controller.signal });
       handle.catch(() => {});
-      // Routing plus the sandbox dialing back can take well over 10s.
-      await vi.advanceTimersByTimeAsync(100_000);
-      expect(ws.sockets).toHaveLength(1);
-      await vi.advanceTimersByTimeAsync(20_001);
-      const error = (await handle.catch(e => e)) as Error;
-      expect(error).toBeInstanceOf(ExecNotStartedError);
-      expect(error.message).toMatch(/not ready within 120000ms/);
+      // Routing plus the sandbox dialing back can take minutes; nothing gives up.
+      await vi.advanceTimersByTimeAsync(300_000);
       expect(ws.sockets).toHaveLength(1);
       expect(ws.sockets[0]!.sentText).toEqual([{ type: "exec_hello" }]);
+      controller.abort(new Error("stop"));
+      await expect(handle).rejects.toThrow("stop");
       expect(vi.getTimerCount()).toBe(0);
     } finally {
       vi.useRealTimers();
@@ -393,17 +391,17 @@ describe("exec", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("escalates timeout to KILL and rejects an unconfirmed termination", async () => {
+  it("escalates timeout to KILL and resolves an unconfirmed termination as unknown", async () => {
     vi.useFakeTimers();
     const { sandbox, ws } = await wsSandbox([shellToken("jwt")]);
     const handle = sandbox.exec("trap '' TERM; sleep 100", { timeoutSec: 1 });
     const socket = await ws.nextSocket();
-    const rejection = expect(handle).rejects.toThrow(/termination was not confirmed/);
     await vi.advanceTimersByTimeAsync(6_000);
     expect(socket.sentText).toContainEqual({ type: "signal", data: { signal: "KILL" } });
     expect(socket.readyState).toBe(1);
     await vi.advanceTimersByTimeAsync(5_000);
-    await rejection;
+    // Same shape as 3.12: timedOut, with the exit unknown.
+    await expect(handle).resolves.toMatchObject({ timedOut: true, exitCode: null });
     expect(socket.readyState).toBe(3);
     expect(vi.getTimerCount()).toBe(0);
   });
@@ -688,15 +686,13 @@ describe("exec", () => {
     expect(socket.sentText.some(f => f.type === "signal")).toBe(false);
   });
 
-  it("terminates the process before surfacing a callback failure", async () => {
+  it("rejects with a callback failure right away, as in 3.12", async () => {
     const reason = new Error("consumer failed");
     const { handle, socket } = await execSocket("agent", { onStdout: () => { throw reason; } });
     socket.serverStdout("hello");
-    await tick();
-    expect(socket.sentText).toContainEqual({ type: "signal", data: { signal: "TERM" } });
-    expect(socket.readyState).toBe(1);
-    socket.serverExit(-1);
     await expect(handle).rejects.toBe(reason);
+    expect(socket.sentText).not.toContainEqual({ type: "signal", data: { signal: "TERM" } });
+    expect(socket.readyState).toBe(3);
   });
 
   it("does not signal a detached command on later abort", async () => {

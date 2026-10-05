@@ -20,12 +20,6 @@ const SEND_HIGH_WATER_BYTES = 128 * 1024;
 /** How long the local WebSocket send buffer may stay above the high-water mark. */
 const SEND_STALL_TIMEOUT_MS = 30_000;
 const SEND_POLL_MS = 10;
-/**
- * The proxy accepts the socket before it routes the session (up to 70s) and
- * waits for the sandbox to dial back (up to 30s), and only then answers
- * `exec_hello`. The client's budget has to outlast both.
- */
-const READY_TIMEOUT_MS = 120_000;
 /** Lowest exec-control version this client speaks. */
 const MIN_EXEC_CONTROL_VERSION = 2;
 const MAX_STDIN_CHUNKS = 64;
@@ -42,7 +36,7 @@ const notRetryable = new WeakSet<object>();
 
 /**
  * Whether a connection failure left nothing running AND is worth one more try.
- * Denials (policy, limits), routing failures, and the readiness timeout are not.
+ * Denials (policy, limits) and routing failures are not.
  */
 export function shouldRetryBeforeStart(error: unknown): boolean {
   return error instanceof ExecNotStartedError && !notRetryable.has(error);
@@ -163,16 +157,6 @@ export function connectExecWs(args: {
       jwt,
     ]) as unknown as RailwayWsSocket;
     socket.binaryType = "arraybuffer";
-    const handshakeTimer = setTimeout(() => {
-      closed = true;
-      signal?.removeEventListener("abort", onAbort);
-      reject(notStarted(
-        `The exec session was not ready within ${READY_TIMEOUT_MS}ms; no command was sent.`,
-        { retryable: false },
-      ));
-      socket.close(1000, "");
-    }, READY_TIMEOUT_MS);
-
     const assertOpen = () => {
       if (closed) {
         throw new RailwayConnectionError({
@@ -182,7 +166,6 @@ export function connectExecWs(args: {
     };
     const onAbort = () => {
       closed = true;
-      clearTimeout(handshakeTimer);
       signal?.removeEventListener("abort", onAbort);
       reject(signal?.reason);
       socket.close(1000, "");
@@ -196,7 +179,6 @@ export function connectExecWs(args: {
         return;
       }
       opened = true;
-      clearTimeout(handshakeTimer);
       signal?.removeEventListener("abort", onAbort);
       const data: {
         command: string;
@@ -281,7 +263,6 @@ export function connectExecWs(args: {
         socket.send(JSON.stringify({ type: "exec_hello" }));
         helloSent = true;
       } catch (error) {
-        clearTimeout(handshakeTimer);
         signal?.removeEventListener("abort", onAbort);
         closed = true;
         reject(error);
@@ -304,7 +285,6 @@ export function connectExecWs(args: {
         try {
           credits = window = negotiatedStdinWindow(frame.data);
         } catch (error) {
-          clearTimeout(handshakeTimer);
           signal?.removeEventListener("abort", onAbort);
           closed = true;
           reject(error);
@@ -355,7 +335,6 @@ export function connectExecWs(args: {
     socket.onclose = event => {
       closed = true;
       wakeCreditWaiters();
-      clearTimeout(handshakeTimer);
       signal?.removeEventListener("abort", onAbort);
       if (!opened) {
         const detail = `code ${event.code}${event.reason ? `: ${event.reason}` : ""}`;
@@ -381,7 +360,6 @@ export function connectExecWs(args: {
     socket.onerror = event => {
       if (opened) return;
       closed = true;
-      clearTimeout(handshakeTimer);
       signal?.removeEventListener("abort", onAbort);
       reject(notStarted(
         "tcp-proxy exec WebSocket connection failed; no command was sent.",

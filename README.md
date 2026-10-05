@@ -118,9 +118,7 @@ Results capture the full output by default. For long-lived agents, dev servers, 
 log followers, set `captureOutput: false`: callbacks still receive every chunk, but
 nothing is retained, so memory stays flat however long the command runs. To keep a
 bounded prefix instead, set `maxOutputBytes`; `truncated` reports when it was cut.
-Callbacks always receive the full stream.
-Callbacks run synchronously; a thrown error terminates the command before the
-handle rejects.
+Callbacks always receive the full stream. A callback that throws rejects the exec.
 
 ### Older servers
 
@@ -130,8 +128,7 @@ rolled out in October 2026. Against an older server, a plain `exec` still works;
 any command runs.
 
 Writing to stdin is flow-controlled: a command that stops reading its input slows
-`stdin.write()` down, and `kill()` and abort still reach it. Reattaching to a session
-name that no longer exists is an error; it never starts a new command.
+`stdin.write()` down, and `kill()` and abort still reach it.
 
 ### Cancellation and timeouts
 
@@ -153,14 +150,12 @@ try {
 
 Aborting cancels token minting or a pending connection. Once connected, abort and
 `timeoutSec` send TERM to the remote process group, escalate to KILL after 5 seconds,
-and wait for the remote exit. Abort rejects with the signal's reason; timeout resolves
-with `timedOut: true` and `exitCode: -1` (signalled). If no exit is confirmed within 10
-seconds of termination starting, the handle rejects with `RailwayConnectionError`; a
-dropped connection rejects with `ExecInterruptedError`. Both mean the command's outcome
-is unknown. The `timeoutSec` clock starts once the command has been sent.
-
-A sandbox that is still starting can take a while to accept a command; `exec` waits up
-to 120 seconds for it before rejecting with `ExecNotStartedError`.
+and wait for the remote exit. Timeout resolves with `timedOut: true` and `exitCode: -1`
+once the kill is confirmed, or `exitCode: null` if no exit arrives within 10 seconds.
+Abort rejects with the signal's reason, or with `RailwayConnectionError` if the exit is
+not confirmed in time. A dropped connection rejects with `ExecInterruptedError`. The
+`timeoutSec` clock starts once the command has been sent; pass `signal` to bound the
+wait for a sandbox that is still starting.
 
 ### Ephemeral and durable sessions
 

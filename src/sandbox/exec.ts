@@ -450,12 +450,20 @@ async function runExec(
       context.config.log(`exec: no exit ${KILL_GRACE_MS}ms after TERM; sending KILL in sandbox=${context.sandboxId}`);
       signalRemote("KILL");
     }, KILL_GRACE_MS);
-    terminationDeadline = setTimeout(() => settle({
-      error: new RailwayConnectionError({
-        message: `Exec termination was not confirmed within ${TERMINATION_CONFIRM_MS}ms; the command's outcome is unknown.`,
-        cause: failure?.reason,
-      }),
-    }), TERMINATION_CONFIRM_MS);
+    terminationDeadline = setTimeout(() => {
+      // A timeout resolves as it did in 3.12 (`timedOut: true`, `exitCode: null`
+      // = unknown); only an abort or a callback failure rejects.
+      if (timedOut && !failure) {
+        settle();
+        return;
+      }
+      settle({
+        error: new RailwayConnectionError({
+          message: `Exec termination was not confirmed within ${TERMINATION_CONFIRM_MS}ms; the command's outcome is unknown.`,
+          cause: failure?.reason,
+        }),
+      });
+    }, TERMINATION_CONFIRM_MS);
   };
   const onAbort = () => terminate({ reason: options.signal?.reason });
 
@@ -463,9 +471,11 @@ async function runExec(
     if (!chunk || callbackFailed) return;
     try {
       callback?.(chunk);
-    } catch (reason) {
+    } catch (error) {
+      // As in 3.12: reject right away. Settling closes the socket, which ends an
+      // ephemeral exec and leaves a durable one running (reattachable).
       callbackFailed = true;
-      terminate({ reason });
+      settle({ error });
     }
   };
 

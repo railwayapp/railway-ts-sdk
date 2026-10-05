@@ -153,9 +153,9 @@ export interface ExecStdin {
 export interface ExecOptions {
   /**
    * Kill the command after this many seconds and resolve with
-   * `timedOut: true` after the remote exit. Sends TERM, escalating to KILL
-   * after 5 seconds. Rejects if termination cannot be confirmed within 10
-   * seconds. The deadline starts when the exec connection opens.
+   * `timedOut: true`. Sends TERM, escalating to KILL after 5 seconds; a
+   * confirmed kill reports `exitCode: -1`, and an unconfirmed one `null`. The
+   * deadline starts once the command has been sent.
    */
   timeoutSec?: number;
   /** Abort setup or terminate and reject with the signal's reason. Unconfirmed termination rejects with a connection error. */
@@ -190,9 +190,9 @@ export interface ExecOptions {
    * (`exec({ sessionName })`).
    */
   env?: Record<string, string>;
-  /** Receives each stdout chunk, even beyond the capture cap. A throw terminates and rejects the exec. */
+  /** Receives each stdout chunk as it arrives, even beyond `maxOutputBytes`. A throw rejects the exec. */
   onStdout?: (chunk: string) => void;
-  /** Receives each stderr chunk, even beyond the capture cap. A throw terminates and rejects the exec. */
+  /** Receives each stderr chunk as it arrives, even beyond `maxOutputBytes`. A throw rejects the exec. */
   onStderr?: (chunk: string) => void;
   /**
    * On reattach (`exec({ sessionName })`), set `true` to resume from the
