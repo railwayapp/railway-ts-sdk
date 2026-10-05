@@ -199,8 +199,9 @@ The server must assign a durable session before detaching is possible. To resume
 writing stdin after reattaching, pass `stdin: true`; stdin must not have been ended
 by a previous connection.
 
-If the WebSocket cannot be established, `exec` rejects with
-`RailwayConnectionError`. In non-Node runtimes without a global `WebSocket`,
+If the WebSocket cannot be established, `exec` retries once on a fresh token, since no
+command has been sent yet, and then rejects with `ExecNotStartedError` (a
+`RailwayConnectionError`). In non-Node runtimes without a global `WebSocket`,
 pass an implementation via the `webSocketImpl` config option.
 
 ### Running a command without a WebSocket

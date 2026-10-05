@@ -1,5 +1,5 @@
 import type { NormalizedRailwayClientConfig } from "../core/config.js";
-import { ExecControlUnsupportedError, RailwayConnectionError, RailwayError } from "../core/errors.js";
+import { ExecControlUnsupportedError, ExecNotStartedError, RailwayConnectionError, RailwayError } from "../core/errors.js";
 import {
   connectExecWs,
   type ExecWsConnection,
@@ -488,9 +488,33 @@ async function runExec(
         });
       },
   };
+  // A connection that fails before the command is sent left nothing running, so
+  // one retry on a fresh token is safe. It covers transient drops such as a
+  // tcp-proxy rolling deploy. An old proxy, a negotiation timeout, or an abort
+  // is not retried here.
+  const connectWithRetry = async (legacy: boolean, firstJwt: string) => {
+    try {
+      return await connectExecWs({ config: context.config, jwt: firstJwt, ...init, legacy, handlers });
+    } catch (error) {
+      if (!(error instanceof ExecNotStartedError) || error instanceof ExecControlUnsupportedError) {
+        throw error;
+      }
+      options.signal?.throwIfAborted();
+      context.config.log("exec: connection failed before the command was sent; retrying once");
+      await abortableDelay(CONNECT_RETRY_DELAY_MS, options.signal);
+      return connectExecWs({
+        config: context.config,
+        jwt: await mintShellToken(),
+        ...init,
+        legacy,
+        handlers,
+      });
+    }
+  };
+
   let connection: ExecWsConnection;
   try {
-    connection = await connectExecWs({ config: context.config, jwt, ...init, handlers });
+    connection = await connectWithRetry(false, jwt);
   } catch (error) {
     if (!(error instanceof ExecControlUnsupportedError)) throw error;
     // The proxy predates exec control and refused the bare hello, so nothing ran.
@@ -504,13 +528,7 @@ async function runExec(
       });
     }
     context.config.log("exec: tcp-proxy predates exec control; retrying in legacy mode");
-    connection = await connectExecWs({
-      config: context.config,
-      jwt: await mintShellToken(),
-      ...init,
-      legacy: true,
-      handlers,
-    });
+    connection = await connectWithRetry(true, await mintShellToken());
   }
   control.connection = connection;
   onConnection(connection);
@@ -588,4 +606,25 @@ class OutputCapture {
     }
     return this.text;
   }
+}
+
+/** Pause before the single pre-start reconnect. */
+const CONNECT_RETRY_DELAY_MS = 250;
+
+function abortableDelay(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason);
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }

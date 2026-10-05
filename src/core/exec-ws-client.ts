@@ -3,7 +3,7 @@ import {
   type NormalizedRailwayClientConfig,
   type WebSocketConstructor,
 } from "./config.js";
-import { ExecControlUnsupportedError, RailwayConnectionError } from "./errors.js";
+import { ExecControlUnsupportedError, ExecNotStartedError, RailwayConnectionError } from "./errors.js";
 import type { RailwayWsSocket } from "./ws-socket.js";
 
 /**
@@ -286,7 +286,7 @@ export function connectExecWs(args: {
       if (!opened) {
         // A proxy that predates exec control reads the hello as a command-less
         // init and closes; nothing ran, so the caller may retry in legacy mode.
-        const ErrorType = helloSent ? ExecControlUnsupportedError : RailwayConnectionError;
+        const ErrorType = helloSent ? ExecControlUnsupportedError : ExecNotStartedError;
         reject(
           new ErrorType({
             message: `tcp-proxy exec WebSocket closed before exec control negotiation completed; no command was sent (code ${event.code}${
@@ -306,8 +306,8 @@ export function connectExecWs(args: {
       clearTimeout(handshakeTimer);
       signal?.removeEventListener("abort", onAbort);
       reject(
-        new RailwayConnectionError({
-          message: "tcp-proxy exec WebSocket connection failed.",
+        new ExecNotStartedError({
+          message: "tcp-proxy exec WebSocket connection failed; no command was sent.",
           cause: event,
         }),
       );

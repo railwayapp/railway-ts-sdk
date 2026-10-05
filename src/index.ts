@@ -5,6 +5,7 @@ export {
 } from "./core/config.js";
 export {
   ExecControlUnsupportedError,
+  ExecNotStartedError,
   RailwayAuthError,
   RailwayConnectionError,
   RailwayError,

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { deriveTcpProxyWsEndpoint } from "../src/core/config.js";
-import { ExecControlUnsupportedError } from "../src/core/errors.js";
+import { ExecControlUnsupportedError, ExecNotStartedError } from "../src/core/errors.js";
 import {
   ExecHandle,
   Sandbox,
@@ -94,6 +94,48 @@ describe("exec", () => {
     await expect(handle).rejects.toThrow(message);
     expect(ws.sockets).toHaveLength(1);
     expect(ws.sockets[0]!.sentText).toEqual([{ type: "exec_hello" }]);
+  });
+
+  it("retries once on a fresh token when the connection fails before the command is sent", async () => {
+    const { sandbox, ws } = await wsSandbox([shellToken("jwt_a"), shellToken("jwt_b")], { manualOpen: true });
+    const handle = sandbox.exec("echo hi");
+    const first = await vi.waitFor(() => ws.sockets[0] ?? Promise.reject(new Error("no socket")));
+    first.serverClose(1006, "");
+    await vi.waitFor(() => expect(ws.sockets).toHaveLength(2));
+    const second = ws.sockets[1]!;
+    expect(second.protocols.at(-1)).toBe("jwt_b");
+    second.serverOpen();
+    await vi.waitFor(() => expect(second.sentText.map(f => f.type)).toContain("init_exec"));
+    expect(ws.sockets.flatMap(s => s.sentText).filter(f => f.type === "init_exec")).toHaveLength(1);
+    second.serverStdout("hi\n");
+    second.serverExit(0);
+    await expect(handle).resolves.toMatchObject({ exitCode: 0, stdout: "hi\n" });
+  });
+
+  it("gives up after the single retry with ExecNotStartedError", async () => {
+    const { sandbox, ws } = await wsSandbox([shellToken("jwt_a"), shellToken("jwt_b")], { manualOpen: true });
+    const handle = sandbox.exec("echo hi");
+    handle.catch(() => {});
+    const first = await vi.waitFor(() => ws.sockets[0] ?? Promise.reject(new Error("no socket")));
+    first.serverClose(1006, "");
+    await vi.waitFor(() => expect(ws.sockets).toHaveLength(2));
+    ws.sockets[1]!.serverClose(1006, "");
+    await expect(handle).rejects.toBeInstanceOf(ExecNotStartedError);
+    expect(ws.sockets).toHaveLength(2);
+    expect(ws.sockets.flatMap(s => s.sentText)).toEqual([]);
+  });
+
+  it("does not retry once aborted", async () => {
+    const controller = new AbortController();
+    const { sandbox, ws } = await wsSandbox([shellToken("jwt_a"), shellToken("jwt_b")], { manualOpen: true });
+    const handle = sandbox.exec("echo hi", { signal: controller.signal });
+    handle.catch(() => {});
+    const first = await vi.waitFor(() => ws.sockets[0] ?? Promise.reject(new Error("no socket")));
+    first.serverClose(1006, "");
+    controller.abort(new Error("stop"));
+    await expect(handle).rejects.toThrow("stop");
+    await new Promise(r => setTimeout(r, 300));
+    expect(ws.sockets).toHaveLength(1);
   });
 
   it("does not fall back when negotiation times out", async () => {
