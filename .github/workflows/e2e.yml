@@ -1,0 +1,44 @@
+name: E2E
+
+# Live sandbox suites against a real Railway environment. They create and
+# destroy sandboxes and checkpoints, so they run on demand, nightly, and on PRs
+# labelled `run-e2e` rather than on every push.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 9 * * *"
+  pull_request:
+    branches: [main]
+    types: [labeled, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  # One live run at a time: suites share the environment's sandbox quota.
+  group: e2e
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    name: Live e2e
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-e2e')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_E2E_API_TOKEN }}
+      RAILWAY_ENVIRONMENT_ID: ${{ secrets.RAILWAY_E2E_ENVIRONMENT_ID }}
+    steps:
+      # Without credentials every live suite skips and the job would pass empty.
+      - name: Require credentials
+        run: |
+          if [ -z "$RAILWAY_API_TOKEN" ] || [ -z "$RAILWAY_ENVIRONMENT_ID" ]; then
+            echo "::error::Set the RAILWAY_E2E_API_TOKEN and RAILWAY_E2E_ENVIRONMENT_ID repository secrets."
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+      - run: mise run install
+      - run: mise run e2e

@@ -119,4 +119,64 @@ describe.runIf(live)("fork + checkpoint e2e (live)", () => {
       .catch(caught => caught);
     expect(error).toBeInstanceOf(RailwayGraphQLError);
   }, 180_000);
+
+  // mono #41814: the orchestrator allows one checkpoint per source at a time.
+  it("forks one source three times in parallel", async () => {
+    const source = track(await Sandbox.create());
+    await source.exec("echo base > /tmp/state.txt");
+
+    const attempts = await Promise.allSettled([0, 1, 2].map(() => source.fork()));
+    const forks = attempts.flatMap(attempt =>
+      attempt.status === "fulfilled" ? [track(attempt.value)] : [],
+    );
+    expect(
+      attempts.flatMap(attempt => (attempt.status === "rejected" ? [String(attempt.reason)] : [])),
+    ).toEqual([]);
+    for (const fork of forks) {
+      expect(await fork.files.read("/tmp/state.txt")).toBe("base\n");
+    }
+  }, 300_000);
+
+  it("re-capturing a checkpoint name replaces it and pins its region", async () => {
+    const name = `sdk-e2e-replace-${Date.now()}`;
+    let checkpointId: string | undefined;
+    try {
+      const source = track(await Sandbox.create());
+      await source.exec("echo v1 > /tmp/state.txt");
+      checkpointId = (await source.checkpoint(name)).id;
+
+      await source.exec("echo v2 > /tmp/state.txt");
+      checkpointId = (await source.checkpoint(name)).id;
+      expect((await Sandbox.checkpoints()).filter(item => item.key === name)).toHaveLength(1);
+
+      const booted = track(await Sandbox.create(name));
+      expect(booted.region).toBe(source.region);
+      expect(await booted.files.read("/tmp/state.txt")).toBe("v2\n");
+
+      const otherRegion = ["us-west2", "europe-west4-drams3a", "us-east4-eqdc4a"].find(
+        region => region !== source.region,
+      )!;
+      const error = await Sandbox.create(name, { region: otherRegion }).then(
+        sandbox => {
+          track(sandbox);
+          return undefined;
+        },
+        caught => caught,
+      );
+      expect(error).toBeInstanceOf(RailwayGraphQLError);
+      expect(String(error)).toContain(source.region);
+    } finally {
+      if (checkpointId) await Sandbox.deleteCheckpoint(checkpointId).catch(() => {});
+    }
+  }, 300_000);
+
+  it("creates a sandbox that never idles out (plan-gated)", async ctx => {
+    const sandbox = await Sandbox.create({ idleTimeoutMinutes: 0 }).catch(error => {
+      // Plans without never-idle reject the option; nothing to test there.
+      if (error instanceof RailwayGraphQLError && /plan|idle/i.test(error.message)) ctx.skip();
+      throw error;
+    });
+    track(sandbox);
+    expect(sandbox.idleTimeoutMinutes).toBe(0);
+  }, 120_000);
 });

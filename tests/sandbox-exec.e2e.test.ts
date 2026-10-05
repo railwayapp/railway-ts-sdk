@@ -1,5 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { once } from "node:events";
+import { fileURLToPath } from "node:url";
 
 import { Sandbox } from "../src/index.js";
 import {
@@ -273,6 +276,68 @@ describe.runIf(live)("exec e2e (live)", () => {
 
     expect(result.exitCode).toBe(-1);
     expect(lineNumbers(result.stdout).length).toBeLessThan(total);
+  }, 120_000);
+
+  // mono #41812: execHttp decoded per chunk and counted UTF-16 units.
+  it.each([
+    ["4-byte emoji", "\\U0001F680", 5_000, "🚀"],
+    ["2-byte é", "\\u00e9", 17_000, "é"],
+  ])("execHttp cuts %s at 16,000 bytes on a character boundary", async (_label, escape, count, char) => {
+    const result = await sandbox.execHttp(
+      `python3 -c 'import sys; sys.stdout.write("${escape}" * ${count})'`,
+      { timeoutSec: 30 },
+    );
+    expect(result).toMatchObject({ exitCode: 0, truncated: true, timedOut: false });
+    expect(Buffer.byteLength(result.stdout)).toBe(16_000);
+    expect(result.stdout).not.toContain("�");
+    expect(result.stdout.replaceAll(char, "")).toBe("");
+  }, 60_000);
+
+  it("ephemeral execs have no session name and cannot be detached", async () => {
+    const handle = sandbox.exec("sleep 2; echo done", { ephemeral: true });
+    await expect(handle.sessionName).rejects.toThrow(/no durable session name/);
+    await expect(handle.detach()).rejects.toThrow(/cannot be detached/);
+    await expect(handle).resolves.toMatchObject({ exitCode: 0, stdout: "done\n" });
+  }, 60_000);
+
+  it.each([
+    ["durable", true],
+    ["ephemeral", false],
+  ])("%s command survives a dropped connection: %s", async (mode, survives) => {
+    // A separate process starts the command and is SIGKILLed, so the socket drops
+    // without a detach, as when a supervisor crashes.
+    const marker = `sleep ${3000 + Math.floor(Math.random() * 6000)}`;
+    const fixture = fileURLToPath(new URL("./fixtures/exec-drop.ts", import.meta.url));
+    const child = spawn(process.execPath, ["--import", "tsx", fixture, sandbox.id, marker, mode], {
+      env: process.env,
+      stdio: ["ignore", "pipe", "inherit"],
+    });
+    let output = "";
+    child.stdout.on("data", chunk => (output += chunk));
+    const [code, signal] = await once(child, "exit");
+    expect({ code, signal, output }).toMatchObject({ signal: "SIGKILL" });
+    expect(output).toContain("READY");
+
+    await sleep(3_000);
+    const check = await sandbox.exec(`pgrep -fx '${marker}' || true`);
+    expect(check.stdout.trim() !== "").toBe(survives);
+    if (survives) await sandbox.exec(`pkill -fx '${marker}' || true`);
+  }, 90_000);
+
+  // Known platform gap: durable output is spooled to an 8 x 1 MiB ring, and a
+  // reader that falls a full ring behind skips ahead with no gap marker.
+  // `it.fails` passes while the bug exists; when the platform fixes it this
+  // test fails, so flip it to `it` and assert `truncated` semantics.
+  it.fails("durable exec returns complete output beyond the 8 MiB retention ring", async () => {
+    const result = await sandbox.exec("head -c 10000000 /dev/zero | tr '\\0' a");
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.length).toBe(10_000_000);
+  }, 120_000);
+
+  it("ephemeral exec returns complete output beyond 8 MiB", async () => {
+    const result = await sandbox.exec("head -c 10000000 /dev/zero | tr '\\0' a", { ephemeral: true });
+    expect(result).toMatchObject({ exitCode: 0, truncated: false });
+    expect(result.stdout.length).toBe(10_000_000);
   }, 120_000);
 });
 
