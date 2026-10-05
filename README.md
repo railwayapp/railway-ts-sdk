@@ -198,14 +198,15 @@ pass an implementation via the `webSocketImpl` config option.
 
 ### Running a command without a WebSocket
 
-Where outbound WebSockets aren't available, `run` sends the command in one HTTPS request
+Where a WebSocket isn't practical, such as a short-lived serverless function or a harness
+that only makes HTTP calls, `execHttp` sends the command in one HTTPS request
 and returns `{ exitCode, stdout, stderr, truncated, timedOut }`. It has no streaming,
 stdin, or cancellation. Each stream is cut at 16,000 bytes, and the server enforces
 `timeoutSec` (2 minutes by default, 10 at most); a timed-out command reports
 `exitCode: -1`. Use `exec` for anything larger or longer.
 
 ```ts
-const { exitCode, stdout } = await sandbox.run("node --version", { timeoutSec: 30 });
+const { exitCode, stdout } = await sandbox.execHttp("node --version", { timeoutSec: 30 });
 ```
 
 ## Files

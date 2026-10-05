@@ -357,7 +357,7 @@ describe("sandbox compute, sessions, and HTTPS run", () => {
       { data: { sandboxExec: result } },
     ]);
     const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch });
-    await expect(sandbox.run("make test", { timeoutSec: 30 })).resolves.toEqual(result);
+    await expect(sandbox.execHttp("make test", { timeoutSec: 30 })).resolves.toEqual(result);
     expect(mock.calls[1]?.body.query).toContain("mutation RailwaySandboxExec");
     expect(mock.calls[1]?.body.variables).toEqual({
       id: "sandbox_123", environmentId: "environment_123", command: "make test", timeoutSec: 30,
@@ -367,7 +367,7 @@ describe("sandbox compute, sessions, and HTTPS run", () => {
   it.each([0, -5, 1.5])("rejects run timeoutSec %s without a request", async timeoutSec => {
     const mock = createFetchMock([{ data: { sandboxCreate: sandboxInfo() } }]);
     const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch });
-    await expect(sandbox.run("true", { timeoutSec })).rejects.toThrow(TypeError);
+    await expect(sandbox.execHttp("true", { timeoutSec })).rejects.toThrow(TypeError);
     expect(mock.calls).toHaveLength(1);
   });
 });

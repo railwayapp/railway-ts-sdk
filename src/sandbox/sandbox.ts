@@ -15,14 +15,14 @@ import type {
   CheckpointOptions,
   ConnectOptions,
   CreateOptions,
+  ExecHttpOptions,
+  ExecHttpResult,
   ExecOptions,
   ExecReattachTarget,
   ExecResult,
   ExecTarget,
   ForkOptions,
   ListOptions,
-  RunOptions,
-  RunResult,
   SandboxCheckpointInfo,
   SandboxDomain,
   SandboxInfo,
@@ -239,12 +239,12 @@ export class Sandbox implements AsyncDisposable {
 
   /**
    * Run a command in one HTTPS request and get its result. No streaming, stdin,
-   * or cancellation: use it where WebSockets are unavailable, and `exec`
-   * everywhere else. Each stream is cut at 16,000 bytes; the server timeout is
+   * or cancellation: use it where a WebSocket isn't practical (short-lived
+   * functions, HTTP-only harnesses), and `exec` everywhere else. Each stream is cut at 16,000 bytes; the server timeout is
    * 2 minutes by default and 10 at most.
    */
-  async run(command: string, options: RunOptions = {}): Promise<RunResult> {
-    return this.#engine.run(this.id, command, options);
+  async execHttp(command: string, options: ExecHttpOptions = {}): Promise<ExecHttpResult> {
+    return this.#engine.execHttp(this.id, command, options);
   }
 
   /** Reset the idle countdown and refresh this handle. Does not change the configured timeout. */

@@ -63,8 +63,8 @@ import type {
   ExecTarget,
   ForkOptions,
   ListOptions,
-  RunOptions,
-  RunResult,
+  ExecHttpOptions,
+  ExecHttpResult,
   SandboxCheckpointInfo,
   SandboxCreationOptions,
   SandboxInfo,
@@ -290,11 +290,11 @@ export class SandboxEngine {
   }
 
   /** One-request exec over HTTPS: no streaming, stdin, or cancellation. */
-  async run(
+  async execHttp(
     sandboxId: string,
     command: string,
-    options: RunOptions = {},
-  ): Promise<RunResult> {
+    options: ExecHttpOptions = {},
+  ): Promise<ExecHttpResult> {
     if (
       options.timeoutSec !== undefined &&
       !(Number.isInteger(options.timeoutSec) && options.timeoutSec > 0)
@@ -302,7 +302,7 @@ export class SandboxEngine {
       // The HTTPS exec takes whole seconds, unlike the streaming exec's timer.
       throw new TypeError("`timeoutSec` must be a positive whole number of seconds.");
     }
-    this.#config.log(`run (http) in sandbox ${sandboxId}`);
+    this.#config.log(`execHttp in sandbox ${sandboxId}`);
     const data = await requestGraphQL<
       RailwaySandboxExecMutation,
       RailwaySandboxExecMutationVariables

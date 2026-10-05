@@ -160,8 +160,8 @@ describe.runIf(live)("exec e2e (live)", () => {
     }
   }, 60_000);
 
-  it("runs a command over one HTTPS request with run()", async () => {
-    const result = await sandbox.run("printf out; printf err >&2; exit 7", { timeoutSec: 30 });
+  it("runs a command over one HTTPS request with execHttp()", async () => {
+    const result = await sandbox.execHttp("printf out; printf err >&2; exit 7", { timeoutSec: 30 });
     expect(result).toMatchObject({
       exitCode: 7,
       stdout: "out",

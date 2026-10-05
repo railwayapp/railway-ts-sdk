@@ -78,17 +78,17 @@ export interface SandboxSessionInfo {
   createdAt: string | null;
 }
 
-/** Options for `sandbox.run`, the one-request HTTPS exec. */
-export interface RunOptions {
+/** Options for `sandbox.execHttp`. */
+export interface ExecHttpOptions {
   /** Server-side deadline in whole seconds. Defaults to 2 minutes; capped at 10 minutes. */
   timeoutSec?: number;
 }
 
 /**
- * Result of `sandbox.run`. Each stream is cut at 16,000 bytes (`truncated`). On a
+ * Result of `sandbox.execHttp`. Each stream is cut at 16,000 bytes (`truncated`). On a
  * server timeout `timedOut` is true and `exitCode` is -1.
  */
-export type RunResult = RailwaySandboxExecMutation["sandboxExec"];
+export type ExecHttpResult = RailwaySandboxExecMutation["sandboxExec"];
 
 /** Knobs shared by every sandbox-creating call: `create`, `create(template)`, `create(checkpoint)`, and `fork`. */
 export interface SandboxCreationOptions {
