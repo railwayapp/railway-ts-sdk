@@ -1,7 +1,12 @@
 import type { NormalizedRailwayClientConfig } from "../core/config.js";
-import { ExecControlUnsupportedError, ExecNotStartedError, RailwayConnectionError, RailwayError } from "../core/errors.js";
+import {
+  ExecControlUnsupportedError,
+  RailwayConnectionError,
+  RailwayError,
+} from "../core/errors.js";
 import {
   connectExecWs,
+  shouldRetryBeforeStart,
   type ExecWsConnection,
 } from "../core/exec-ws-client.js";
 import { requestGraphQL } from "../core/graphql-client.js";
@@ -22,7 +27,12 @@ import type {
 
 const decoder = () => new TextDecoder();
 const DEFAULT_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
+/** TERM to KILL escalation. */
 const KILL_GRACE_MS = 5_000;
+/** How long termination may take to produce a confirmed exit before the outcome is unknown. */
+const TERMINATION_CONFIRM_MS = KILL_GRACE_MS * 2;
+/** Pause before the single reconnect after a failure that sent no command. */
+const CONNECT_RETRY_DELAY_MS = 250;
 
 /**
  * Reattach carries a durable session id, not a command, but the `/ws/exec`
@@ -177,15 +187,15 @@ export function startExec(
     (!Number.isFinite(options.timeoutSec) || options.timeoutSec <= 0 ||
       options.timeoutSec * 1000 > 2_147_483_647)
   ) {
-    throw new RangeError(
-      "timeoutSec must be positive and fit in a JavaScript timer.",
+    throw new TypeError(
+      "`timeoutSec` must be a positive number of seconds that fits in a JavaScript timer.",
     );
   }
   if (
     options.maxOutputBytes !== undefined &&
     (!Number.isSafeInteger(options.maxOutputBytes) || options.maxOutputBytes < 0)
   ) {
-    throw new RangeError("maxOutputBytes must be a non-negative safe integer.");
+    throw new TypeError("`maxOutputBytes` must be a non-negative safe integer.");
   }
 
   let resolveSessionName!: (value: string) => void;
@@ -274,6 +284,8 @@ export function startExec(
       ));
     },
     async end() {
+      // Ending stdin of a command that already exited (e.g. `head -1`) is a no-op.
+      if (control.finished) return;
       if (stdinEnded) return stdinTail;
       stdinEnded = true;
       return enqueueStdin(connection => connection.closeStdin());
@@ -331,10 +343,18 @@ async function runExec(
     scope: "shell",
   };
   const mintShellToken = async () => {
-    const tokenData = await requestGraphQL<
-      RailwayGenerateShellTokenMutation,
-      RailwayGenerateShellTokenMutationVariables
-    >(context.config, RailwayGenerateShellTokenDocument, { input }, options.signal);
+    let tokenData: RailwayGenerateShellTokenMutation;
+    try {
+      tokenData = await requestGraphQL<
+        RailwayGenerateShellTokenMutation,
+        RailwayGenerateShellTokenMutationVariables
+      >(context.config, RailwayGenerateShellTokenDocument, { input }, options.signal);
+    } catch (error) {
+      // A custom fetch may reject an aborted request with its own AbortError;
+      // callers are promised the signal's reason.
+      options.signal?.throwIfAborted();
+      throw error;
+    }
     options.signal?.throwIfAborted();
     return tokenData.generateShellToken;
   };
@@ -422,15 +442,19 @@ async function runExec(
       new RailwayError("Exec stdin is no longer writable."),
     );
     // Keep the socket open: closing it merely detaches a durable process.
+    context.config.log(`exec: sending TERM in sandbox=${context.sandboxId}`);
     signalRemote("TERM");
     if (settled) return;
-    escalation = setTimeout(() => signalRemote("KILL"), KILL_GRACE_MS);
+    escalation = setTimeout(() => {
+      context.config.log(`exec: no exit ${KILL_GRACE_MS}ms after TERM; sending KILL in sandbox=${context.sandboxId}`);
+      signalRemote("KILL");
+    }, KILL_GRACE_MS);
     terminationDeadline = setTimeout(() => settle({
       error: new RailwayConnectionError({
-        message: "Exec termination was not confirmed within 10000ms; the command's outcome is unknown.",
+        message: `Exec termination was not confirmed within ${TERMINATION_CONFIRM_MS}ms; the command's outcome is unknown.`,
         cause: failure?.reason,
       }),
-    }), KILL_GRACE_MS * 2);
+    }), TERMINATION_CONFIRM_MS);
   };
   const onAbort = () => terminate({ reason: options.signal?.reason });
 
@@ -489,24 +513,24 @@ async function runExec(
       },
   };
   // A connection that fails before the command is sent left nothing running, so
-  // one retry on a fresh token is safe. It covers transient drops such as a
-  // tcp-proxy rolling deploy. An old proxy, a negotiation timeout, or an abort
-  // is not retried here.
-  const connectWithRetry = async (legacy: boolean, firstJwt: string) => {
+  // one reconnect on a fresh token is safe. Only transient failures (a dropped
+  // socket, a deploy) are retried; denials, routing failures, the readiness
+  // timeout, an old proxy, and aborts are not. One attempt, unlike the files
+  // client's three, because each one mints a token and may wait out routing.
+  const connectWithRetry = async () => {
     try {
-      return await connectExecWs({ config: context.config, jwt: firstJwt, ...init, legacy, handlers });
+      return await connectExecWs({ config: context.config, jwt, ...init, handlers });
     } catch (error) {
-      if (!(error instanceof ExecNotStartedError) || error instanceof ExecControlUnsupportedError) {
-        throw error;
-      }
+      if (!shouldRetryBeforeStart(error)) throw error;
       options.signal?.throwIfAborted();
-      context.config.log("exec: connection failed before the command was sent; retrying once");
+      context.config.log(
+        `exec: ${(error as Error).message} Retrying once in sandbox=${context.sandboxId}`,
+      );
       await abortableDelay(CONNECT_RETRY_DELAY_MS, options.signal);
       return connectExecWs({
         config: context.config,
         jwt: await mintShellToken(),
         ...init,
-        legacy,
         handlers,
       });
     }
@@ -514,7 +538,7 @@ async function runExec(
 
   let connection: ExecWsConnection;
   try {
-    connection = await connectWithRetry(false, jwt);
+    connection = await connectWithRetry();
   } catch (error) {
     if (!(error instanceof ExecControlUnsupportedError)) throw error;
     // The proxy predates exec control and refused the bare hello, so nothing ran.
@@ -527,8 +551,17 @@ async function runExec(
         cause: error,
       });
     }
-    context.config.log("exec: tcp-proxy predates exec control; retrying in legacy mode");
-    connection = await connectWithRetry(true, await mintShellToken());
+    context.config.log(
+      `exec: tcp-proxy predates exec control; reconnecting in legacy mode in sandbox=${context.sandboxId}`,
+    );
+    // One legacy attempt; no further retry stacks on the fallback.
+    connection = await connectExecWs({
+      config: context.config,
+      jwt: await mintShellToken(),
+      ...init,
+      legacy: true,
+      handlers,
+    });
   }
   control.connection = connection;
   onConnection(connection);
@@ -608,8 +641,6 @@ class OutputCapture {
   }
 }
 
-/** Pause before the single pre-start reconnect. */
-const CONNECT_RETRY_DELAY_MS = 250;
 
 function abortableDelay(ms: number, signal: AbortSignal | undefined): Promise<void> {
   return new Promise((resolve, reject) => {

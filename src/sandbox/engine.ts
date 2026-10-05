@@ -31,6 +31,9 @@ import {
   type RailwaySandboxCreateMutationVariables,
   type RailwaySandboxDestroyMutation,
   type RailwaySandboxDestroyMutationVariables,
+  type RailwaySandboxHeartbeatMutation,
+  type RailwaySandboxHeartbeatMutationVariables,
+  type RailwaySandboxSessionFieldsFragment,
   type RailwaySandboxExecMutation,
   type RailwaySandboxExecMutationVariables,
   type RailwaySandboxSessionsQuery,
@@ -59,9 +62,9 @@ import type {
   ExecOptions,
   ExecTarget,
   ForkOptions,
-  ExecResult,
   ListOptions,
   RunOptions,
+  RunResult,
   SandboxCheckpointInfo,
   SandboxCreationOptions,
   SandboxInfo,
@@ -72,6 +75,8 @@ import type {
 } from "./types.js";
 
 const READINESS_TIMEOUT_MS = 5 * 60_000;
+/** Upper bound on `sessions()` paging; a sandbox holds far fewer sessions. */
+const MAX_SESSION_PAGES = 20;
 const POLL_INITIAL_DELAY_MS = 500;
 const POLL_MAX_DELAY_MS = 5_000;
 
@@ -257,27 +262,31 @@ export class SandboxEngine {
     return data.sandboxCheckpointRename;
   }
 
-  /** Sessions in the sandbox, or null when its runtime cannot list them. */
+  /**
+   * Every session in the sandbox (all pages), or null when its runtime cannot
+   * list them. A sandbox holds few sessions, so callers get the whole set.
+   */
   async sessions(sandboxId: string): Promise<SandboxSessionInfo[] | null> {
-    const data = await requestGraphQL<
-      RailwaySandboxSessionsQuery,
-      RailwaySandboxSessionsQueryVariables
-    >(this.#config, RailwaySandboxSessionsDocument, {
-      environmentId: this.#config.environmentId,
-      id: sandboxId,
-    });
-    if (data.sandboxSessions == null) return null;
-    return data.sandboxSessions.edges.map(({ node }) => ({
-      name: node.name,
-      kind: node.kind,
-      running: node.runState.running,
-      exitCode: node.runState.running ? null : node.runState.exitCode,
-      exitedAt: node.runState.exitedAt ?? null,
-      attached: node.attached,
-      command: node.command,
-      foregroundActive: node.foregroundActive ?? null,
-      createdAt: node.createdAt ?? null,
-    }));
+    const sessions: SandboxSessionInfo[] = [];
+    let after: string | undefined;
+    for (let page = 0; page < MAX_SESSION_PAGES; page++) {
+      const variables: RailwaySandboxSessionsQueryVariables = {
+        environmentId: this.#config.environmentId,
+        id: sandboxId,
+        ...(after !== undefined ? { after } : {}),
+      };
+      const data = await requestGraphQL<
+        RailwaySandboxSessionsQuery,
+        RailwaySandboxSessionsQueryVariables
+      >(this.#config, RailwaySandboxSessionsDocument, variables);
+      if (data.sandboxSessions == null) return null;
+      for (const { node } of data.sandboxSessions.edges) sessions.push(toSessionInfo(node));
+      const { hasNextPage, endCursor } = data.sandboxSessions.pageInfo;
+      if (!hasNextPage || !endCursor) return sessions;
+      after = endCursor;
+    }
+    this.#config.log(`sessions: stopped after ${MAX_SESSION_PAGES} pages in sandbox ${sandboxId}`);
+    return sessions;
   }
 
   /** One-request exec over HTTPS: no streaming, stdin, or cancellation. */
@@ -285,12 +294,13 @@ export class SandboxEngine {
     sandboxId: string,
     command: string,
     options: RunOptions = {},
-  ): Promise<ExecResult> {
+  ): Promise<RunResult> {
     if (
       options.timeoutSec !== undefined &&
       !(Number.isInteger(options.timeoutSec) && options.timeoutSec > 0)
     ) {
-      throw new RangeError("timeoutSec must be a positive integer.");
+      // The HTTPS exec takes whole seconds, unlike the streaming exec's timer.
+      throw new TypeError("`timeoutSec` must be a positive whole number of seconds.");
     }
     this.#config.log(`run (http) in sandbox ${sandboxId}`);
     const data = await requestGraphQL<
@@ -457,11 +467,15 @@ export class SandboxEngine {
   }
 
   async heartbeat(id: string): Promise<SandboxInfo> {
-    const data = await requestGraphQL(
-      this.#config,
-      RailwaySandboxHeartbeatDocument,
-      { id, environmentId: this.#config.environmentId },
-    );
+    const variables: RailwaySandboxHeartbeatMutationVariables = {
+      id,
+      environmentId: this.#config.environmentId,
+    };
+    this.#config.log(`heartbeat sandbox ${id}`);
+    const data = await requestGraphQL<
+      RailwaySandboxHeartbeatMutation,
+      RailwaySandboxHeartbeatMutationVariables
+    >(this.#config, RailwaySandboxHeartbeatDocument, variables);
     if (!data.sandboxHeartbeat) {
       throw new SandboxNotFoundError({ id, environmentId: this.environmentId });
     }
@@ -542,6 +556,9 @@ function creationLine(
     `envKeys=[${envKeys.join(",")}]`,
     `domains=[${domains.join(",")}]`,
   ];
+  if (input.resources) {
+    parts.push(`resources=cpu:${input.resources.cpu ?? "default"},memGB:${input.resources.memoryGB ?? "default"}`);
+  }
   if (input.sourceSandboxId) parts.push(`source=${input.sourceSandboxId}`);
   if (input.template?.name) parts.push(`checkpoint="${input.template.name}"`);
   return parts.join(" ");
@@ -553,16 +570,37 @@ export function engineFromOptions(options: SandboxOptions = {}): SandboxEngine {
   return new SandboxEngine({ ...base, environmentId });
 }
 
-/** Rejects values the platform would refuse anyway, before a create is spent on them. */
+/**
+ * The platform validates sizes, but NaN and Infinity serialize to JSON `null`,
+ * which it would silently read as "use the default". Reject them here.
+ */
 function validResources(resources: SandboxResources): SandboxResources {
   for (const key of ["cpu", "memoryGB"] as const) {
     const value = resources[key];
     if (value !== undefined && !(Number.isFinite(value) && value > 0)) {
-      throw new RangeError(`resources.${key} must be a positive number.`);
+      throw new TypeError(`\`resources.${key}\` must be a positive finite number.`);
     }
   }
   return {
     ...(resources.cpu !== undefined ? { cpu: resources.cpu } : {}),
     ...(resources.memoryGB !== undefined ? { memoryGB: resources.memoryGB } : {}),
+  };
+}
+
+/**
+ * Flattens the run state. The schema reports `exitCode: 0` while a session is
+ * still running, so a running session reports `null` instead.
+ */
+function toSessionInfo(node: RailwaySandboxSessionFieldsFragment): SandboxSessionInfo {
+  return {
+    name: node.name,
+    kind: node.kind,
+    running: node.runState.running,
+    exitCode: node.runState.running ? null : node.runState.exitCode,
+    exitedAt: node.runState.exitedAt ?? null,
+    attached: node.attached,
+    command: node.command,
+    foregroundActive: node.foregroundActive ?? null,
+    createdAt: node.createdAt ?? null,
   };
 }

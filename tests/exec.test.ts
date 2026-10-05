@@ -125,34 +125,99 @@ describe("exec", () => {
     expect(ws.sockets.flatMap(s => s.sentText)).toEqual([]);
   });
 
-  it("does not retry once aborted", async () => {
+  it("stops the retry when aborted during its delay", async () => {
     const controller = new AbortController();
     const { sandbox, ws } = await wsSandbox([shellToken("jwt_a"), shellToken("jwt_b")], { manualOpen: true });
     const handle = sandbox.exec("echo hi", { signal: controller.signal });
     handle.catch(() => {});
     const first = await vi.waitFor(() => ws.sockets[0] ?? Promise.reject(new Error("no socket")));
-    first.serverClose(1006, "");
-    controller.abort(new Error("stop"));
-    await expect(handle).rejects.toThrow("stop");
-    await new Promise(r => setTimeout(r, 300));
-    expect(ws.sockets).toHaveLength(1);
+    vi.useFakeTimers();
+    try {
+      first.serverClose(1006, "");
+      await vi.advanceTimersByTimeAsync(100); // inside the 250ms retry delay
+      controller.abort(new Error("stop"));
+      await expect(handle).rejects.toThrow("stop");
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(ws.sockets).toHaveLength(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("does not fall back when negotiation times out", async () => {
+  it("waits out the server's routing window, then fails without retry or fallback", async () => {
     vi.useFakeTimers();
     try {
       const { sandbox, ws } = await wsSandbox([shellToken("jwt_abc")], { manualCapabilities: true });
       const handle = sandbox.exec("side-effect");
       handle.catch(() => {});
-      await vi.advanceTimersByTimeAsync(10_001);
+      // Routing plus the sandbox dialing back can take well over 10s.
+      await vi.advanceTimersByTimeAsync(100_000);
+      expect(ws.sockets).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(20_001);
       const error = (await handle.catch(e => e)) as Error;
-      expect(error.message).toMatch(/timed out/);
-      expect(error).not.toBeInstanceOf(ExecControlUnsupportedError);
+      expect(error).toBeInstanceOf(ExecNotStartedError);
+      expect(error.message).toMatch(/not ready within 120000ms/);
       expect(ws.sockets).toHaveLength(1);
       expect(ws.sockets[0]!.sentText).toEqual([{ type: "exec_hello" }]);
+      expect(vi.getTimerCount()).toBe(0);
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("retries a session the server dropped during a deploy (1001), still negotiating", async () => {
+    const { handle, ws, socket } = await execSocket("echo hi", {}, [shellToken("jwt_a"), shellToken("jwt_b")], { manualCapabilities: true });
+    expect(socket.sentText).toEqual([{ type: "exec_hello" }]);
+    socket.serverClose(1001, "going away");
+    await vi.waitFor(() => expect(ws.sockets).toHaveLength(2));
+    const second = ws.sockets[1]!;
+    await vi.waitFor(() => expect(second.sentText).toEqual([{ type: "exec_hello" }]));
+    second.serverFrame({ type: "exec_capabilities", data: { version: 2, stdin_chunks: 8, stdin_chunk_bytes: 16384 } });
+    await vi.waitFor(() => expect(second.sentText.map(f => f.type)).toContain("init_exec"));
+    second.serverExit(0);
+    await expect(handle).resolves.toMatchObject({ exitCode: 0 });
+  });
+
+  it.each([
+    [1008, "Sandbox is not running."],
+    [4001, "too many sessions"],
+    [1011, "stacker did not dial back"],
+  ])("fails fast on a server close %s before the command, naming the reason", async (code, reason) => {
+    const { handle, ws, socket } = await execSocket("echo hi", { stdin: true }, undefined, { manualCapabilities: true });
+    socket.serverClose(code, reason);
+    const error = (await handle.catch(e => e)) as Error;
+    expect(error).toBeInstanceOf(ExecNotStartedError);
+    expect(error).not.toBeInstanceOf(ExecControlUnsupportedError);
+    expect(error.message).toContain(`code ${code}: ${reason}`);
+    expect(ws.sockets).toHaveLength(1);
+  });
+
+  it("makes a single legacy attempt after an old proxy, with no retry stacked on it", async () => {
+    const { sandbox, ws, mock } = await wsSandbox(
+      [shellToken("jwt_a"), shellToken("jwt_b"), shellToken("jwt_c")],
+      { legacyPeer: true, manualOpen: true },
+    );
+    const handle = sandbox.exec("echo hi");
+    handle.catch(() => {});
+    const first = await vi.waitFor(() => ws.sockets[0] ?? Promise.reject(new Error("no socket")));
+    first.serverOpen(); // the old proxy closes 1000 on the bare hello
+    await vi.waitFor(() => expect(ws.sockets).toHaveLength(2));
+    ws.sockets[1]!.serverClose(1006, ""); // the legacy attempt drops before opening
+    await expect(handle).rejects.toBeInstanceOf(ExecNotStartedError);
+    expect(ws.sockets).toHaveLength(2);
+    // sandboxCreate + two shell tokens; the third token was never minted.
+    expect(mock.calls).toHaveLength(3);
+  });
+
+  it("accepts a newer exec-control version and a larger chunk limit", async () => {
+    const { handle, socket } = await execSocket("cat", { stdin: true }, undefined, { manualCapabilities: true });
+    socket.serverFrame({ type: "exec_capabilities", data: { version: 3, stdin_chunks: 8, stdin_chunk_bytes: 65536 } });
+    await vi.waitFor(() => expect(socket.sentText.map(f => f.type)).toContain("init_exec"));
+    await handle.stdin.write("x");
+    expect(socket.sentStdin).toHaveLength(1);
+    socket.serverExit(0);
+    await expect(handle).resolves.toMatchObject({ exitCode: 0 });
   });
 
   it("aborts capability negotiation without sending a command", async () => {
@@ -180,6 +245,36 @@ describe("exec", () => {
     socket.serverExit(-1);
     await expect(handle).rejects.toBe(controller.signal.reason);
     await rejected;
+  });
+
+  it("lets a command take longer than 30s to read stdin", async () => {
+    const { handle, socket } = await execSocket("sleep 40; cat", { stdin: true }, undefined, { manualCredits: true });
+    vi.useFakeTimers();
+    try {
+      const write = handle.stdin.write(new Uint8Array(9 * 16 * 1024));
+      let failed: unknown;
+      write.catch(error => (failed = error));
+      await vi.advanceTimersByTimeAsync(40_000);
+      expect(socket.sentStdin).toHaveLength(8);
+      expect(failed).toBeUndefined();
+      socket.serverFrame({ type: "stdin_credit", data: { chunks: 1 } });
+      await vi.advanceTimersByTimeAsync(0);
+      await expect(write).resolves.toBeUndefined();
+      expect(socket.sentStdin).toHaveLength(9);
+      await handle.stdin.end();
+      socket.serverExit(0);
+      await expect(handle).resolves.toMatchObject({ exitCode: 0 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("treats ending stdin after the command exited as a no-op", async () => {
+    const { handle, socket } = await execSocket("head -1", { stdin: true });
+    await handle.stdin.write("one\n");
+    socket.serverExit(0);
+    await handle;
+    await expect(handle.stdin.end()).resolves.toBeUndefined();
   });
 
   it.each([undefined, null, "0", 0.5, -2])("rejects an invalid remote exit code (%s)", async code => {

@@ -30,6 +30,21 @@ describe.runIf(live)("fork + checkpoint e2e (live)", () => {
     expect((await staticFork.exec("cat /tmp/state.txt")).stdout).toBe("base\n");
   }, 180_000);
 
+  it("sizes create and fork independently with resources", async () => {
+    const memMiB = async (sandbox: Sandbox) =>
+      Number((await sandbox.exec("awk '/MemTotal/ {print $2}' /proc/meminfo")).stdout) / 1024;
+    const small = track(await Sandbox.create({ resources: { cpu: 1, memoryGB: 1 } }));
+    const large = track(await small.fork({ resources: { cpu: 2, memoryGB: 2 } }));
+    // The guest reports a little more than the request; compare, don't pin.
+    const [smallMem, largeMem] = await Promise.all([memMiB(small), memMiB(large)]);
+    expect(largeMem).toBeGreaterThan(smallMem + 500);
+    expect((await large.exec("nproc")).stdout.trim()).toBe("2");
+  }, 240_000);
+
+  it("rejects resources above the workspace maximum", async () => {
+    await expect(Sandbox.create({ resources: { cpu: 512 } })).rejects.toThrow(/cpu/i);
+  }, 60_000);
+
   it("captures one immutable checkpoint and manages its lifecycle", async () => {
     const name = `sdk-e2e-snap-${Date.now()}`;
     const renamed = `${name}-renamed`;

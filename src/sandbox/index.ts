@@ -28,6 +28,7 @@ export type {
   ForkOptions,
   ListOptions,
   RunOptions,
+  RunResult,
   SandboxCheckpointInfo,
   SandboxDomain,
   SandboxFileEntry,

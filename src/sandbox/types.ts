@@ -1,7 +1,9 @@
 import type { RailwayClientConfig } from "../core/config.js";
 import type {
   RailwaySandboxCheckpointFieldsFragment,
+  RailwaySandboxExecMutation,
   RailwaySandboxFieldsFragment,
+  RailwaySandboxSessionFieldsFragment,
   RailwaySandboxTemplateBuildFieldsFragment,
 } from "../generated/graphql.js";
 
@@ -58,7 +60,8 @@ export interface SandboxResources {
 export interface SandboxSessionInfo {
   /** Stable session name; pass it as `exec({ sessionName })` to reattach. */
   name: string;
-  kind: "SHELL" | "EXEC";
+  /** `SHELL` for an interactive shell, `EXEC` for a one-off command. */
+  kind: RailwaySandboxSessionFieldsFragment["kind"];
   /** Whether the session's process is still alive. */
   running: boolean;
   /** Exit code once the process has exited; null while it runs. */
@@ -71,14 +74,21 @@ export interface SandboxSessionInfo {
   command: string;
   /** For a shell, whether a foreground program holds the terminal; null when unknown or not a shell. */
   foregroundActive: boolean | null;
+  /** When the session started (ISO timestamp); null when the runtime does not report it. */
   createdAt: string | null;
 }
 
 /** Options for `sandbox.run`, the one-request HTTPS exec. */
 export interface RunOptions {
-  /** Server-side deadline in seconds. */
+  /** Server-side deadline in whole seconds. Defaults to 2 minutes; capped at 10 minutes. */
   timeoutSec?: number;
 }
+
+/**
+ * Result of `sandbox.run`. Each stream is cut at 16,000 bytes (`truncated`). On a
+ * server timeout `timedOut` is true and `exitCode` is -1.
+ */
+export type RunResult = RailwaySandboxExecMutation["sandboxExec"];
 
 /** Knobs shared by every sandbox-creating call: `create`, `create(template)`, `create(checkpoint)`, and `fork`. */
 export interface SandboxCreationOptions {

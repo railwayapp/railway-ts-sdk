@@ -17,7 +17,49 @@ const STDERR_FRAME = 0x03;
 // /ws/files). Leave room for the leading stdin tag within every message.
 const STDIN_CHUNK_BYTES = 16 * 1024;
 const SEND_HIGH_WATER_BYTES = 128 * 1024;
-const SEND_TIMEOUT_MS = 30_000;
+/** How long the local WebSocket send buffer may stay above the high-water mark. */
+const SEND_STALL_TIMEOUT_MS = 30_000;
+const SEND_POLL_MS = 10;
+/**
+ * The proxy accepts the socket before it routes the session (up to 70s) and
+ * waits for the sandbox to dial back (up to 30s), and only then answers
+ * `exec_hello`. The client's budget has to outlast both.
+ */
+const READY_TIMEOUT_MS = 120_000;
+/** Lowest exec-control version this client speaks. */
+const MIN_EXEC_CONTROL_VERSION = 2;
+const MAX_STDIN_CHUNKS = 64;
+/**
+ * Close codes for a session the server dropped before it started, where a new
+ * connection can succeed: going away (deploys), abnormal closure, service
+ * restart, try again later.
+ */
+const TRANSIENT_CLOSE_CODES: ReadonlySet<number> = new Set([1001, 1006, 1012, 1013]);
+/** What a proxy that predates exec control sends after rejecting the bare hello. */
+const LEGACY_REJECT_CLOSE_CODE = 1000;
+
+const notRetryable = new WeakSet<object>();
+
+/**
+ * Whether a connection failure left nothing running AND is worth one more try.
+ * Denials (policy, limits), routing failures, and the readiness timeout are not.
+ */
+export function shouldRetryBeforeStart(error: unknown): boolean {
+  return error instanceof ExecNotStartedError && !notRetryable.has(error);
+}
+
+function notStarted(
+  message: string,
+  options: { retryable: boolean; closeCode?: number; cause?: unknown },
+): ExecNotStartedError {
+  const error = new ExecNotStartedError({
+    message,
+    ...(options.closeCode !== undefined ? { closeCode: options.closeCode } : {}),
+    ...(options.cause !== undefined ? { cause: options.cause } : {}),
+  });
+  if (!options.retryable) notRetryable.add(error);
+  return error;
+}
 
 /** Subprotocol the tcp-proxy bridges expect alongside the JWT. */
 const SHELL_SUBPROTOCOL = "railway-shell";
@@ -95,6 +137,27 @@ export function connectExecWs(args: {
     let helloSent = false;
     let credits = 0;
     let window = 0;
+    let creditWaiters: Array<() => void> = [];
+    const wakeCreditWaiters = () => {
+      const waiters = creditWaiters;
+      creditWaiters = [];
+      for (const wake of waiters) wake();
+    };
+    // Credits pace input to the remote command. A command that is slow to read
+    // stdin is legitimate, so this waits without a deadline; abort and close
+    // still end the wait.
+    const waitForCredit = (abort: AbortSignal) => new Promise<void>((resolve, rejectWait) => {
+      const onWaitAbort = () => {
+        creditWaiters = creditWaiters.filter(w => w !== wake);
+        rejectWait(abort.reason);
+      };
+      const wake = () => {
+        abort.removeEventListener("abort", onWaitAbort);
+        resolve();
+      };
+      creditWaiters.push(wake);
+      abort.addEventListener("abort", onWaitAbort, { once: true });
+    });
     const socket = new WS(config.tcpProxyWsEndpoint, [
       SHELL_SUBPROTOCOL,
       jwt,
@@ -103,14 +166,17 @@ export function connectExecWs(args: {
     const handshakeTimer = setTimeout(() => {
       closed = true;
       signal?.removeEventListener("abort", onAbort);
-      reject(new RailwayConnectionError({ message: "Exec capability negotiation timed out after 10000ms; no command was sent." }));
+      reject(notStarted(
+        `The exec session was not ready within ${READY_TIMEOUT_MS}ms; no command was sent.`,
+        { retryable: false },
+      ));
       socket.close(1000, "");
-    }, 10_000);
+    }, READY_TIMEOUT_MS);
 
     const assertOpen = () => {
       if (closed) {
         throw new RailwayConnectionError({
-          message: "Exec stdin connection is closed.",
+          message: "Exec connection is closed.",
         });
       }
     };
@@ -159,16 +225,21 @@ export function connectExecWs(args: {
           signal.throwIfAborted();
           assertOpen();
           for (let offset = 0; offset < bytes.length; offset += STDIN_CHUNK_BYTES) {
-            const started = Date.now();
-            while (credits === 0 || (socket.bufferedAmount ?? 0) > SEND_HIGH_WATER_BYTES) {
+            while (credits === 0) {
               signal.throwIfAborted();
               assertOpen();
-              if (Date.now() - started >= SEND_TIMEOUT_MS) {
+              await waitForCredit(signal);
+            }
+            const started = Date.now();
+            while ((socket.bufferedAmount ?? 0) > SEND_HIGH_WATER_BYTES) {
+              signal.throwIfAborted();
+              assertOpen();
+              if (Date.now() - started >= SEND_STALL_TIMEOUT_MS) {
                 throw new RailwayConnectionError({
-                  message: "Exec stdin send buffer stalled for 30000ms.",
+                  message: `Exec stdin send buffer stalled for ${SEND_STALL_TIMEOUT_MS}ms.`,
                 });
               }
-              await new Promise(resolve => setTimeout(resolve, 10));
+              await new Promise(resolve => setTimeout(resolve, SEND_POLL_MS));
             }
             signal.throwIfAborted();
             assertOpen();
@@ -190,6 +261,7 @@ export function connectExecWs(args: {
         },
         close: () => {
           closed = true;
+          wakeCreditWaiters();
           socket.close(1000, "");
         },
       });
@@ -246,6 +318,7 @@ export function connectExecWs(args: {
         case "stdin_credit":
           if (validCreditGrant(frame.data?.chunks, window - credits)) {
             credits += frame.data!.chunks!;
+            wakeCreditWaiters();
           } else {
             handlers.onError(new RailwayConnectionError({
               message: "Invalid exec stdin credit frame.",
@@ -281,20 +354,25 @@ export function connectExecWs(args: {
 
     socket.onclose = event => {
       closed = true;
+      wakeCreditWaiters();
       clearTimeout(handshakeTimer);
       signal?.removeEventListener("abort", onAbort);
       if (!opened) {
-        // A proxy that predates exec control reads the hello as a command-less
-        // init and closes; nothing ran, so the caller may retry in legacy mode.
-        const ErrorType = helloSent ? ExecControlUnsupportedError : ExecNotStartedError;
-        reject(
-          new ErrorType({
-            message: `tcp-proxy exec WebSocket closed before exec control negotiation completed; no command was sent (code ${event.code}${
-              event.reason ? `: ${event.reason}` : ""
-            }).`,
+        const detail = `code ${event.code}${event.reason ? `: ${event.reason}` : ""}`;
+        // The proxy routes the session after accepting the socket, so a close
+        // here can be a denial, a routing failure, or a deploy, not only an old
+        // proxy. An old proxy answers the bare hello with a normal closure.
+        if (helloSent && event.code === LEGACY_REJECT_CLOSE_CODE) {
+          reject(new ExecControlUnsupportedError({
+            message: `tcp-proxy does not support exec control (${detail}); no command was sent.`,
             closeCode: event.code,
-          }),
-        );
+          }));
+          return;
+        }
+        reject(notStarted(
+          `tcp-proxy exec session closed before the command was sent (${detail}).`,
+          { retryable: TRANSIENT_CLOSE_CODES.has(event.code), closeCode: event.code },
+        ));
         return;
       }
       handlers.onClose({ code: event.code, reason: event.reason });
@@ -305,12 +383,10 @@ export function connectExecWs(args: {
       closed = true;
       clearTimeout(handshakeTimer);
       signal?.removeEventListener("abort", onAbort);
-      reject(
-        new ExecNotStartedError({
-          message: "tcp-proxy exec WebSocket connection failed; no command was sent.",
-          cause: event,
-        }),
-      );
+      reject(notStarted(
+        "tcp-proxy exec WebSocket connection failed; no command was sent.",
+        { retryable: true, cause: event },
+      ));
       socket.close(1000, "");
     };
   });
@@ -349,9 +425,14 @@ function validCreditGrant(chunks: unknown, available: number): chunks is number 
     chunks > 0 && chunks <= available;
 }
 
+/**
+ * Accepts any later protocol version and any chunk limit at least as large as
+ * the chunks this client sends, so a newer proxy does not break deployed SDKs.
+ */
 function negotiatedStdinWindow(data: ControlFrameData | undefined): number {
-  if (data?.version !== 2 || data.stdin_chunk_bytes !== STDIN_CHUNK_BYTES ||
-    !validCreditGrant(data.stdin_chunks, 64)) {
+  if (typeof data?.version !== "number" || data.version < MIN_EXEC_CONTROL_VERSION ||
+    typeof data.stdin_chunk_bytes !== "number" || data.stdin_chunk_bytes < STDIN_CHUNK_BYTES ||
+    !validCreditGrant(data.stdin_chunks, MAX_STDIN_CHUNKS)) {
     throw new RailwayConnectionError({
       message: "Unsupported exec control capabilities; no command was sent.",
     });

@@ -55,9 +55,9 @@ RAILWAY_E2E_SANDBOX_SOURCE=checkpoint RAILWAY_E2E_PRIVATE=1 mise run e2e tests/s
 The default boot path is `fresh`; `RAILWAY_E2E_PRIVATE=1` opts into private
 networking. Fork/checkpoint scenarios destroy the source before the exec suite
 runs. Teardown destroys test sandboxes and named checkpoints; recipe builds may
-leave reusable cached checkpoints. Live conformance tests include ephemeral
-cancellation, which currently fails because the runtime only routes signals to
-durable execs. Keep this failure visible when validating runtime changes.
+leave reusable cached checkpoints. Live conformance tests include ephemeral and
+durable cancellation, including while a stdin upload is stalled; keep them enabled
+when validating runtime or tcp-proxy changes.
 
 ## Package checks
 

@@ -122,18 +122,16 @@ run, but the result's `stdout` and `stderr` are empty and `truncated` is false.
 Callbacks run synchronously; a thrown error terminates the command before the
 handle rejects.
 
-### Exec protocol compatibility
+### Older servers
 
-This development branch requires matching runtime and tcp-proxy `exec_control`
-support. It sends a command-less capability hello before `init_exec`; unsupported
-peers reject before the command is transmitted. The backend changes have not yet
-been deployed or live-validated. Existing sandboxes and checkpoints may contain an
-older runtime, even after a proxy upgrade.
+Stdin, ephemeral execs, and confirmed cancellation need server support that Railway
+rolled out in October 2026. Against an older server, a plain `exec` still works;
+`stdin: true` and `ephemeral: true` reject with `ExecControlUnsupportedError` before
+any command runs.
 
-Stdin is sent in 16 KiB chunks with an eight-chunk credit window. The proxy
-replenishes credits as it forwards input, keeping its control reader available
-when the command stops reading stdin. A durable name is returned only after
-runtime acceptance; a missing reattachment errors rather than starting a new command.
+Writing to stdin is flow-controlled: a command that stops reading its input slows
+`stdin.write()` down, and `kill()` and abort still reach it. Reattaching to a session
+name that no longer exists is an error; it never starts a new command.
 
 ### Cancellation and timeouts
 
@@ -156,15 +154,13 @@ try {
 Aborting cancels token minting or a pending connection. Once connected, abort and
 `timeoutSec` send TERM to the remote process group, escalate to KILL after 5 seconds,
 and wait for the remote exit. Abort rejects with the signal's reason; timeout resolves
-with `timedOut: true`. If no exit is confirmed within 10 seconds of termination starting,
-the handle rejects with `RailwayConnectionError`; a dropped connection rejects with
-`ExecInterruptedError`. Both mean the command's outcome is unknown. The `timeoutSec`
-clock starts after capability negotiation and transmission of `init_exec`.
+with `timedOut: true` and `exitCode: -1` (signalled). If no exit is confirmed within 10
+seconds of termination starting, the handle rejects with `RailwayConnectionError`; a
+dropped connection rejects with `ExecInterruptedError`. Both mean the command's outcome
+is unknown. The `timeoutSec` clock starts once the command has been sent.
 
-Exec control (credit-bounded stdin, ephemeral execs, confirmed exits) is negotiated
-before any command is sent. Against an older tcp-proxy, a plain `exec` retries once
-without it; `stdin: true` and `ephemeral: true` reject with
-`ExecControlUnsupportedError` instead, and no command runs.
+A sandbox that is still starting can take a while to accept a command; `exec` waits up
+to 120 seconds for it before rejecting with `ExecNotStartedError`.
 
 ### Ephemeral and durable sessions
 
@@ -175,8 +171,8 @@ const result = await sandbox.exec("git status --short", { ephemeral: true });
 ```
 
 Ephemeral execs support stdin, streaming, and remote cancellation, but `sessionName`
-and `detach()` reject. The option applies only to fresh execs. On a compatible
-runtime, disconnecting an ephemeral exec terminates its process group; durable
+and `detach()` reject. The option applies only to fresh execs. Disconnecting an
+ephemeral exec terminates its process group; durable
 execs survive disconnects and can be reattached.
 
 When durable sessions are enabled for the sandbox, reattach to a running exec
@@ -199,16 +195,19 @@ The server must assign a durable session before detaching is possible. To resume
 writing stdin after reattaching, pass `stdin: true`; stdin must not have been ended
 by a previous connection.
 
-If the WebSocket cannot be established, `exec` retries once on a fresh token, since no
-command has been sent yet, and then rejects with `ExecNotStartedError` (a
-`RailwayConnectionError`). In non-Node runtimes without a global `WebSocket`,
+If the connection drops before the command is sent (for example during a Railway
+deploy), `exec` reconnects once, since nothing ran yet. If the sandbox refuses the
+session, or the reconnect fails too, it rejects with `ExecNotStartedError` (a
+`RailwayConnectionError`) and the close reason. No command ran in either case. In non-Node runtimes without a global `WebSocket`,
 pass an implementation via the `webSocketImpl` config option.
 
 ### Running a command without a WebSocket
 
 Where outbound WebSockets aren't available, `run` sends the command in one HTTPS request
-and returns the same result shape as `exec`. It has no streaming, stdin, or cancellation;
-`timeoutSec` is enforced by the server.
+and returns `{ exitCode, stdout, stderr, truncated, timedOut }`. It has no streaming,
+stdin, or cancellation. Each stream is cut at 16,000 bytes, and the server enforces
+`timeoutSec` (2 minutes by default, 10 at most); a timed-out command reports
+`exitCode: -1`. Use `exec` for anything larger or longer.
 
 ```ts
 const { exitCode, stdout } = await sandbox.run("node --version", { timeoutSec: 30 });

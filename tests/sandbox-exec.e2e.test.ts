@@ -146,6 +146,31 @@ describe.runIf(live)("exec e2e (live)", () => {
     expect(sandbox.idleTimeoutMinutes).toBe(10);
   }, 30_000);
 
+  it("lists a running durable exec in sessions()", async () => {
+    const handle = sandbox.exec("sleep 30");
+    const sessionName = await handle.sessionName;
+    try {
+      const sessions = await sandbox.sessions();
+      expect(sessions).not.toBeNull();
+      const mine = sessions!.find(session => session.name === sessionName);
+      expect(mine).toMatchObject({ kind: "EXEC", running: true, exitCode: null });
+    } finally {
+      await handle.kill("KILL");
+      await handle.catch(() => {});
+    }
+  }, 60_000);
+
+  it("runs a command over one HTTPS request with run()", async () => {
+    const result = await sandbox.run("printf out; printf err >&2; exit 7", { timeoutSec: 30 });
+    expect(result).toMatchObject({
+      exitCode: 7,
+      stdout: "out",
+      stderr: "err",
+      truncated: false,
+      timedOut: false,
+    });
+  }, 60_000);
+
   it("fire-and-forget: start a command without reading it, then reconnect and harvest the full output", async () => {
     const handle = sandbox.exec(
       "sleep 1; for i in $(seq 1 20); do echo line-$i; done; exit 0",

@@ -125,22 +125,34 @@ mutation RailwaySandboxCheckpointDelete($environmentId: String!, $id: ID!) {
   sandboxCheckpointDelete(environmentId: $environmentId, id: $id)
 }
 
-query RailwaySandboxSessions($environmentId: String!, $id: String!) {
-  sandboxSessions(environmentId: $environmentId, id: $id) {
+fragment RailwaySandboxSessionFields on SandboxSession {
+  name
+  kind
+  runState {
+    running
+    exitCode
+    exitedAt
+  }
+  attached
+  command
+  foregroundActive
+  createdAt
+}
+
+query RailwaySandboxSessions(
+  $environmentId: String!
+  $id: String!
+  $after: String
+) {
+  sandboxSessions(environmentId: $environmentId, id: $id, after: $after) {
     edges {
       node {
-        name
-        kind
-        runState {
-          running
-          exitCode
-          exitedAt
-        }
-        attached
-        command
-        foregroundActive
-        createdAt
+        ...RailwaySandboxSessionFields
       }
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
     }
   }
 }

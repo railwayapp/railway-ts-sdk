@@ -22,6 +22,7 @@ import type {
   ForkOptions,
   ListOptions,
   RunOptions,
+  RunResult,
   SandboxCheckpointInfo,
   SandboxDomain,
   SandboxInfo,
@@ -239,9 +240,10 @@ export class Sandbox implements AsyncDisposable {
   /**
    * Run a command in one HTTPS request and get its result. No streaming, stdin,
    * or cancellation: use it where WebSockets are unavailable, and `exec`
-   * everywhere else.
+   * everywhere else. Each stream is cut at 16,000 bytes; the server timeout is
+   * 2 minutes by default and 10 at most.
    */
-  async run(command: string, options: RunOptions = {}): Promise<ExecResult> {
+  async run(command: string, options: RunOptions = {}): Promise<RunResult> {
     return this.#engine.run(this.id, command, options);
   }
 
