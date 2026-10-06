@@ -170,6 +170,12 @@ and `detach()` reject. The option applies only to fresh execs. Disconnecting an
 ephemeral exec terminates its process group; durable
 execs survive disconnects and can be reattached.
 
+Durable execs keep about the last 8 MiB of output for reattachment. A command that
+writes more than that faster than the client reads it can lose output from the
+middle of the stream, and the result does not report the gap. For commands with
+large output, such as builds, test runs or data dumps, use `ephemeral: true`, or
+have the command write to a file and read the file back.
+
 When durable sessions are enabled for the sandbox, reattach to a running exec
 from anywhere — even another process — with the saved name. By default it
 replays the retained log, then continues live (pass `resumeFromLastRead: true`
