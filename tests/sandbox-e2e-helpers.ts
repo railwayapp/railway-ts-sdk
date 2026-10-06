@@ -2,9 +2,9 @@ import { expect } from "vitest";
 
 import { Sandbox, type ExecHandle, type CreateOptions } from "../src/index.js";
 
-/** Live suites stay offline unless both credentials are present. */
+/** Live suites stay offline unless a token (project or account) and an environment are present. */
 export const live =
-  Boolean(process.env.RAILWAY_API_TOKEN) &&
+  Boolean(process.env.RAILWAY_TOKEN || process.env.RAILWAY_API_TOKEN) &&
   Boolean(process.env.RAILWAY_ENVIRONMENT_ID);
 
 /** Select a boot path for repeated process-control conformance runs. */

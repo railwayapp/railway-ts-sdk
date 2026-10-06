@@ -26,30 +26,31 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_E2E_API_TOKEN }}
+      # A project token scoped to the test environment; the SDK reads project
+      # tokens from RAILWAY_TOKEN and sends them as Project-Access-Token.
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_E2E_API_TOKEN }}
       RAILWAY_ENVIRONMENT_ID: ${{ secrets.RAILWAY_E2E_ENVIRONMENT_ID }}
     steps:
       # Without credentials every live suite skips and the job would pass empty.
       - name: Require credentials
         run: |
-          if [ -z "$RAILWAY_API_TOKEN" ] || [ -z "$RAILWAY_ENVIRONMENT_ID" ]; then
+          if [ -z "$RAILWAY_TOKEN" ] || [ -z "$RAILWAY_ENVIRONMENT_ID" ]; then
             echo "::error::Set the RAILWAY_E2E_API_TOKEN and RAILWAY_E2E_ENVIRONMENT_ID repository secrets."
             exit 1
           fi
-      # Fail fast with a readable reason when the token can't reach the
+      # Fail fast with a readable reason when the token doesn't match the
       # environment, instead of a dozen "Not Authorized" test failures.
-      - name: Check the token can reach the environment
+      - name: Check the token belongs to the environment
         run: |
-          body=$(jq -n --arg id "$RAILWAY_ENVIRONMENT_ID" \
-            '{query: "query($id: String!) { environment(id: $id) { name projectId } }", variables: {id: $id}}')
           response=$(curl -sS https://backboard.railway.com/graphql/v2 \
-            -H "Authorization: Bearer $RAILWAY_API_TOKEN" -H "Content-Type: application/json" -d "$body")
-          if [ "$(echo "$response" | jq -r '.data.environment.name // empty')" = "" ]; then
-            echo "::error::The token can't read environment $RAILWAY_ENVIRONMENT_ID: $(echo "$response" | jq -c '.errors // .')"
-            echo "Use an account token, or a workspace token from the workspace that owns this environment. Project tokens belong in RAILWAY_TOKEN, not RAILWAY_API_TOKEN."
+            -H "Project-Access-Token: $RAILWAY_TOKEN" -H "Content-Type: application/json" \
+            -d '{"query":"{ projectToken { projectId environmentId } }"}')
+          token_env=$(echo "$response" | jq -r '.data.projectToken.environmentId // empty')
+          if [ "$token_env" != "$RAILWAY_ENVIRONMENT_ID" ]; then
+            echo "::error::RAILWAY_E2E_API_TOKEN must be a project token for environment RAILWAY_E2E_ENVIRONMENT_ID. Token environment: ${token_env:-none}. $(echo "$response" | jq -c '.errors // empty')"
             exit 1
           fi
-          echo "$response" | jq -r '.data.environment | "Token can read environment \(.name) in project \(.projectId)"'
+          echo "Project token matches the test environment."
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2
         with:

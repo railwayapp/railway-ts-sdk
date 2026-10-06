@@ -39,8 +39,9 @@ Unit tests must stay offline and must not call Railway.
 
 ## Live sandbox checks
 
-With `RAILWAY_API_TOKEN` and `RAILWAY_ENVIRONMENT_ID` set in `.env` or the
-environment, run `mise run e2e` to exercise real sandbox creation, files,
+With `RAILWAY_ENVIRONMENT_ID` and a token set in `.env` or the environment
+(`RAILWAY_TOKEN` for a project token scoped to that environment, or
+`RAILWAY_API_TOKEN` for an account or workspace token), run `mise run e2e` to exercise real sandbox creation, files,
 execution, forks, checkpoints, and template builds. Use a dedicated test project.
 
 Repeat the exec suite across boot paths with:

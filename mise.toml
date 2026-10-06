@@ -23,7 +23,7 @@ run = "pnpm run typecheck"
 
 [tasks.test]
 description = "Run offline tests, then the bounded live e2e task when .env provides credentials"
-run = "if [ -f .env ]; then set -a; . ./.env; set +a; fi; if [ -n \"${RAILWAY_API_TOKEN:-}\" ] && [ -n \"${RAILWAY_ENVIRONMENT_ID:-}\" ]; then RAILWAY_API_TOKEN='' RAILWAY_ENVIRONMENT_ID='' pnpm run test && mise run e2e; else pnpm run test; fi"
+run = "if [ -f .env ]; then set -a; . ./.env; set +a; fi; if [ -n \"${RAILWAY_TOKEN:-}${RAILWAY_API_TOKEN:-}\" ] && [ -n \"${RAILWAY_ENVIRONMENT_ID:-}\" ]; then RAILWAY_TOKEN='' RAILWAY_API_TOKEN='' RAILWAY_ENVIRONMENT_ID='' pnpm run test && mise run e2e; else pnpm run test; fi"
 
 [tasks.test-watch]
 description = "Run unit tests in watch mode"
@@ -53,7 +53,7 @@ run = "pnpm run clean"
 [tasks.check]
 description = "Run typecheck, offline unit tests, and build (forces e2e off — clears creds)"
 depends = ["typecheck", "build"]
-run = "RAILWAY_API_TOKEN='' RAILWAY_ENVIRONMENT_ID='' pnpm run test"
+run = "RAILWAY_TOKEN='' RAILWAY_API_TOKEN='' RAILWAY_ENVIRONMENT_ID='' pnpm run test"
 
 [tasks.example]
 description = "Run the default manual example using .env credentials"
