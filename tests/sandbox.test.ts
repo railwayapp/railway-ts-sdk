@@ -203,7 +203,7 @@ describe("sandbox instance", () => {
     expect(mock.calls[1]?.body.query).toContain(
       "mutation RailwayGenerateShellToken",
     );
-    expect(socket.sentText[0]).toEqual({
+    expect(socket.sentText.find(f => f.type === "init_exec")).toEqual({
       type: "init_exec",
       data: { command: "bash -lc 'pwd'" },
     });
@@ -247,6 +247,128 @@ describe("sandbox instance", () => {
       id: "sandbox_123",
       environmentId: "environment_123",
     });
+  });
+
+  it("heartbeats the scoped sandbox and updates the handle", async () => {
+    const mock = createFetchMock([
+      { data: { sandboxCreate: sandboxInfo() } },
+      { data: { sandboxHeartbeat: sandboxInfo({ idleTimeoutMinutes: 30 }) } },
+    ]);
+    const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch });
+    await expect(sandbox.heartbeat()).resolves.toBe(sandbox);
+    expect(sandbox.idleTimeoutMinutes).toBe(30);
+    expect(mock.calls[1]?.body.query).toContain("mutation RailwaySandboxHeartbeat");
+    expect(mock.calls[1]?.body.variables).toEqual({ id: sandbox.id, environmentId: "environment_123" });
+  });
+
+  it("reports a missing sandbox on heartbeat without changing the handle", async () => {
+    const mock = createFetchMock([
+      { data: { sandboxCreate: sandboxInfo() } },
+      { data: { sandboxHeartbeat: null } },
+    ]);
+    const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch });
+    await expect(sandbox.heartbeat()).rejects.toBeInstanceOf(SandboxNotFoundError);
+    expect(sandbox.status).toBe("RUNNING");
+  });
+});
+
+describe("sandbox compute, sessions, and HTTPS run", () => {
+  it("sends resources and a never-idle timeout on create and fork", async () => {
+    const mock = createFetchMock([
+      { data: { sandboxCreate: sandboxInfo() } },
+      { data: { sandboxCreate: sandboxInfo({ id: "sandbox_fork" }) } },
+    ]);
+    const sandbox = await Sandbox.create({
+      ...auth,
+      fetch: mock.fetch,
+      idleTimeoutMinutes: 0,
+      resources: { cpu: 0.5, memoryGB: 2 },
+    });
+    await sandbox.fork({ resources: { memoryGB: 4 } });
+    expect(mock.calls[0]?.body.variables).toMatchObject({
+      input: { idleTimeoutMinutes: 0, resources: { cpu: 0.5, memoryGB: 2 } },
+    });
+    expect(mock.calls[1]?.body.variables).toMatchObject({
+      input: { sourceSandboxId: "sandbox_123", resources: { memoryGB: 4 } },
+    });
+    expect((mock.calls[1]?.body.variables as { input: { resources: object } }).input.resources).not.toHaveProperty("cpu");
+  });
+
+  it.each([{ cpu: 0 }, { cpu: -1 }, { memoryGB: Number.NaN }, { memoryGB: Number.POSITIVE_INFINITY }])(
+    "rejects resources %o before creating anything",
+    async resources => {
+      const mock = createFetchMock([]);
+      await expect(Sandbox.create({ ...auth, fetch: mock.fetch, resources })).rejects.toThrow(TypeError);
+      expect(mock.calls).toHaveLength(0);
+    },
+  );
+
+  it("lists sessions and maps run state", async () => {
+    const mock = createFetchMock([
+      { data: { sandboxCreate: sandboxInfo() } },
+      {
+        data: {
+          sandboxSessions: {
+            edges: [
+              { node: { name: "quick-otter-1ab", kind: "EXEC", runState: { running: true, exitCode: 0, exitedAt: null }, attached: false, command: "npm test", foregroundActive: null, createdAt: "2026-10-05T18:00:00Z" } },
+              { node: { name: "calm-heron-9cd", kind: "SHELL", runState: { running: false, exitCode: 130, exitedAt: "2026-10-05T18:05:00Z" }, attached: false, command: "", foregroundActive: null, createdAt: null } },
+            ],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      },
+    ]);
+    const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch });
+    await expect(sandbox.sessions()).resolves.toEqual([
+      { name: "quick-otter-1ab", kind: "EXEC", running: true, exitCode: null, exitedAt: null, attached: false, command: "npm test", foregroundActive: null, createdAt: "2026-10-05T18:00:00Z" },
+      { name: "calm-heron-9cd", kind: "SHELL", running: false, exitCode: 130, exitedAt: "2026-10-05T18:05:00Z", attached: false, command: "", foregroundActive: null, createdAt: null },
+    ]);
+    expect(mock.calls[1]?.body.query).toContain("query RailwaySandboxSessions");
+    expect(mock.calls[1]?.body.variables).toEqual({ id: "sandbox_123", environmentId: "environment_123" });
+  });
+
+  it("follows session pages to the end", async () => {
+    const node = (name: string) => ({ node: { name, kind: "EXEC", runState: { running: true, exitCode: 0, exitedAt: null }, attached: true, command: "x", foregroundActive: null, createdAt: null } });
+    const mock = createFetchMock([
+      { data: { sandboxCreate: sandboxInfo() } },
+      { data: { sandboxSessions: { edges: [node("a")], pageInfo: { hasNextPage: true, endCursor: "c1" } } } },
+      { data: { sandboxSessions: { edges: [node("b")], pageInfo: { hasNextPage: false, endCursor: "c2" } } } },
+    ]);
+    const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch });
+    const sessions = await sandbox.sessions();
+    expect(sessions?.map(s => s.name)).toEqual(["a", "b"]);
+    expect(mock.calls[1]?.body.variables).not.toHaveProperty("after");
+    expect(mock.calls[2]?.body.variables).toMatchObject({ after: "c1" });
+  });
+
+  it("returns null when the sandbox cannot report sessions", async () => {
+    const mock = createFetchMock([
+      { data: { sandboxCreate: sandboxInfo() } },
+      { data: { sandboxSessions: null } },
+    ]);
+    const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch });
+    await expect(sandbox.sessions()).resolves.toBeNull();
+  });
+
+  it("runs a command over one HTTPS request", async () => {
+    const result = { exitCode: 7, stdout: "out", stderr: "err", truncated: false, timedOut: false };
+    const mock = createFetchMock([
+      { data: { sandboxCreate: sandboxInfo() } },
+      { data: { sandboxExec: result } },
+    ]);
+    const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch });
+    await expect(sandbox.execHttp("make test", { timeoutSec: 30 })).resolves.toEqual(result);
+    expect(mock.calls[1]?.body.query).toContain("mutation RailwaySandboxExec");
+    expect(mock.calls[1]?.body.variables).toEqual({
+      id: "sandbox_123", environmentId: "environment_123", command: "make test", timeoutSec: 30,
+    });
+  });
+
+  it.each([0, -5, 1.5])("rejects run timeoutSec %s without a request", async timeoutSec => {
+    const mock = createFetchMock([{ data: { sandboxCreate: sandboxInfo() } }]);
+    const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch });
+    await expect(sandbox.execHttp("true", { timeoutSec })).rejects.toThrow(TypeError);
+    expect(mock.calls).toHaveLength(1);
   });
 });
 

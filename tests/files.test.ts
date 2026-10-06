@@ -581,6 +581,8 @@ describe("files.write", () => {
       (mock.calls[2]?.body.variables as { input: { scope: string } }).input
         .scope,
     ).toBe("shell");
+    expect(await exec.nextRequest()).toMatchObject({ type: "exec_hello" });
+    exec.serverReply("exec_capabilities", "0", { version: 2, stdin_chunks: 8, stdin_chunk_bytes: 16384 });
     const init = await exec.nextRequest();
     expect(init).toMatchObject({
       type: "init_exec",
@@ -601,6 +603,8 @@ describe("files.write", () => {
     await acceptWrite(upload, 1);
 
     const exec = await ws.nextSocket();
+    expect(await exec.nextRequest()).toMatchObject({ type: "exec_hello" });
+    exec.serverReply("exec_capabilities", "0", { version: 2, stdin_chunks: 8, stdin_chunk_bytes: 16384 });
     const init = await exec.nextRequest();
     expect(init).toMatchObject({
       type: "init_exec",

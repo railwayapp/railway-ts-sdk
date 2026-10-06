@@ -1,0 +1,59 @@
+name: E2E
+
+# Live sandbox suites against a real Railway environment. They create and
+# destroy sandboxes and checkpoints, so they run on demand, nightly, and on PRs
+# labelled `run-e2e` rather than on every push.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 9 * * *"
+  pull_request:
+    branches: [main]
+    types: [labeled, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  # One live run at a time: suites share the environment's sandbox quota.
+  group: e2e
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    name: Live e2e
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-e2e')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # A project token scoped to the test environment; the SDK reads project
+      # tokens from RAILWAY_TOKEN and sends them as Project-Access-Token.
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_E2E_API_TOKEN }}
+      RAILWAY_ENVIRONMENT_ID: ${{ secrets.RAILWAY_E2E_ENVIRONMENT_ID }}
+    steps:
+      # Without credentials every live suite skips and the job would pass empty.
+      - name: Require credentials
+        run: |
+          if [ -z "$RAILWAY_TOKEN" ] || [ -z "$RAILWAY_ENVIRONMENT_ID" ]; then
+            echo "::error::Set the RAILWAY_E2E_API_TOKEN and RAILWAY_E2E_ENVIRONMENT_ID repository secrets."
+            exit 1
+          fi
+      # Fail fast with a readable reason when the token doesn't match the
+      # environment, instead of a dozen "Not Authorized" test failures.
+      - name: Check the token belongs to the environment
+        run: |
+          response=$(curl -sS https://backboard.railway.com/graphql/v2 \
+            -H "Project-Access-Token: $RAILWAY_TOKEN" -H "Content-Type: application/json" \
+            -d '{"query":"{ projectToken { projectId environmentId } }"}')
+          token_env=$(echo "$response" | jq -r '.data.projectToken.environmentId // empty')
+          if [ "$token_env" != "$RAILWAY_ENVIRONMENT_ID" ]; then
+            echo "::error::RAILWAY_E2E_API_TOKEN must be a project token for environment RAILWAY_E2E_ENVIRONMENT_ID. Token environment: ${token_env:-none}. $(echo "$response" | jq -c '.errors // empty')"
+            exit 1
+          fi
+          echo "Project token matches the test environment."
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+      - run: mise run install
+      - run: mise run e2e

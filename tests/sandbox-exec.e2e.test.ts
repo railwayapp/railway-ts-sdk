@@ -1,7 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import { once } from "node:events";
+import { fileURLToPath } from "node:url";
 
 import { Sandbox } from "../src/index.js";
 import {
+  createExecTestSandbox,
   expectSequential,
   lineNumbers,
   live,
@@ -15,7 +20,7 @@ describe.runIf(live)("exec e2e (live)", () => {
   let sandbox: Sandbox;
 
   beforeAll(async () => {
-    sandbox = await Sandbox.create({ idleTimeoutMinutes: 10 });
+    sandbox = await createExecTestSandbox();
   }, 240_000);
 
   afterAll(async () => {
@@ -71,12 +76,102 @@ describe.runIf(live)("exec e2e (live)", () => {
     expect(result.stdout).toContain("/mise");
   }, 90_000);
 
-  it("enforces timeoutSec client-side", async () => {
-    const result = await sandbox.exec("echo start; sleep 300", {
-      timeoutSec: 2,
+  it.each([false, true])("timeout stops the process group (ignore TERM: %s)", async ignoreTerm => {
+    const result = await sandbox.exec(
+      `${ignoreTerm ? "trap '' TERM; " : ""}${processTreeCommand}`,
+      { timeoutSec: 5 },
+    );
+    expect(result).toMatchObject({ timedOut: true, exitCode: -1 });
+    await expectProcessTreeStopped(sandbox, [result.stdout]);
+  }, 60_000);
+
+  it.each([false, true])("abort stops the process group (ephemeral: %s)", async ephemeral => {
+    const controller = new AbortController();
+    const output: string[] = [];
+    const handle = sandbox.exec(processTreeCommand, {
+      signal: controller.signal,
+      ephemeral,
+      captureOutput: false,
+      onStdout: chunk => output.push(chunk),
     });
-    expect(result.timedOut).toBe(true);
-    expect(result.stdout).toContain("start");
+    await waitForLines(output, 2);
+    controller.abort();
+    await expect(handle).rejects.toBe(controller.signal.reason);
+    await expectProcessTreeStopped(sandbox, output);
+  }, 60_000);
+
+  it("supports a bidirectional exchange before stdin EOF", async () => {
+    const chunks: string[] = [];
+    const handle = sandbox.exec(
+      "while IFS= read -r line; do printf 'line-%s\\n' \"$line\"; done",
+      { stdin: true, captureOutput: false, onStdout: chunk => chunks.push(chunk), timeoutSec: 30 },
+    );
+    await handle.stdin.write("1\n");
+    await waitForLines(chunks, 1);
+    await handle.stdin.write("2\n");
+    await waitForLines(chunks, 2);
+    await handle.stdin.end();
+    await expect(handle).resolves.toMatchObject({ exitCode: 0, stdout: "", truncated: false });
+    expect(chunks.join("")).toBe("line-1\nline-2\n");
+  }, 60_000);
+
+  it.each([false, true])("streams binary stdin in bounded frames (ephemeral: %s)", async ephemeral => {
+    const bytes = Uint8Array.from({ length: 200_000 }, (_, i) => i % 256);
+    const handle = sandbox.exec("sha256sum", { stdin: true, ephemeral, timeoutSec: 10 });
+    await handle.stdin.write(bytes);
+    await handle.stdin.end();
+    const result = await handle;
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.split(" ")[0]).toBe(createHash("sha256").update(bytes).digest("hex"));
+    if (ephemeral) await expect(handle.sessionName).rejects.toThrow(/Ephemeral/);
+    else expect(await handle.sessionName).toBeTruthy();
+  }, 60_000);
+
+  it("runs a short ephemeral command with an exit code", async () => {
+    await expect(sandbox.exec("echo ephemeral; exit 7", { ephemeral: true, timeoutSec: 5 }))
+      .resolves.toMatchObject({ exitCode: 7, stdout: "ephemeral\n", timedOut: false });
+  }, 30_000);
+
+  it("caps captured output while streaming the complete output", async () => {
+    let bytes = 0;
+    const result = await sandbox.exec("head -c 100000 /dev/zero | tr '\\0' x", {
+      maxOutputBytes: 128,
+      onStdout: chunk => { bytes += chunk.length; },
+      timeoutSec: 30,
+    });
+    expect(result).toMatchObject({ exitCode: 0, stdout: "x".repeat(128), truncated: true });
+    expect(bytes).toBe(100_000);
+  }, 60_000);
+
+  it("heartbeats a running sandbox and refreshes its metadata", async () => {
+    await expect(sandbox.heartbeat()).resolves.toBe(sandbox);
+    expect(sandbox.status).toBe("RUNNING");
+    expect(sandbox.idleTimeoutMinutes).toBe(10);
+  }, 30_000);
+
+  it("lists a running durable exec in sessions()", async () => {
+    const handle = sandbox.exec("sleep 30");
+    const sessionName = await handle.sessionName;
+    try {
+      const sessions = await sandbox.sessions();
+      expect(sessions).not.toBeNull();
+      const mine = sessions!.find(session => session.name === sessionName);
+      expect(mine).toMatchObject({ kind: "EXEC", running: true, exitCode: null });
+    } finally {
+      await handle.kill("KILL");
+      await handle.catch(() => {});
+    }
+  }, 60_000);
+
+  it("runs a command over one HTTPS request with execHttp()", async () => {
+    const result = await sandbox.execHttp("printf out; printf err >&2; exit 7", { timeoutSec: 30 });
+    expect(result).toMatchObject({
+      exitCode: 7,
+      stdout: "out",
+      stderr: "err",
+      truncated: false,
+      timedOut: false,
+    });
   }, 60_000);
 
   it("fire-and-forget: start a command without reading it, then reconnect and harvest the full output", async () => {
@@ -182,4 +277,95 @@ describe.runIf(live)("exec e2e (live)", () => {
     expect(result.exitCode).toBe(-1);
     expect(lineNumbers(result.stdout).length).toBeLessThan(total);
   }, 120_000);
+
+  // mono #41812: execHttp decoded per chunk and counted UTF-16 units.
+  it.each([
+    ["4-byte emoji", "\\U0001F680", 5_000, "🚀"],
+    ["2-byte é", "\\u00e9", 17_000, "é"],
+  ])("execHttp cuts %s at 16,000 bytes on a character boundary", async (_label, escape, count, char) => {
+    const result = await sandbox.execHttp(
+      `python3 -c 'import sys; sys.stdout.write("${escape}" * ${count})'`,
+      { timeoutSec: 30 },
+    );
+    expect(result).toMatchObject({ exitCode: 0, truncated: true, timedOut: false });
+    expect(Buffer.byteLength(result.stdout)).toBe(16_000);
+    expect(result.stdout).not.toContain("�");
+    expect(result.stdout.replaceAll(char, "")).toBe("");
+  }, 60_000);
+
+  it("ephemeral execs have no session name and cannot be detached", async () => {
+    const handle = sandbox.exec("sleep 2; echo done", { ephemeral: true });
+    await expect(handle.sessionName).rejects.toThrow(/no durable session name/);
+    await expect(handle.detach()).rejects.toThrow(/cannot be detached/);
+    await expect(handle).resolves.toMatchObject({ exitCode: 0, stdout: "done\n" });
+  }, 60_000);
+
+  it.each([
+    ["durable", true],
+    ["ephemeral", false],
+  ])("%s command survives a dropped connection: %s", async (mode, survives) => {
+    // A separate process starts the command and is SIGKILLed, so the socket drops
+    // without a detach, as when a supervisor crashes.
+    const marker = `sleep ${3000 + Math.floor(Math.random() * 6000)}`;
+    const fixture = fileURLToPath(new URL("./fixtures/exec-drop.ts", import.meta.url));
+    const child = spawn(process.execPath, ["--import", "tsx", fixture, sandbox.id, marker, mode], {
+      env: process.env,
+      stdio: ["ignore", "pipe", "inherit"],
+    });
+    let output = "";
+    child.stdout.on("data", chunk => (output += chunk));
+    const [code, signal] = await once(child, "exit");
+    expect({ code, signal, output }).toMatchObject({ signal: "SIGKILL" });
+    expect(output).toContain("READY");
+
+    await sleep(3_000);
+    const check = await sandbox.exec(`pgrep -fx '${marker}' || true`);
+    expect(check.stdout.trim() !== "").toBe(survives);
+    if (survives) await sandbox.exec(`pkill -fx '${marker}' || true`);
+  }, 90_000);
+
+  // Known platform gap: durable output is spooled to an 8 x 1 MiB ring, and a
+  // reader that falls a full ring behind the command skips ahead with no gap
+  // marker. Whether it falls behind depends on the client's read speed (it
+  // loses ~1.9 MB of 10 MB from a laptop, nothing from a CI runner), so this
+  // can't assert either way until the platform reports the gap. Unskip then
+  // and assert `truncated` instead.
+  it.skip("durable exec returns complete output beyond the 8 MiB retention ring", async () => {
+    const result = await sandbox.exec("head -c 10000000 /dev/zero | tr '\\0' a");
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.length).toBe(10_000_000);
+  }, 120_000);
+
+  it("ephemeral exec returns complete output beyond 8 MiB", async () => {
+    const result = await sandbox.exec("head -c 10000000 /dev/zero | tr '\\0' a", { ephemeral: true });
+    expect(result).toMatchObject({ exitCode: 0, truncated: false });
+    expect(result.stdout.length).toBe(10_000_000);
+  }, 120_000);
 });
+
+// Print both PIDs before blocking; checking the descendant catches detach-only timeouts.
+const processTreeCommand = "sleep 300 & child=$!; printf 'line-%s\\n' \"$$\" \"$child\"; wait";
+
+async function expectProcessTreeStopped(sandbox: Sandbox, output: string[]) {
+  const pids = lineNumbers(output.join(""));
+  expect(pids).toHaveLength(2);
+  expect(pids.every(pid => Number.isSafeInteger(pid) && pid > 1)).toBe(true);
+  // A dead child may briefly remain a zombie until init reaps it.
+  const check = await sandbox.exec(
+    `for pid in ${pids.join(" ")}; do
+      if [ -r "/proc/$pid/stat" ]; then
+        IFS= read -r stat < "/proc/$pid/stat" || continue
+        fields=\${stat##*) }
+        state=\${fields%% *}
+        case "$state" in
+          Z|X) ;;
+          *) printf 'still running: %s (%s)\\n' "$pid" "$state"; exit 1 ;;
+        esac
+      fi
+    done`,
+    { timeoutSec: 10 },
+  );
+  expect(check.stdout.trim()).toBe("");
+  expect(check.stderr).toBe("");
+  expect(check.exitCode).toBe(0);
+}

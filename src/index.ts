@@ -4,6 +4,8 @@ export {
   type RailwayClientConfig,
 } from "./core/config.js";
 export {
+  ExecControlUnsupportedError,
+  ExecNotStartedError,
   RailwayAuthError,
   RailwayConnectionError,
   RailwayError,
@@ -75,6 +77,9 @@ export {
   type ExecReattachTarget,
   type ExecResult,
   type ExecSignal,
+  type ExecHttpOptions,
+  type ExecHttpResult,
+  type ExecStdin,
   type ExecTarget,
   type FileReadFormat,
   type FileReadOptions,
@@ -87,6 +92,8 @@ export {
   type SandboxFileEntry,
   type SandboxInfo,
   type SandboxNetworkIsolation,
+  type SandboxResources,
+  type SandboxSessionInfo,
   type SandboxStatus,
   type SandboxTemplate,
   type TemplateBuildOptions,

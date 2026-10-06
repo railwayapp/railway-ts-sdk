@@ -61,12 +61,11 @@ const result = await sandbox.exec("npm run build", { timeoutSec: 120 });
 result.exitCode; // number | null; null if the session ended without one
 result.stdout; // string
 result.stderr; // string
-result.truncated; // true if the server cut the output
-result.timedOut; // true if the command hit timeoutSec (enforced client-side)
+result.truncated; // true if captured output exceeded maxOutputBytes
+result.timedOut; // true if timeoutSec triggered termination and the server reported an exit
 ```
 
-`cwd` and `env` apply per command (the SDK composes them into the command, so
-they work on every sandbox):
+`cwd` and `env` apply per command and are sent as native exec parameters:
 
 ```ts
 const result = await sandbox.exec("pnpm test", {
@@ -75,10 +74,7 @@ const result = await sandbox.exec("pnpm test", {
 });
 ```
 
-Per-exec env values are embedded in the command string and visible to `ps`
-inside the sandbox; bake secrets in at create time via `Sandbox.create({ env })`
-instead. Both options apply to fresh execs only — reattaching by `sessionName`
-rejects them.
+Both options apply to fresh execs only — reattaching by `sessionName` rejects them.
 
 Every exec runs over a WebSocket bridge to the sandbox, with separated
 stdout/stderr and a real exit code. Short commands resolve when they exit;
@@ -95,6 +91,91 @@ await handle.kill(); // terminate it — SIGTERM by default (pass "KILL" to forc
 const result = await handle; // same ExecResult shape as above
 ```
 
+### Stdin and streaming
+
+Pass `stdin: true` to write to a command. Await each write for backpressure and
+call `end()` to send EOF. Without this option, stdin is closed immediately.
+
+```ts
+const handle = sandbox.exec("cat", {
+  stdin: true,
+  captureOutput: false,
+  onStdout: chunk => process.stdout.write(chunk),
+});
+
+await handle.stdin.write("hello\n");
+await handle.stdin.write(new Uint8Array([65, 66, 10]));
+await handle.stdin.end();
+await handle;
+```
+
+Writes are serialized, use payload chunks of at most 16 KiB, and wait for the WebSocket
+send buffer to drain. A buffer stalled for 30 seconds rejects the write. A resolved
+write means the bytes were queued to the transport, not that the command consumed
+them. Await writes rather than queueing an unbounded number of them.
+
+Results capture the full output by default. For long-lived agents, dev servers, or
+log followers, set `captureOutput: false`: callbacks still receive every chunk, but
+nothing is retained, so memory stays flat however long the command runs. To keep a
+bounded prefix instead, set `maxOutputBytes`; `truncated` reports when it was cut.
+Callbacks always receive the full stream. A callback that throws rejects the exec.
+
+### Older servers
+
+Stdin, ephemeral execs, and confirmed cancellation need server support that Railway
+rolled out in October 2026. Against an older server, a plain `exec` still works;
+`stdin: true` and `ephemeral: true` reject with `ExecControlUnsupportedError` before
+any command runs.
+
+Writing to stdin is flow-controlled: a command that stops reading its input slows
+`stdin.write()` down, and `kill()` and abort still reach it.
+
+### Cancellation and timeouts
+
+```ts
+const controller = new AbortController();
+const handle = sandbox.exec("npm run dev", {
+  signal: controller.signal,
+  captureOutput: false,
+  onStdout: chunk => process.stdout.write(chunk),
+});
+
+controller.abort();
+try {
+  await handle;
+} catch (error) {
+  if (error !== controller.signal.reason) throw error;
+}
+```
+
+Aborting cancels token minting or a pending connection. Once connected, abort and
+`timeoutSec` send TERM to the remote process group, escalate to KILL after 5 seconds,
+and wait for the remote exit. Timeout resolves with `timedOut: true` and `exitCode: -1`
+once the kill is confirmed, or `exitCode: null` if no exit arrives within 10 seconds.
+Abort rejects with the signal's reason, or with `RailwayConnectionError` if the exit is
+not confirmed in time. A dropped connection rejects with `ExecInterruptedError`. The
+`timeoutSec` clock starts once the command has been sent; pass `signal` to bound the
+wait for a sandbox that is still starting.
+
+### Ephemeral and durable sessions
+
+For commands that do not need durable logs or reattachment, pass `ephemeral: true`:
+
+```ts
+const result = await sandbox.exec("git status --short", { ephemeral: true });
+```
+
+Ephemeral execs support stdin, streaming, and remote cancellation, but `sessionName`
+and `detach()` reject. The option applies only to fresh execs. Disconnecting an
+ephemeral exec terminates its process group; durable
+execs survive disconnects and can be reattached.
+
+Durable execs keep about the last 8 MiB of output for reattachment. A command that
+writes more than that faster than the client reads it can lose output from the
+middle of the stream, and the result does not report the gap. For commands with
+large output, such as builds, test runs or data dumps, use `ephemeral: true`, or
+have the command write to a file and read the file back.
+
 When durable sessions are enabled for the sandbox, reattach to a running exec
 from anywhere — even another process — with the saved name. By default it
 replays the retained log, then continues live (pass `resumeFromLastRead: true`
@@ -109,9 +190,38 @@ const result = await sandbox.exec({ sessionName }, {
 See `examples/sandboxes/exec.ts` for detaching and reattaching by `sessionName`
 from a fresh `Sandbox.connect(id)`.
 
-If the WebSocket cannot be established, `exec` rejects with
-`RailwayConnectionError`. In non-Node runtimes without a global `WebSocket`,
+`handle.detach()` closes the connection while leaving the durable command running.
+It resolves with the session name and settles the handle with output captured so far;
+`exitCode` is `null` because the command has not exited.
+The server must assign a durable session before detaching is possible. To resume
+writing stdin after reattaching, pass `stdin: true`; stdin must not have been ended
+by a previous connection.
+
+If the connection drops before the command is sent (for example during a Railway
+deploy), `exec` reconnects once, since nothing ran yet. If the sandbox refuses the
+session, or the reconnect fails too, it rejects with `ExecNotStartedError` (a
+`RailwayConnectionError`) and the close reason. No command ran in either case. In non-Node runtimes without a global `WebSocket`,
 pass an implementation via the `webSocketImpl` config option.
+
+The server ends an exec session whose client stops answering keepalives, so a process
+whose event loop is blocked for tens of seconds can lose a running exec (it rejects
+with `ExecInterruptedError`). Keep heavy synchronous work off the thread that streams
+exec output.
+
+### Running a command without a WebSocket
+
+Where a WebSocket isn't practical, such as a short-lived serverless function or a harness
+that only makes HTTP calls, `execHttp` sends the command in one HTTPS request
+and returns `{ exitCode, stdout, stderr, truncated, timedOut }`. It has no streaming,
+stdin, or cancellation. Each stream is cut at 16,000 bytes, and the server enforces
+`timeoutSec` (2 minutes by default, 10 at most); a timed-out command reports
+`exitCode: -1` with the stdout so far discarded. Use `exec` for anything larger or longer.
+`sandbox.files` still uses a WebSocket, so an HTTP-only caller writes files through the
+command itself (for example a heredoc).
+
+```ts
+const { exitCode, stdout } = await sandbox.execHttp("node --version", { timeoutSec: 30 });
+```
 
 ## Files
 
@@ -181,8 +291,23 @@ const fork = await base.fork();
 await fork.exec("npm test"); // sees the installed deps, isolated from base
 ```
 
-`Sandbox.create(source)` is the same operation in static form. Pass `idleTimeoutMinutes` to
-override the fork's idle timeout. The source must be `RUNNING`.
+`Sandbox.create(source)` is the same operation in static form. Pass `idleTimeoutMinutes` or
+`resources` to override the fork's own settings; neither is copied from the source. The
+source must be `RUNNING`.
+
+## CPU and memory
+
+Pass `resources` to size a sandbox. Each omitted field uses your workspace's sandbox
+default, and values above the workspace's VM maximum are rejected. It works the same for
+`create`, templates, checkpoints, and `fork`.
+
+```ts
+const sandbox = await Sandbox.create({ resources: { cpu: 2, memoryGB: 4 } });
+const small = await sandbox.fork({ resources: { cpu: 0.5, memoryGB: 1 } });
+```
+
+`cpu` is in vCPUs and accepts fractions; `memoryGB` is decimal gigabytes
+(1 GB = 1,000,000,000 bytes) and is a minimum: the guest reports somewhat more.
 
 ## Regions
 
@@ -194,17 +319,17 @@ const sandbox = await Sandbox.create({ region: "us-east4-eqdc4a" });
 console.log(sandbox.region);
 ```
 
-Region selection works for blank sandboxes, templates, saved checkpoints, and forks.
-Blockstore-backed disks can boot in a different region from their source:
+Forks, templates and saved checkpoints boot where their data lives: a fork runs in its
+source sandbox's region, and a checkpoint or template in the region it was captured or
+built in. Omitting `region` picks that region automatically; requesting a different one
+is rejected.
 
 ```ts
-const remoteFork = await sandbox.fork({ region: "europe-west4-drams3a" });
-const localFork = await sandbox.fork({ region: sandbox.region });
+const fork = await sandbox.fork(); // same region as `sandbox`
 ```
 
-Omitting `region` uses the platform default, including for forks; it does not implicitly
-inherit the source sandbox's region. Region identifiers are strings validated by Railway,
-so the SDK does not keep a fixed region enum.
+Region identifiers are strings validated by Railway, so the SDK does not keep a fixed
+region enum.
 
 ## Network isolation
 
@@ -244,6 +369,25 @@ sandbox.domains;
 the source's domains; pass them again if the fork should be reachable. Domains cannot be
 changed after create. `connect` and `refresh` read back whatever is already published.
 
+## Keeping a sandbox alive
+
+Call `heartbeat()` before the sandbox's idle timeout expires to reset its idle countdown:
+
+```ts
+await sandbox.heartbeat(); // returns this sandbox and refreshes its metadata
+```
+
+Schedule heartbeats at an interval shorter than `idleTimeoutMinutes` while your
+application needs the sandbox. This does not change its configured timeout or
+revive a sandbox that has already been destroyed.
+
+To keep a sandbox until you destroy it, create it with `idleTimeoutMinutes: 0`. Only some
+plans allow this; on others, `create` fails with the allowed range.
+
+```ts
+const sandbox = await Sandbox.create({ idleTimeoutMinutes: 0 });
+```
+
 ## Reconnecting and listing
 
 A sandbox outlives the process that created it, so you can reattach to it by id.
@@ -254,6 +398,19 @@ await sandbox.exec("cat /tmp/state.json");
 
 const all = await Sandbox.list();
 ```
+
+List the shells and exec sessions inside a sandbox, running or recently exited, and
+reattach to one by the name you saved from `handle.sessionName`:
+
+```ts
+const sessions = await sandbox.sessions(); // null if the sandbox can't report sessions
+const server = sessions?.find(s => s.name === savedSessionName && s.running);
+if (server) await sandbox.exec({ sessionName: server.name }, { onStdout: c => process.stdout.write(c) });
+```
+
+Every exec appears in the list, including short finished ones, so match on the saved
+name rather than on `kind` or `command`. `command` shows the login-shell wrapper the
+command ran in (for example `bash -lc 'node server.js'`).
 
 `connect` throws `SandboxNotFoundError` if the sandbox does not exist in the
 environment. `sandbox.refresh()` re-reads the sandbox to update `status` and the other
@@ -387,6 +544,7 @@ then an environment variable, then a default. Pass explicit values to override.
 | `environmentId` | `RAILWAY_ENVIRONMENT_ID` | _(required)_ |
 | `endpoint` | `RAILWAY_GRAPHQL_ENDPOINT` | `https://backboard.railway.com/graphql/v2` |
 | `fetch` | n/a | `globalThis.fetch` |
+| `webSocketImpl` | n/a | `globalThis.WebSocket` (pass the `ws` package where none exists) |
 | `verbose` | `RAILWAY_VERBOSE` | `false` |
 
 A token read from `RAILWAY_TOKEN` is treated as a [project token](https://docs.railway.com/integrations/api#project-token)

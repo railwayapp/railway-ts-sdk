@@ -1,7 +1,9 @@
 import type { RailwayClientConfig } from "../core/config.js";
 import type {
   RailwaySandboxCheckpointFieldsFragment,
+  RailwaySandboxExecMutation,
   RailwaySandboxFieldsFragment,
+  RailwaySandboxSessionFieldsFragment,
   RailwaySandboxTemplateBuildFieldsFragment,
 } from "../generated/graphql.js";
 
@@ -17,7 +19,7 @@ export interface ExecResult {
   exitCode: number | null;
   stdout: string;
   stderr: string;
-  /** True when the server cut the output; the streams may be incomplete. */
+  /** True when captured stdout or stderr exceeded maxOutputBytes. Callbacks still receive all output. */
   truncated: boolean;
   /** True when the client-side `timeoutSec` deadline killed the command. */
   timedOut: boolean;
@@ -46,16 +48,69 @@ export interface NamedTemplateRef {
 
 export type TemplateSource = CompiledTemplate | NamedTemplateRef;
 
-/** Knobs shared by every sandbox-creating call: `create`, `create(template)`, and `fork`. */
+/** vCPU and memory for one sandbox. Omitted fields use the workspace's sandbox default. */
+export interface SandboxResources {
+  /** vCPUs; fractional values such as `0.5` are allowed. Capped at the workspace's VM maximum. */
+  cpu?: number;
+  /** Memory in decimal GB (1 GB = 1,000,000,000 bytes). Capped at the workspace's VM maximum. */
+  memoryGB?: number;
+}
+
+/** A shell or exec session inside a sandbox, live or recently exited. */
+export interface SandboxSessionInfo {
+  /** Stable session name; pass it as `exec({ sessionName })` to reattach. */
+  name: string;
+  /** `SHELL` for an interactive shell, `EXEC` for a one-off command. */
+  kind: RailwaySandboxSessionFieldsFragment["kind"];
+  /** Whether the session's process is still alive. */
+  running: boolean;
+  /** Exit code once the process has exited; null while it runs. */
+  exitCode: number | null;
+  /** When the process exited (ISO timestamp); null while it runs. */
+  exitedAt: string | null;
+  /** Whether a client is connected right now. */
+  attached: boolean;
+  /** The command an exec session runs; empty for an interactive shell. */
+  command: string;
+  /** For a shell, whether a foreground program holds the terminal; null when unknown or not a shell. */
+  foregroundActive: boolean | null;
+  /** When the session started (ISO timestamp); null when the runtime does not report it. */
+  createdAt: string | null;
+}
+
+/** Options for `sandbox.execHttp`. */
+export interface ExecHttpOptions {
+  /** Server-side deadline in whole seconds. Defaults to 2 minutes; capped at 10 minutes. */
+  timeoutSec?: number;
+}
+
+/**
+ * Result of `sandbox.execHttp`. Each stream is cut at 16,000 bytes (`truncated`). On a
+ * server timeout `timedOut` is true and `exitCode` is -1.
+ */
+export type ExecHttpResult = RailwaySandboxExecMutation["sandboxExec"];
+
+/** Knobs shared by every sandbox-creating call: `create`, `create(template)`, `create(checkpoint)`, and `fork`. */
 export interface SandboxCreationOptions {
+  /**
+   * Minutes without activity before the sandbox is destroyed. Defaults to the
+   * plan's default. `0` (or any value <= 0) means never idle out; only some plans
+   * allow it, and create fails with the allowed range otherwise.
+   */
   idleTimeoutMinutes?: number;
+  /** vCPU and memory. Forks and checkpoint restores take their own value, not the source's. */
+  resources?: SandboxResources;
   networkIsolation?: SandboxNetworkIsolation;
   /**
    * Railway-provided HTTP domains to publish. Requires `networkIsolation: "PRIVATE"`.
    * Prefix is generated from the project name when omitted.
    */
   domains?: Array<{ port: number; prefix?: string }>;
-  /** Region where the sandbox should run. Uses the platform default when omitted. */
+  /**
+   * Region where the sandbox should run. Uses the platform default when omitted.
+   * Forks, templates and checkpoints boot where their data lives; omit this for
+   * them, since a different region is rejected.
+   */
   region?: string;
   /** Runtime env baked into the sandbox, available to every command. Values may use Railway references (e.g. `${{shared.FOO}}`). */
   env?: Record<string, string>;
@@ -89,12 +144,40 @@ export type ExecTarget = string | ExecReattachTarget;
 /** Signal names accepted by `ExecHandle.kill()` (sent to the process group). */
 export type ExecSignal = "HUP" | "INT" | "QUIT" | "KILL" | "TERM";
 
+/** Host-to-command stdin. Await writes for backpressure; end sends EOF. */
+export interface ExecStdin {
+  write(data: string | Uint8Array): Promise<void>;
+  end(): Promise<void>;
+}
+
 export interface ExecOptions {
   /**
    * Kill the command after this many seconds and resolve with
-   * `timedOut: true`. Enforced client-side by closing the exec session.
+   * `timedOut: true`. Sends TERM, escalating to KILL after 5 seconds; a
+   * confirmed kill reports `exitCode: -1`, and an unconfirmed one `null`. The
+   * deadline starts once the command has been sent.
    */
   timeoutSec?: number;
+  /** Abort setup or terminate and reject with the signal's reason. Unconfirmed termination rejects with a connection error. */
+  signal?: AbortSignal;
+  /**
+   * Keep stdin open for handle.stdin.write/end. Defaults to false (immediate EOF).
+   * Requires exec control; an older tcp-proxy rejects with ExecControlUnsupportedError.
+   */
+  stdin?: boolean;
+  /**
+   * Skip durable session creation. Cannot be reattached or detached. Fresh execs only.
+   * Requires exec control (signal delivery and process-group cleanup when the
+   * attachment disconnects); an older tcp-proxy rejects with ExecControlUnsupportedError.
+   */
+  ephemeral?: boolean;
+  /** Capture output in the result (default true). Set false for callback-only streaming. */
+  captureOutput?: boolean;
+  /**
+   * Maximum captured UTF-8 bytes per stream; unbounded by default. Past it the
+   * result sets `truncated`. Callbacks are not capped.
+   */
+  maxOutputBytes?: number;
   /**
    * Working directory for the command (the sandbox default is `/`).
    * The exec fails if the directory does not exist.
@@ -107,9 +190,9 @@ export interface ExecOptions {
    * (`exec({ sessionName })`).
    */
   env?: Record<string, string>;
-  /** Receives each stdout chunk as it arrives. A throw rejects the exec. */
+  /** Receives each stdout chunk as it arrives, even beyond `maxOutputBytes`. A throw rejects the exec. */
   onStdout?: (chunk: string) => void;
-  /** Receives each stderr chunk as it arrives. A throw rejects the exec. */
+  /** Receives each stderr chunk as it arrives, even beyond `maxOutputBytes`. A throw rejects the exec. */
   onStderr?: (chunk: string) => void;
   /**
    * On reattach (`exec({ sessionName })`), set `true` to resume from the

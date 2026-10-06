@@ -57,6 +57,12 @@ mutation RailwaySandboxDestroy($id: String!, $environmentId: String!) {
   }
 }
 
+mutation RailwaySandboxHeartbeat($id: String!, $environmentId: String!) {
+  sandboxHeartbeat(id: $id, environmentId: $environmentId) {
+    ...RailwaySandboxFields
+  }
+}
+
 fragment RailwaySandboxTemplateBuildFields on SandboxTemplateBuild {
   id
   status
@@ -117,4 +123,56 @@ mutation RailwaySandboxCheckpointRename(
 
 mutation RailwaySandboxCheckpointDelete($environmentId: String!, $id: ID!) {
   sandboxCheckpointDelete(environmentId: $environmentId, id: $id)
+}
+
+fragment RailwaySandboxSessionFields on SandboxSession {
+  name
+  kind
+  runState {
+    running
+    exitCode
+    exitedAt
+  }
+  attached
+  command
+  foregroundActive
+  createdAt
+}
+
+query RailwaySandboxSessions(
+  $environmentId: String!
+  $id: String!
+  $after: String
+) {
+  sandboxSessions(environmentId: $environmentId, id: $id, after: $after) {
+    edges {
+      node {
+        ...RailwaySandboxSessionFields
+      }
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+
+mutation RailwaySandboxExec(
+  $environmentId: String!
+  $id: String!
+  $command: String!
+  $timeoutSec: Int
+) {
+  sandboxExec(
+    environmentId: $environmentId
+    id: $id
+    command: $command
+    timeoutSec: $timeoutSec
+  ) {
+    exitCode
+    stdout
+    stderr
+    truncated
+    timedOut
+  }
 }

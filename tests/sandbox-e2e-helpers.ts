@@ -1,11 +1,52 @@
 import { expect } from "vitest";
 
-import { Sandbox, type ExecHandle } from "../src/index.js";
+import { Sandbox, type ExecHandle, type CreateOptions } from "../src/index.js";
 
-/** Live suites stay offline unless both credentials are present. */
+/** Live suites stay offline unless a token (project or account) and an environment are present. */
 export const live =
-  Boolean(process.env.RAILWAY_API_TOKEN) &&
+  Boolean(process.env.RAILWAY_TOKEN || process.env.RAILWAY_API_TOKEN) &&
   Boolean(process.env.RAILWAY_ENVIRONMENT_ID);
+
+/** Select a boot path for repeated process-control conformance runs. */
+export async function createExecTestSandbox(): Promise<Sandbox> {
+  const scenario = process.env.RAILWAY_E2E_SANDBOX_SOURCE ?? "fresh";
+  const options: CreateOptions = {
+    idleTimeoutMinutes: 10,
+    networkIsolation: process.env.RAILWAY_E2E_PRIVATE === "1" ? "PRIVATE" : "ISOLATED",
+  };
+  let sandbox: Sandbox;
+  switch (scenario) {
+    case "fresh":
+      sandbox = await Sandbox.create(options);
+      break;
+    case "template":
+      sandbox = await Sandbox.create(
+        Sandbox.template().run("echo template > /etc/sdk-exec-boot-source"),
+        options,
+      );
+      break;
+    case "fork":
+    case "checkpoint": {
+      await using source = await Sandbox.create(options);
+      await source.files.write("/etc/sdk-exec-boot-source", scenario);
+      if (scenario === "fork") {
+        sandbox = await source.fork(options);
+      } else {
+        const checkpoint = await source.checkpoint(`sdk-exec-${crypto.randomUUID()}`);
+        try {
+          sandbox = await Sandbox.create(checkpoint.key, options);
+        } finally {
+          await Sandbox.deleteCheckpoint(checkpoint.id);
+        }
+      }
+      break;
+    }
+    default:
+      throw new Error(`Unknown RAILWAY_E2E_SANDBOX_SOURCE: ${scenario}`);
+  }
+  console.info(`[live] source=${scenario} sandbox=${sandbox.id} region=${sandbox.region} network=${sandbox.networkIsolation}`);
+  return sandbox;
+}
 
 export function createSandboxTracker(): {
   track: (sandbox: Sandbox) => Sandbox;
