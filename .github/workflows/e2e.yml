@@ -36,6 +36,20 @@ jobs:
             echo "::error::Set the RAILWAY_E2E_API_TOKEN and RAILWAY_E2E_ENVIRONMENT_ID repository secrets."
             exit 1
           fi
+      # Fail fast with a readable reason when the token can't reach the
+      # environment, instead of a dozen "Not Authorized" test failures.
+      - name: Check the token can reach the environment
+        run: |
+          body=$(jq -n --arg id "$RAILWAY_ENVIRONMENT_ID" \
+            '{query: "query($id: String!) { environment(id: $id) { name projectId } }", variables: {id: $id}}')
+          response=$(curl -sS https://backboard.railway.com/graphql/v2 \
+            -H "Authorization: Bearer $RAILWAY_API_TOKEN" -H "Content-Type: application/json" -d "$body")
+          if [ "$(echo "$response" | jq -r '.data.environment.name // empty')" = "" ]; then
+            echo "::error::The token can't read environment $RAILWAY_ENVIRONMENT_ID: $(echo "$response" | jq -c '.errors // .')"
+            echo "Use an account token, or a workspace token from the workspace that owns this environment. Project tokens belong in RAILWAY_TOKEN, not RAILWAY_API_TOKEN."
+            exit 1
+          fi
+          echo "$response" | jq -r '.data.environment | "Token can read environment \(.name) in project \(.projectId)"'
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2
         with:
