@@ -325,10 +325,12 @@ describe.runIf(live)("exec e2e (live)", () => {
   }, 90_000);
 
   // Known platform gap: durable output is spooled to an 8 x 1 MiB ring, and a
-  // reader that falls a full ring behind skips ahead with no gap marker.
-  // `it.fails` passes while the bug exists; when the platform fixes it this
-  // test fails, so flip it to `it` and assert `truncated` semantics.
-  it.fails("durable exec returns complete output beyond the 8 MiB retention ring", async () => {
+  // reader that falls a full ring behind the command skips ahead with no gap
+  // marker. Whether it falls behind depends on the client's read speed (it
+  // loses ~1.9 MB of 10 MB from a laptop, nothing from a CI runner), so this
+  // can't assert either way until the platform reports the gap. Unskip then
+  // and assert `truncated` instead.
+  it.skip("durable exec returns complete output beyond the 8 MiB retention ring", async () => {
     const result = await sandbox.exec("head -c 10000000 /dev/zero | tr '\\0' a");
     expect(result.exitCode).toBe(0);
     expect(result.stdout.length).toBe(10_000_000);
