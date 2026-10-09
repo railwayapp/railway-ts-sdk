@@ -1,0 +1,8 @@
+query RailwayServiceExecInstance($environmentId: String!, $serviceId: String!) {
+  serviceInstance(environmentId: $environmentId, serviceId: $serviceId) {
+    activeDeployments {
+      status
+      instances { id status }
+    }
+  }
+}

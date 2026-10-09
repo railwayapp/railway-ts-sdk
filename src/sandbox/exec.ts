@@ -146,7 +146,8 @@ export class ExecHandle implements Promise<ExecResult> {
 export interface ExecContext {
   config: NormalizedRailwayClientConfig;
   environmentId: string;
-  sandboxId: string;
+  instanceId: string;
+  serviceId?: string;
 }
 
 interface ExecControl {
@@ -340,8 +341,9 @@ async function runExec(
 
   const input: RailwayGenerateShellTokenMutationVariables["input"] = {
     environmentId: context.environmentId,
-    instanceId: context.sandboxId,
-    kind: "sandbox",
+    instanceId: context.instanceId,
+    kind: context.serviceId ? "deployment" : "sandbox",
+    ...(context.serviceId ? { serviceId: context.serviceId } : {}),
     scope: "shell",
   };
   const mintShellToken = async () => {
@@ -446,11 +448,11 @@ async function runExec(
       new RailwayError("Exec stdin is no longer writable."),
     );
     // Keep the socket open: closing it merely detaches a durable process.
-    context.config.log(`exec: sending TERM in sandbox=${context.sandboxId}`);
+    context.config.log(`exec: sending TERM in instance=${context.instanceId}`);
     signalRemote("TERM");
     if (settled) return;
     escalation = setTimeout(() => {
-      context.config.log(`exec: no exit ${KILL_GRACE_MS}ms after TERM; sending KILL in sandbox=${context.sandboxId}`);
+      context.config.log(`exec: no exit ${KILL_GRACE_MS}ms after TERM; sending KILL in instance=${context.instanceId}`);
       signalRemote("KILL");
     }, KILL_GRACE_MS);
     terminationDeadline = setTimeout(() => {
@@ -538,7 +540,7 @@ async function runExec(
       if (!shouldRetryBeforeStart(error)) throw error;
       options.signal?.throwIfAborted();
       context.config.log(
-        `exec: ${(error as Error).message} Retrying once in sandbox=${context.sandboxId}`,
+        `exec: ${(error as Error).message} Retrying once in instance=${context.instanceId}`,
       );
       await abortableDelay(CONNECT_RETRY_DELAY_MS, options.signal);
       return connectExecWs({
@@ -566,7 +568,7 @@ async function runExec(
       });
     }
     context.config.log(
-      `exec: tcp-proxy predates exec control; reconnecting in legacy mode in sandbox=${context.sandboxId}`,
+      `exec: tcp-proxy predates exec control; reconnecting in legacy mode in instance=${context.instanceId}`,
     );
     // One legacy attempt; no further retry stacks on the fallback.
     connection = await connectExecWs({

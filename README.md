@@ -533,6 +533,29 @@ Beta limitations to know:
 
 Full guide and reference: <https://docs.railway.com/infrastructure-as-code>.
 
+## Execute on an existing service
+
+Select the exact running replica; connecting does not wake a sleeping service or
+create compute. The token must already authorize that service and environment.
+
+```ts
+import { Service } from "railway";
+
+const service = await Service.connect({ environmentId, serviceId, instanceId });
+const handle = service.exec("cat", { stdin: true, timeoutSec: 60 });
+await handle.stdin.write("input\n");
+await handle.stdin.end();
+const result = await handle;
+```
+
+Service commands use the same native execution engine as sandboxes: separated
+stdout/stderr, confirmed exit codes, streaming callbacks, and AbortSignal
+termination. They are foreground ephemeral commands; disconnect ends their
+process group. Durable session names, detach and reattach are not supported.
+A missing exit still means an unknown outcome, including after cancellation.
+Pass the existing public `fetch` and `webSocketImpl` configuration when a protected
+proxy owns outbound requests; do not replace it with direct connections.
+
 ## Configuration
 
 `token`, `environmentId`, and `endpoint` each resolve in order: an explicit option,

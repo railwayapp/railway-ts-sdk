@@ -164,15 +164,16 @@ export type ActiveFeatureFlag =
   | 'HA_FOR_MONGO'
   | 'IN_DASHBOARD_SUPPORT'
   | 'MAGIC_CONFIG'
-  | 'MYSQL_PITR'
   | 'PRIORITY_BOARDING'
   | 'RAILWAY_AGENT_DASHBOARD'
   | 'RAILWAY_AGENT_FEED'
+  | 'RAILWAY_AUTOMATIONS'
   | 'TRACING'
   | 'USAGE_INSIGHTS'
   | 'VM_STORAGE_TRACES';
 
 export type ActivePlatformFlag =
+  | 'AGENT_CACHE_TOKEN_BILLING'
   | 'AGENT_USAGE_CH_INGEST'
   | 'ALERT_SUS_USERS_CRON_KILLSWITCH'
   | 'BLOCK_TRIAL_RESTRICTION_APPEALS'
@@ -230,6 +231,7 @@ export type ActivePlatformFlag =
   | 'WORKSPACE_MCP_KILLSWITCH';
 
 export type ActiveProjectFeatureFlag =
+  | 'LEGACY_CONFIG_AS_CODE'
   | 'PLACEHOLDER'
   | 'RBS_VOLUMES';
 
@@ -628,11 +630,13 @@ export type CloudAgent = {
   environmentId: Scalars['String']['output'];
   id: Scalars['ID']['output'];
   name: Scalars['String']['output'];
+  /** Hostname on the environment's private network, e.g. <name>.railway.internal, reachable on any port from services in that environment. Null when the VM is isolated or its private endpoint isn't registered yet. */
+  privateDomain?: Maybe<Scalars['String']['output']>;
   project: Project;
   projectId: Scalars['String']['output'];
   /** Region the agent's machine runs in. Null briefly after creation, before the machine has been placed. */
   region?: Maybe<Scalars['String']['output']>;
-  /** Live coding-agent sessions, one entry per session. Retained for 24h after the last report, so a sleeping agent still shows what it was last doing. */
+  /** Coding-agent sessions, one entry per session, newest first. Kept while the agent sleeps, so it still lists what it was doing. */
   sessions: Array<CloudAgentSnapshot>;
   /** Repo this agent's workspace was created from. Null for agents created without a source. */
   source?: Maybe<CloudAgentSource>;
@@ -643,11 +647,13 @@ export type CloudAgent = {
 export type CloudAgentCheckpoint = {
   __typename?: 'CloudAgentCheckpoint';
   createdAt: Scalars['DateTime']['output'];
-  environmentId: Scalars['String']['output'];
+  /** Set when the checkpoint boots only in this environment. Null boots anywhere in the project. */
+  environmentId?: Maybe<Scalars['String']['output']>;
   /** Why the capture failed. */
   failureReason?: Maybe<Scalars['String']['output']>;
   id: Scalars['ID']['output'];
   name?: Maybe<Scalars['String']['output']>;
+  projectId: Scalars['String']['output'];
   /** Region the checkpoint was captured in. */
   region: Scalars['String']['output'];
   status: CloudAgentCheckpointStatus;
@@ -804,6 +810,8 @@ export type CloudAgentStatus =
 /** Task lifecycle and correlation. Read cloudAgentTask for the latest session response. */
 export type CloudAgentTask = {
   __typename?: 'CloudAgentTask';
+  /** Files the agent linked in this turn's result. */
+  attachments: Array<CloudAgentTaskAttachment>;
   cloudAgentId?: Maybe<Scalars['ID']['output']>;
   completedAt?: Maybe<Scalars['DateTime']['output']>;
   createdAt: Scalars['DateTime']['output'];
@@ -812,7 +820,10 @@ export type CloudAgentTask = {
   externalRef?: Maybe<Scalars['String']['output']>;
   id: Scalars['ID']['output'];
   metadata?: Maybe<Scalars['JSON']['output']>;
+  /** The model the turn ran on, once it was submitted. */
+  model?: Maybe<Scalars['String']['output']>;
   promptPreview?: Maybe<Scalars['String']['output']>;
+  reasoningEffort?: Maybe<Scalars['String']['output']>;
   requestedByUserId?: Maybe<Scalars['ID']['output']>;
   sessionId?: Maybe<Scalars['String']['output']>;
   startedAt?: Maybe<Scalars['DateTime']['output']>;
@@ -820,6 +831,17 @@ export type CloudAgentTask = {
   structuredOutput?: Maybe<Scalars['JSON']['output']>;
   /** The turn's closing text, once it has finished. */
   text?: Maybe<Scalars['String']['output']>;
+};
+
+/** A file the agent published and linked in its result. The URL rechecks access on every request and stays valid until expiresAt. */
+export type CloudAgentTaskAttachment = {
+  __typename?: 'CloudAgentTaskAttachment';
+  bytes?: Maybe<Scalars['Int']['output']>;
+  contentType: Scalars['String']['output'];
+  expiresAt: Scalars['String']['output'];
+  filename: Scalars['String']['output'];
+  id: Scalars['ID']['output'];
+  url: Scalars['String']['output'];
 };
 
 export type CloudAgentTaskCancelResult = {
@@ -840,12 +862,18 @@ export type CloudAgentTaskDispatchInput = {
   environmentId: Scalars['String']['input'];
   externalRef?: InputMaybe<Scalars['String']['input']>;
   idempotencyKey?: InputMaybe<Scalars['String']['input']>;
+  /** Up to 4 images the model sees with the prompt (screenshots, mockups), 5 MiB in total. Kept as the agent's attachments. */
+  images?: InputMaybe<Array<CloudAgentTaskImageInput>>;
   metadata?: InputMaybe<Scalars['JSON']['input']>;
   mode?: InputMaybe<CloudAgentTaskMode>;
+  /** A model id from cloudAgentTaskModels. Applies when the task starts a conversation; a later turn may repeat it but not change it. Defaults to your agent model setting. */
+  model?: InputMaybe<Scalars['String']['input']>;
   /** JSON Schema object for structured output; requires PROMPT mode. */
   outputSchema?: InputMaybe<Scalars['JSON']['input']>;
   projectId: Scalars['String']['input'];
   prompt: Scalars['String']['input'];
+  /** One of the model's reasoningEfforts. May change between turns in PROMPT mode. */
+  reasoningEffort?: InputMaybe<Scalars['String']['input']>;
   /** Continue this task's original agent/session. Mutually exclusive with cloudAgentId/sessionId. */
   replyToTaskId?: InputMaybe<Scalars['String']['input']>;
   /** Existing session to continue; requires cloudAgentId. */
@@ -864,6 +892,17 @@ export type CloudAgentTaskHandle = {
   sessionId: Scalars['String']['output'];
   status: CloudAgentTaskStatus;
   taskId: Scalars['ID']['output'];
+};
+
+/** An image the model sees with the prompt: PNG, JPEG, or WebP. Send data or url, not both. */
+export type CloudAgentTaskImageInput = {
+  /** Base64 bytes, or a data: URL. Shares the request's 1 MB body limit; send larger images by url. */
+  data?: InputMaybe<Scalars['String']['input']>;
+  filename?: InputMaybe<Scalars['String']['input']>;
+  /** Optional; checked against the bytes. */
+  mediaType?: InputMaybe<Scalars['String']['input']>;
+  /** A public HTTPS URL Railway fetches when the task is dispatched, up to 5 MiB. */
+  url?: InputMaybe<Scalars['String']['input']>;
 };
 
 /** A question the task's run is waiting on: a tool approval or an MCP server's form. */
@@ -896,6 +935,25 @@ export type CloudAgentTaskMode =
   | 'FOLLOW_UP'
   | 'PROMPT'
   | 'STEER';
+
+export type CloudAgentTaskModel = {
+  __typename?: 'CloudAgentTaskModel';
+  displayName: Scalars['String']['output'];
+  /** Pass as the dispatch's model. */
+  id: Scalars['ID']['output'];
+  /** A new conversation runs on it when the task names none. */
+  isDefault: Scalars['Boolean']['output'];
+  provider: Scalars['String']['output'];
+  /** Empty when the model takes no reasoning effort. */
+  reasoningEfforts: Array<Scalars['String']['output']>;
+};
+
+export type CloudAgentTaskModels = {
+  __typename?: 'CloudAgentTaskModels';
+  defaultModel: Scalars['String']['output'];
+  defaultReasoningEffort?: Maybe<Scalars['String']['output']>;
+  models: Array<CloudAgentTaskModel>;
+};
 
 export type CloudAgentTaskPage = {
   __typename?: 'CloudAgentTaskPage';
@@ -932,14 +990,19 @@ export type CloudAgentTaskRespondResult = {
 
 export type CloudAgentTaskResult = {
   __typename?: 'CloudAgentTaskResult';
+  /** Files the agent linked in its result, once it ends. */
+  attachments: Array<CloudAgentTaskAttachment>;
   cloudAgentId: Scalars['ID']['output'];
   completedAt?: Maybe<Scalars['String']['output']>;
   error?: Maybe<Scalars['String']['output']>;
   externalRef?: Maybe<Scalars['String']['output']>;
   metadata?: Maybe<Scalars['JSON']['output']>;
+  /** The model the turn ran on, once it was submitted. */
+  model?: Maybe<Scalars['String']['output']>;
   /** Answer these with cloudAgentTaskRespond. */
   pendingInteractions: Array<CloudAgentTaskInteraction>;
   progress?: Maybe<CloudAgentTaskProgress>;
+  reasoningEffort?: Maybe<Scalars['String']['output']>;
   sessionId: Scalars['String']['output'];
   sessionState?: Maybe<Scalars['String']['output']>;
   status: CloudAgentTaskStatus;
@@ -4838,6 +4901,7 @@ export type PlanLimitOverride = Node & {
 };
 
 export type PlatformFeatureFlag =
+  | 'AGENT_CACHE_TOKEN_BILLING'
   | 'AGENT_USAGE_CH_INGEST'
   | 'ALERT_SUS_USERS_CRON_KILLSWITCH'
   | 'BLOCK_TRIAL_RESTRICTION_APPEALS'
@@ -5684,6 +5748,8 @@ export type Query = {
   cloudAgentConsoleSessions?: Maybe<QueryCloudAgentConsoleSessionsConnection>;
   /** Read a task turn without waking the VM: the latest on the agent/session, or taskId's. */
   cloudAgentTask: CloudAgentTaskResult;
+  /** The models a task in this environment can run on, and the default a new conversation starts on. */
+  cloudAgentTaskModels: CloudAgentTaskModels;
   /** List task records in an environment, newest first. Filter to one agent, or with sessionId to one session's turns. */
   cloudAgentTasks: CloudAgentTaskPage;
   /** Cloud agents in an environment. */
@@ -6107,6 +6173,12 @@ export type QueryCloudAgentTaskArgs = {
   cloudAgentId: Scalars['String']['input'];
   sessionId: Scalars['String']['input'];
   taskId?: InputMaybe<Scalars['String']['input']>;
+};
+
+
+export type QueryCloudAgentTaskModelsArgs = {
+  environmentId: Scalars['String']['input'];
+  projectId: Scalars['String']['input'];
 };
 
 
@@ -7715,6 +7787,8 @@ export type Sandbox = {
   /** Minutes of inactivity before the sandbox is destroyed. 0 means it never idles out; null means unknown, including for a destroyed sandbox. */
   idleTimeoutMinutes?: Maybe<Scalars['Int']['output']>;
   networkIsolation: SandboxNetworkIsolation;
+  /** Hostname on the environment's private network, e.g. <name>.railway.internal, reachable on any port from services in that environment. Null when the VM is isolated or its private endpoint isn't registered yet. */
+  privateDomain?: Maybe<Scalars['String']['output']>;
   region: Scalars['String']['output'];
   status: SandboxStatus;
 };
@@ -9816,6 +9890,14 @@ export type RailwaySandboxExecMutationVariables = Exact<{
 
 export type RailwaySandboxExecMutation = { __typename?: 'Mutation', sandboxExec: { __typename?: 'SandboxExecResult', exitCode: number, stdout: string, stderr: string, truncated: boolean, timedOut: boolean } };
 
+export type RailwayServiceExecInstanceQueryVariables = Exact<{
+  environmentId: Scalars['String']['input'];
+  serviceId: Scalars['String']['input'];
+}>;
+
+
+export type RailwayServiceExecInstanceQuery = { __typename?: 'Query', serviceInstance: { __typename?: 'ServiceInstance', activeDeployments: Array<{ __typename?: 'Deployment', status: DeploymentStatus, instances: Array<{ __typename?: 'DeploymentDeploymentInstance', id: string, status: DeploymentInstanceStatus }> }> } };
+
 export type RailwayGenerateShellTokenMutationVariables = Exact<{
   input: ShellTokenInput;
 }>;
@@ -9840,4 +9922,5 @@ export const RailwaySandboxCheckpointRenameDocument = {"kind":"Document","defini
 export const RailwaySandboxCheckpointDeleteDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"RailwaySandboxCheckpointDelete"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"id"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"ID"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxCheckpointDelete"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}},{"kind":"Argument","name":{"kind":"Name","value":"id"},"value":{"kind":"Variable","name":{"kind":"Name","value":"id"}}}]}]}}]} as unknown as DocumentNode<RailwaySandboxCheckpointDeleteMutation, RailwaySandboxCheckpointDeleteMutationVariables>;
 export const RailwaySandboxSessionsDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"RailwaySandboxSessions"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"id"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"after"}},"type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxSessions"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}},{"kind":"Argument","name":{"kind":"Name","value":"id"},"value":{"kind":"Variable","name":{"kind":"Name","value":"id"}}},{"kind":"Argument","name":{"kind":"Name","value":"after"},"value":{"kind":"Variable","name":{"kind":"Name","value":"after"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"edges"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"node"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"RailwaySandboxSessionFields"}}]}}]}},{"kind":"Field","name":{"kind":"Name","value":"pageInfo"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"hasNextPage"}},{"kind":"Field","name":{"kind":"Name","value":"endCursor"}}]}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"RailwaySandboxSessionFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"SandboxSession"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"name"}},{"kind":"Field","name":{"kind":"Name","value":"kind"}},{"kind":"Field","name":{"kind":"Name","value":"runState"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"running"}},{"kind":"Field","name":{"kind":"Name","value":"exitCode"}},{"kind":"Field","name":{"kind":"Name","value":"exitedAt"}}]}},{"kind":"Field","name":{"kind":"Name","value":"attached"}},{"kind":"Field","name":{"kind":"Name","value":"command"}},{"kind":"Field","name":{"kind":"Name","value":"foregroundActive"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}}]}}]} as unknown as DocumentNode<RailwaySandboxSessionsQuery, RailwaySandboxSessionsQueryVariables>;
 export const RailwaySandboxExecDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"RailwaySandboxExec"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"id"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"command"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"timeoutSec"}},"type":{"kind":"NamedType","name":{"kind":"Name","value":"Int"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sandboxExec"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}},{"kind":"Argument","name":{"kind":"Name","value":"id"},"value":{"kind":"Variable","name":{"kind":"Name","value":"id"}}},{"kind":"Argument","name":{"kind":"Name","value":"command"},"value":{"kind":"Variable","name":{"kind":"Name","value":"command"}}},{"kind":"Argument","name":{"kind":"Name","value":"timeoutSec"},"value":{"kind":"Variable","name":{"kind":"Name","value":"timeoutSec"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"exitCode"}},{"kind":"Field","name":{"kind":"Name","value":"stdout"}},{"kind":"Field","name":{"kind":"Name","value":"stderr"}},{"kind":"Field","name":{"kind":"Name","value":"truncated"}},{"kind":"Field","name":{"kind":"Name","value":"timedOut"}}]}}]}}]} as unknown as DocumentNode<RailwaySandboxExecMutation, RailwaySandboxExecMutationVariables>;
+export const RailwayServiceExecInstanceDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"RailwayServiceExecInstance"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"serviceId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"serviceInstance"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"environmentId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"environmentId"}}},{"kind":"Argument","name":{"kind":"Name","value":"serviceId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"serviceId"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"activeDeployments"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"instances"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}}]}}]}}]}}]}}]} as unknown as DocumentNode<RailwayServiceExecInstanceQuery, RailwayServiceExecInstanceQueryVariables>;
 export const RailwayGenerateShellTokenDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"RailwayGenerateShellToken"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"ShellTokenInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"generateShellToken"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}]}]}}]} as unknown as DocumentNode<RailwayGenerateShellTokenMutation, RailwayGenerateShellTokenMutationVariables>;

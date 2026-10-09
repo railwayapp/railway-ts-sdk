@@ -262,7 +262,7 @@ export class SandboxFiles {
   async #applyMode(path: string, mode: number): Promise<void> {
     const octal = mode.toString(8).padStart(3, "0");
     const result = await startExec(
-      this.#context,
+      { ...this.#context, instanceId: this.#context.sandboxId },
       `chmod ${octal} -- ${shellQuote(path)}`,
       { timeoutSec: 30 },
     );

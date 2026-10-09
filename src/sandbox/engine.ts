@@ -441,7 +441,7 @@ export class SandboxEngine {
     const context: ExecContext = {
       config: this.#config,
       environmentId: this.#config.environmentId,
-      sandboxId: id,
+      instanceId: id,
     };
     return startExec(context, target, options);
   }

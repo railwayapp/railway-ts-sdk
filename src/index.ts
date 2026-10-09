@@ -120,3 +120,5 @@ export {
   type SignalType,
   type TraceStep,
 } from "./flags/index.js";
+
+export { Service, type ServiceTarget } from "./service.js";
