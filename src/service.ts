@@ -12,7 +12,11 @@ export interface ServiceTarget {
   instanceId: string;
 }
 
-/** Foreground execution on a verified existing service replica. */
+/**
+ * Foreground calls on a verified existing service replica.
+ * Service process controls are not guaranteed by sandbox capabilities; a missing
+ * terminal exit leaves the command's outcome unknown and it may still be running.
+ */
 export class Service {
   readonly #context: ExecContext;
 
@@ -50,7 +54,12 @@ export class Service {
     });
   }
 
-  /** Reuses native stdin, streaming, timeout and cancellation; no durable service promise. */
+  /**
+   * Reuses the native stream engine and requests ephemeral execution, without
+   * promising service cleanup on disconnect. Timeout/abort send termination
+   * requests; only a confirmed remote exit establishes that the command ended.
+   * Durable session names, detach and reattach are not supported here.
+   */
   exec(command: string, options: Omit<ExecOptions, "ephemeral"> = {}): ExecHandle {
     return startExec(this.#context, command, { ...options, ephemeral: true });
   }

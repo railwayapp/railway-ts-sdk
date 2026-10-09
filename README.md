@@ -533,10 +533,11 @@ Beta limitations to know:
 
 Full guide and reference: <https://docs.railway.com/infrastructure-as-code>.
 
-## Execute on an existing service
+## Execute on an existing service (draft)
 
-Select the exact running replica; connecting does not wake a sleeping service or
-create compute. The token must already authorize that service and environment.
+This proposed API is not available in the published 3.13.1 package. Select the
+exact running replica; connecting does not wake a sleeping service or create
+compute. The token must already authorize that service and environment.
 
 ```ts
 import { Service } from "railway";
@@ -546,13 +547,32 @@ const handle = service.exec("cat", { stdin: true, timeoutSec: 60 });
 await handle.stdin.write("input\n");
 await handle.stdin.end();
 const result = await handle;
+// A nonzero exit is a result, not an exception. Inspect exitCode and truncated.
 ```
 
 Service commands use the same native execution engine as sandboxes: separated
-stdout/stderr, confirmed exit codes, streaming callbacks, and AbortSignal
-termination. They are foreground ephemeral commands; disconnect ends their
-process group. Durable session names, detach and reattach are not supported.
-A missing exit still means an unknown outcome, including after cancellation.
+stdout/stderr, streaming callbacks, writable stdin and explicit terminal exit
+codes. They request ephemeral execution, but sandbox control negotiation does
+not establish service cancellation or cleanup on disconnect. Durable session
+names, detach and reattach are not supported by this API.
+
+`timeoutSec`, an `AbortSignal`, and `handle.kill()` send native termination
+requests. A dispatched signal is not proof of termination. Without a confirmed
+remote exit, timeout, abort or disconnect leaves an unknown outcome and the
+command may still be running. Do not automatically retry a mutation after an
+unknown outcome; reconcile it with the service's owning state first.
+
+Live qualification of this draft on one existing development service passed
+stdin plus EOF, separate stdout/stderr, explicit nonzero exit, and a bounded
+authenticated screenshot command. Cancellation did not pass: TERM followed by
+KILL produced no exit within the engine's confirmation window, and disconnect
+left the exact command process alive. The cancellation failure reproduced both
+through a protected proxy and through a direct operator connection. Those probe
+processes later exited under their independent command deadlines; this is not
+evidence that cancellation worked. Offline mock checks verify client behavior,
+not service-side process controls. The draft needs native-owner qualification
+before advertising service cancellation or disconnect cleanup.
+
 Pass the existing public `fetch` and `webSocketImpl` configuration when a protected
 proxy owns outbound requests; do not replace it with direct connections.
 
