@@ -72,6 +72,7 @@ export interface ServiceNode extends GraphResourceBase {
   replicaConfig?: ServiceConfig["replicaConfig"];
   clusterDisplay?: ServiceConfig["clusterDisplay"];
   tracing?: ServiceConfig["tracing"];
+  cdn?: ServiceConfig["cdn"];
 }
 
 export interface DatabaseNode extends Omit<ServiceNode, "address" | "id" | "type" | "kind"> {

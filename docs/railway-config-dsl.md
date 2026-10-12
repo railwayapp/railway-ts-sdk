@@ -246,6 +246,7 @@ interface ServiceConfigInput {
   clusterDisplay?: ServiceConfig["clusterDisplay"];
 
   tracing?: ServiceConfig["tracing"];
+  cdn?: ServiceConfig["cdn"];
 }
 ```
 
@@ -371,6 +372,52 @@ the same thing: no tracing, and no drift in `railway config plan`.
 
 Requires Railway CLI 5.63.0 or newer. Older CLIs drop the block when compiling
 the config.
+
+### CDN
+
+CDN caching is set per service and per environment, for the service's public
+domains. The settings live on the edge and apply without a deploy.
+
+```ts
+service("web", {
+  cdn: { enabled: true },
+});
+
+service("docs", {
+  cdn: {
+    enabled: true,
+    defaultTtlSeconds: 86400,
+    htmlCaching: "force",
+    staleWhileRevalidate: false,
+    purgeOnDeploy: "all",
+  },
+});
+```
+
+`enabled` caches responses from the service's public domains at Railway's
+edge. It needs a public domain and cannot be combined with Railway
+Authentication. The other knobs tune the cache and each has a default:
+
+- `defaultTtlSeconds`: how long the edge keeps a cacheable response without
+  `Cache-Control` headers of its own, in seconds. Defaults to `7200`.
+- `htmlCaching`: whether HTML documents are cached. `auto` follows the
+  response headers, `force` caches them regardless, `never` leaves them
+  uncached. Defaults to `auto`.
+- `staleWhileRevalidate`: honour `stale-while-revalidate` `Cache-Control`
+  directives, serving a stale copy while the edge refreshes it. Defaults to
+  `true`.
+- `purgeOnDeploy`: what a successful deploy purges from the cache. `html`
+  keeps immutable assets warm, `all` clears everything, `off` purges nothing.
+  Defaults to `html`.
+
+Railway serialises the block only while caching is on, and only the knobs that
+differ from the defaults. Leaving the block out, `{ enabled: false }` and
+`null` all mean the same thing: no caching, and no drift in
+`railway config plan`. `{ enabled: true }` is a service caching with the
+defaults, so a knob set to its default does not plan as drift either.
+
+Requires a Railway CLI that compiles `cdn`. Older CLIs drop the block when
+compiling the config.
 
 ### Environment variables
 

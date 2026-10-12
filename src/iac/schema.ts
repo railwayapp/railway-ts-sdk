@@ -33,6 +33,7 @@ export type ServiceConfig = {
     badgeVariant?: "primary" | "secondary" | "muted" | null;
   } | null;
   tracing?: ServiceTracing | null;
+  cdn?: ServiceCdn | null;
 };
 
 /**
@@ -45,6 +46,26 @@ export type ServiceTracing = {
   enabled?: boolean | null;
   /** Instrument the service's processes with eBPF (OBI) for supported runtimes, no code changes. Only takes effect while `enabled` is true. */
   autoInstrumentation?: boolean | null;
+};
+
+/**
+ * CDN caching for the service's public domains in this environment. Settings
+ * live on the edge and apply without a deploy. Railway serialises the block
+ * only while caching is on, and only the knobs that differ from the defaults,
+ * so an omitted key, `{ enabled: false }` and `null` all mean off and
+ * `{ enabled: true }` is a service caching with the defaults.
+ */
+export type ServiceCdn = {
+  /** Cache responses from the service's public domains at Railway's edge. Needs a public domain; cannot be combined with Railway Authentication. */
+  enabled?: boolean | null;
+  /** How long the edge keeps a cacheable response without `Cache-Control` headers of its own, in seconds. Defaults to 7200. */
+  defaultTtlSeconds?: number | null;
+  /** Whether HTML documents are cached: `auto` follows the response headers, `force` caches them regardless, `never` leaves them uncached. Defaults to `auto`. */
+  htmlCaching?: "auto" | "force" | "never" | null;
+  /** Honour `stale-while-revalidate` `Cache-Control` directives, serving a stale copy while the edge refreshes it. Defaults to true. */
+  staleWhileRevalidate?: boolean | null;
+  /** What a successful deploy purges from the cache: `html` keeps immutable assets warm, `all` clears everything, `off` purges nothing. Defaults to `html`. */
+  purgeOnDeploy?: "off" | "html" | "all" | null;
 };
 
 export type ServiceSource = {
