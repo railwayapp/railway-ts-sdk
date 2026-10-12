@@ -82,6 +82,45 @@ describe("Railway IaC authoring", () => {
     );
   });
 
+  it("accepts a typed auto-update maintenance window", () => {
+    const schedule = [
+      { day: 6, startHour: 2, endHour: 6 },
+      { day: 0, startHour: 0, endHour: 24 },
+    ];
+    expect(image("nginx:latest", { autoUpdates: { type: "patch", schedule } })).toEqual({
+      type: "image",
+      image: "nginx:latest",
+      autoUpdates: { type: "patch", schedule },
+    });
+    expect(() => image("nginx:latest", { autoUpdates: { type: "patch", schedule: [] } })).not.toThrow();
+    expect(() => image("nginx:latest", { autoUpdates: { type: "patch", schedule: null } })).not.toThrow();
+  });
+
+  it("rejects auto-update windows outside backboard's bounds", () => {
+    const bad = (window: unknown, pattern: RegExp) =>
+      expect(() => image("nginx:latest", { autoUpdates: { type: "patch", schedule: [window as never] } })).toThrow(pattern);
+
+    bad({ day: 7, startHour: 2, endHour: 6 }, /schedule\[0\]\.day must be an integer from 0/);
+    bad({ day: -1, startHour: 2, endHour: 6 }, /\.day must be/);
+    bad({ day: 1.5, startHour: 2, endHour: 6 }, /\.day must be/);
+    bad({ day: 6, startHour: 24, endHour: 24 }, /\.startHour must be an integer UTC hour from 0 to 23/);
+    bad({ day: 6, startHour: 2, endHour: 0 }, /\.endHour must be an integer UTC hour from 1 to 24/);
+    bad({ day: 6, startHour: 2, endHour: 25 }, /\.endHour must be an integer UTC hour from 1 to 24/);
+    bad({ day: 6, startHour: 6, endHour: 6 }, /endHour must be greater than startHour/);
+    bad({ day: 6, startHour: 22, endHour: 2 }, /cannot cross midnight/);
+    bad({ day: "6", startHour: 2, endHour: 6 }, /\.day must be/);
+    bad({ startHour: 2, endHour: 6 }, /\.day must be/);
+    bad(null, /must be an object/);
+    bad("weekend", /must be an object/);
+
+    expect(() => image("nginx:latest", { autoUpdates: { type: "patch", schedule: { day: 6 } as never } })).toThrow(
+      /must be an array/,
+    );
+    expect(() =>
+      image("nginx:latest", { autoUpdates: { type: "patch", schedule: [{ day: 6, startHour: 2, endHour: 6 }, { day: 3, startHour: 5, endHour: 4 }] } }),
+    ).toThrow(/schedule\[1\]\.endHour must be greater/);
+  });
+
   it("normalizes variables to typed values", () => {
     const db = postgres("postgres");
     const node = service("web", {
