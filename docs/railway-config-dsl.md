@@ -143,7 +143,11 @@ service("web", {
 ```ts
 image(imageName: string, options?: {
   rootDirectory?: string;
-  autoUpdates?: boolean;
+  autoUpdates?: {
+    type?: "disabled" | "patch" | "minor";
+    schedule?: { day: number; startHour: number; endHour: number }[];
+    tagMode?: "semver" | "sha";
+  };
 })
 ```
 
@@ -152,6 +156,38 @@ service("nginx", {
   source: image("nginx:latest"),
 });
 ```
+
+#### Image auto-updates
+
+`autoUpdates` has Railway redeploy the service when a newer image tag is
+published. `type` picks which bumps are taken: `"patch"` or `"minor"` semver
+steps, or `"disabled"`. `schedule` restricts the redeploy to weekly UTC
+maintenance windows; leave it out and updates may run at any time.
+
+```ts
+service("nginx", {
+  source: image("nginx:latest", {
+    autoUpdates: {
+      type: "patch",
+      schedule: [{ day: 6, startHour: 2, endHour: 6 }],
+    },
+  }),
+});
+```
+
+Each window is `{ day, startHour, endHour }` in UTC: `day` is `0` (Sunday)
+to `6` (Saturday), `startHour` is `0`-`23` and inclusive, `endHour` is
+`1`-`24` and exclusive, and `endHour` must be greater than `startHour`. A
+window cannot cross midnight, so a Saturday-night window is two entries:
+`{ day: 6, startHour: 22, endHour: 24 }` and `{ day: 0, startHour: 0, endHour: 2 }`.
+The dashboard's presets are plain windows too, e.g. Weekends is
+`[{ day: 6, startHour: 0, endHour: 24 }, { day: 0, startHour: 0, endHour: 24 }]`.
+
+Auto-updates only apply to Docker Hub and GHCR image sources; `image()` throws
+for any other registry. `image()` also rejects a window outside those bounds
+at authoring time, naming the offending entry, so the mistake does not wait for
+`railway config apply`. Changing `schedule` on its own never redeploys the
+service.
 
 ### `template(templateName, options?)`
 

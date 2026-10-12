@@ -16,6 +16,7 @@ import type {
   VolumeNode,
 } from "./graph.js";
 import type {
+  AutoUpdateScheduleWindow,
   BucketConfig,
   BuildConfig,
   DeployConfig,
@@ -145,7 +146,43 @@ export function image(imageName: string, options: Pick<SourceConfig, "rootDirect
   if (options.autoUpdates !== undefined && !supportsImageAutoUpdates(imageName)) {
     throw new Error("Image auto updates are only supported for Docker Hub and GHCR images.");
   }
+  if (options.autoUpdates?.schedule != null) {
+    validateAutoUpdateSchedule(options.autoUpdates.schedule);
+  }
   return { type: "image", image: imageName, ...options };
+}
+
+// Mirrors backboard's schedule window schema (@railway/models): day 0-6,
+// startHour 0-23, endHour 1-24 exclusive and after startHour, all integers.
+// Backboard rejects anything else at commit time; failing here surfaces the
+// mistake at authoring time with the offending window named.
+function validateAutoUpdateSchedule(schedule: unknown): asserts schedule is AutoUpdateScheduleWindow[] {
+  if (!Array.isArray(schedule)) {
+    throw new Error("Image auto update schedule must be an array of { day, startHour, endHour } windows.");
+  }
+  schedule.forEach((window, index) => {
+    const where = `autoUpdates.schedule[${index}]`;
+    if (typeof window !== "object" || window === null || Array.isArray(window)) {
+      throw new Error(`${where} must be an object with day, startHour and endHour.`);
+    }
+    const { day, startHour, endHour } = window as Record<string, unknown>;
+    if (!isIntegerInRange(day, 0, 6)) {
+      throw new Error(`${where}.day must be an integer from 0 (Sunday) to 6 (Saturday) UTC.`);
+    }
+    if (!isIntegerInRange(startHour, 0, 23)) {
+      throw new Error(`${where}.startHour must be an integer UTC hour from 0 to 23.`);
+    }
+    if (!isIntegerInRange(endHour, 1, 24)) {
+      throw new Error(`${where}.endHour must be an integer UTC hour from 1 to 24 (exclusive).`);
+    }
+    if (endHour <= startHour) {
+      throw new Error(`${where}.endHour must be greater than startHour; a window cannot cross midnight.`);
+    }
+  });
+}
+
+function isIntegerInRange(value: unknown, min: number, max: number): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= min && value <= max;
 }
 
 function supportsImageAutoUpdates(imageName: string): boolean {

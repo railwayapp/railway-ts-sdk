@@ -68,6 +68,29 @@ export type ServiceCdn = {
   purgeOnDeploy?: "off" | "html" | "all" | null;
 };
 
+/**
+ * One weekly UTC window in which scheduled image auto-updates may run.
+ * Bounds match backboard's schedule schema: `day` is 0 (Sunday) to 6
+ * (Saturday), `startHour` is 0-23 inclusive, `endHour` is 1-24 exclusive and
+ * must be greater than `startHour`. A window cannot cross midnight; use two
+ * windows on consecutive days instead.
+ */
+export type AutoUpdateScheduleWindow = {
+  /** UTC weekday: 0 (Sunday) through 6 (Saturday). */
+  day: number;
+  /** UTC hour the window opens (inclusive), 0-23. */
+  startHour: number;
+  /** UTC hour the window closes (exclusive), 1-24. */
+  endHour: number;
+};
+
+export type ServiceAutoUpdates = {
+  type?: "disabled" | "patch" | "minor" | null;
+  /** Weekly UTC maintenance windows. Omitted means Railway's default (anytime). */
+  schedule?: AutoUpdateScheduleWindow[] | null;
+  tagMode?: "semver" | "sha" | null;
+};
+
 export type ServiceSource = {
   image?: string | null;
   repo?: string | null;
@@ -76,11 +99,8 @@ export type ServiceSource = {
   upstreamUrl?: string | null;
   rootDirectory?: string | null;
   checkSuites?: boolean | null;
-  autoUpdates?: {
-    type?: "disabled" | "patch" | "minor" | null;
-    schedule?: unknown;
-    tagMode?: "semver" | "sha" | null;
-  } | null;
+  /** Image auto-updates. Only Docker Hub and GHCR image sources support them. */
+  autoUpdates?: ServiceAutoUpdates | null;
 };
 
 export type ServiceNetworking = {
