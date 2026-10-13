@@ -516,8 +516,8 @@ How it works:
 
 The DSL in brief:
 
-- Resources: `service`, `fn` (cron), `postgres` / `mysql` / `redis` / `mongo`, `bucket`,
-  `group`.
+- Resources: `service`, `fn` (single-file functions from a `codeFile`), `postgres` / `mysql` /
+  `redis` / `mongo`, `bucket`, `group`.
 - Sources: `github(repo)`, `image(ref)`, `template(name)`, `empty()`.
 - Variables: literals, typed references to another resource (`db.env.DATABASE_URL`),
   shared variables (`ctx.shared.NAME`), and `preserve()` to keep a value Railway already

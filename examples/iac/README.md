@@ -19,6 +19,7 @@ The SDK keeps raw config buckets available (`source`, `build`, `deploy`, `networ
 - `todo-list.ts` — frontend + backend monorepo with Redis and regional replicas.
 - `api-postgres-bucket.ts` — API service with Postgres, bucket, custom domain, generated secret.
 - `workers.ts` — Redis-backed worker plus cron-style scheduler.
+- `function.ts` — two Railway Functions whose code lives in `functions/`, one on a domain and one on a cron schedule.
 
 ## Evaluation lives in the CLI
 

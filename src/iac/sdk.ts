@@ -1,4 +1,7 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { dirname, isAbsolute, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { assertMinimumIacCliVersion } from "./cli-version.js";
 import { resourceAddress } from "./graph.js";
 import type {
@@ -226,8 +229,98 @@ export function service<const Env extends Record<string, string | VariableConfig
   return withVariableRefs(node) as ReferencableServiceNode<RailwayProvidedVariable | Extract<keyof Env, string>>;
 }
 
-export function fn<const Env extends Record<string, string | VariableConfig | VariableValue> = {}>(name: string, config: Omit<ServiceConfigInput, "env" | "variables"> & { env?: Env; variables?: Env } = {}): ReferencableServiceNode<RailwayProvidedVariable | Extract<keyof Env, string>> {
-  return withVariableRefs({ ...service(name, config), kind: "function" } as ServiceNode) as ReferencableServiceNode<RailwayProvidedVariable | Extract<keyof Env, string>>;
+export type FunctionRuntime = "bun";
+
+// Runtime images for Railway Functions. Pinned so an authored function plans
+// the same on every machine; pass `source: image(...)` to pick another tag.
+const FUNCTION_IMAGES: Readonly<Record<FunctionRuntime, string>> = {
+  bun: "ghcr.io/railwayapp/function-bun:1.4.0",
+};
+
+// A start command reaches the container as one argv string, and Linux caps a
+// single argument at MAX_ARG_STRLEN: 128 KiB counting the terminating NUL.
+const MAX_COMMAND_BYTES = 128 * 1024 - 1;
+const FUNCTION_START_COMMAND_PREFIX = "./run.sh ";
+
+/**
+ * Largest function source `fn()` accepts, in UTF-8 bytes: 98295. The source
+ * is base64 after the `./run.sh ` prefix of that one argument, so the limit is
+ * the largest whole number of 3-byte groups whose base64 still fits. The API
+ * derives the same number and rejects anything larger on plan and apply.
+ */
+export const FUNCTION_SOURCE_MAX_BYTES = Math.floor((MAX_COMMAND_BYTES - FUNCTION_START_COMMAND_PREFIX.length) / 4) * 3;
+
+export interface FunctionConfigInput extends IntentServiceConfig {
+  /**
+   * Path to the function's source file. `fn()` reads it when the config is
+   * evaluated and base64-encodes it into the deploy start command, which is
+   * how Railway stores function code; the service has no repository. A
+   * relative path resolves against the directory of the file calling `fn()`,
+   * normally `.railway/`. The file must stay within `FUNCTION_SOURCE_MAX_BYTES`.
+   */
+  codeFile?: string | URL;
+  /** Runtime image the function runs on. Defaults to `"bun"`. */
+  runtime?: FunctionRuntime;
+}
+
+export function fn<const Env extends Record<string, string | VariableConfig | VariableValue> = {}>(name: string, config: Omit<FunctionConfigInput, "env" | "variables"> & { env?: Env; variables?: Env } = {}): ReferencableServiceNode<RailwayProvidedVariable | Extract<keyof Env, string>> {
+  const { codeFile, runtime, ...serviceConfig } = config;
+  if (runtime !== undefined && !Object.hasOwn(FUNCTION_IMAGES, runtime)) {
+    throw new Error(`Unknown function runtime "${String(runtime)}"; supported runtimes: ${Object.keys(FUNCTION_IMAGES).join(", ")}.`);
+  }
+  if ((codeFile !== undefined || runtime !== undefined) && serviceConfig.source === undefined) {
+    serviceConfig.source = image(FUNCTION_IMAGES[runtime ?? "bun"]);
+  }
+  if (codeFile !== undefined) {
+    if (serviceConfig.start ?? serviceConfig.startCommand ?? serviceConfig.run?.command ?? serviceConfig.deploy?.startCommand) {
+      throw new Error(`fn("${name}"): "codeFile" sets the start command; drop "start", "startCommand", "run.command" or "deploy.startCommand".`);
+    }
+    serviceConfig.start = functionStartCommand(readFunctionSource(name, codeFile));
+  }
+  return withVariableRefs({ ...service(name, serviceConfig), kind: "function" } as ServiceNode) as ReferencableServiceNode<RailwayProvidedVariable | Extract<keyof Env, string>>;
+}
+
+function readFunctionSource(name: string, codeFile: string | URL): string {
+  const path = codeFile instanceof URL ? fileURLToPath(codeFile) : isAbsolute(codeFile) ? codeFile : resolve(callerDirectory() ?? process.cwd(), codeFile);
+  try {
+    return readFileSync(path, "utf8");
+  } catch (error) {
+    throw new Error(`fn("${name}"): cannot read codeFile ${path}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+// Directory of the module that called into this one: the config file, so a
+// relative `codeFile` means "next to railway.ts" no matter which directory
+// `railway config plan` or `node` runs from. Node's CallSite API gives file
+// names without parsing the stack text; ESM frames carry `file:` URLs (the
+// CLI imports the config with a cache-busting query, which `fileURLToPath`
+// drops). A host that overrides stack formatting or sets `stackTraceLimit`
+// to 0 yields no frames, and the caller falls back to the working directory.
+function callerDirectory(): string | undefined {
+  const original = Error.prepareStackTrace;
+  Error.prepareStackTrace = (_error, callSites) => callSites;
+  const stack: unknown = new Error().stack;
+  Error.prepareStackTrace = original;
+  if (!Array.isArray(stack)) return undefined;
+  const callSites = stack as NodeJS.CallSite[];
+  const self = callSites[0]?.getFileName();
+  for (const site of callSites) {
+    const file = site.getFileName();
+    if (!file || file === self || file.startsWith("node:")) continue;
+    return dirname(file.startsWith("file:") ? fileURLToPath(file) : file);
+  }
+  return undefined;
+}
+
+// The function image's `run.sh` decodes its argument, writes it to
+// `index.tsx` and runs it with the runtime; Railway decodes the same form to
+// show the source in the dashboard. The error text matches the API's.
+function functionStartCommand(code: string): string {
+  const bytes = Buffer.byteLength(code, "utf8");
+  if (bytes > FUNCTION_SOURCE_MAX_BYTES) {
+    throw new Error(`Function source code is ${bytes} bytes; the limit is ${FUNCTION_SOURCE_MAX_BYTES} bytes`);
+  }
+  return `${FUNCTION_START_COMMAND_PREFIX}${Buffer.from(code, "utf8").toString("base64")}`;
 }
 
 export interface DatabaseConfig {
