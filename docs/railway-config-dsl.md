@@ -283,6 +283,7 @@ interface ServiceConfigInput {
 
   tracing?: ServiceConfig["tracing"];
   cdn?: ServiceConfig["cdn"];
+  edgeRules?: ServiceConfig["edgeRules"];
 }
 ```
 
@@ -454,6 +455,68 @@ defaults, so a knob set to its default does not plan as drift either.
 
 Requires a Railway CLI that compiles `cdn`. Older CLIs drop the block when
 compiling the config.
+
+### Edge rules
+
+Edge rules are set per service and per environment. The edge evaluates them
+before a request reaches the service, so they apply without a deploy.
+
+```ts
+service("web", {
+  edgeRules: [
+    {
+      description: "Keep the admin panel internal",
+      priority: 0,
+      if: {
+        and: [
+          { attr: "http.path", op: "matches", value: "/admin/*" },
+          { not: { attr: "ipv4.src", op: "in", value: ["10.0.0.0/8"] } },
+        ],
+      },
+      then: { action: "block", params: { status: 403 } },
+    },
+    {
+      priority: 10,
+      if: { attr: "http.host", op: "eq", value: "old.example.com" },
+      then: {
+        action: "redirect",
+        params: { status: 301, host: "example.com", preserve_path: true },
+      },
+    },
+  ],
+});
+```
+
+Each rule has a `priority` (evaluation order, lowest first, unique within the
+service), a condition in `if` and an action in `then`. `description` is free
+text, `enabled: false` keeps a rule without evaluating it, and `mode` is
+`enforce` (the only mode today). Rules carry no id: the edge assigns one, and
+an update keeps a live rule's id when the priority matches.
+
+`if` is one clause or a combinator of clauses:
+
+- A clause is `{ attr, op, value, key? }`. `attr` is `ipv4.src`, `http.host`,
+  `http.path` or `http.header` (with `key` naming the header). `op` is `eq`,
+  `neq`, `in`, `not_in`, `contains` or `matches` (glob), as the attribute
+  allows. `value` is a string, or a list of strings for `in` and `not_in`.
+- `{ and: [...] }`, `{ or: [...] }` and `{ not: ... }` combine them.
+
+`then.action` is `block`, `allow`, `challenge`, `redirect` or
+`cache_override`, with `params` per action: `status` and `body` for `block`;
+`status` and either `location` or `host` (plus `preserve_path` and
+`preserve_query`) for `redirect`; `ttl_seconds` or `bypass` for
+`cache_override`. The SDK types `params` loosely; the edge validates the whole
+ruleset when the change is committed and rejects an invalid one with its
+diagnostics.
+
+Railway serialises the list sorted by `priority`, without `enabled` when true
+or `mode` when `enforce`, so a reordered or default-laden copy of the live
+rules does not plan as drift. Leaving the key out, `[]` and `null` all mean
+the same thing: no rules. The list is replaced as a whole, and rules need a
+plan with an edge-rules budget and a service with a domain.
+
+Requires a Railway CLI that compiles `edgeRules`. Older CLIs drop the list
+when compiling the config.
 
 ### Environment variables
 
