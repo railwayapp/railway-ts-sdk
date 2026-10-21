@@ -182,6 +182,17 @@ describe("Railway IaC authoring", () => {
     });
   });
 
+  it("keeps null removal entries in networking.customDomains and tcpProxies", () => {
+    expect(service("web", { networking: { customDomains: { "old.example.com": null }, tcpProxies: { "5432": null } } }).networking).toEqual({
+      customDomains: { "old.example.com": null },
+      tcpProxies: { "5432": null },
+    });
+    expect(service("web", { domains: ["a.example.com"], networking: { customDomains: { "old.example.com": null } } }).networking).toEqual({
+      customDomains: { "old.example.com": null, "a.example.com": { port: 8080 } },
+    });
+    expect(service("web", {}).networking).toBeUndefined();
+  });
+
   it("keeps deploy.preDeployTimeoutSeconds next to the preDeploy shorthand", () => {
     const node = service("api", {
       preDeploy: "npx prisma migrate deploy",

@@ -484,7 +484,13 @@ function normalizeNetworking(config: ServiceConfigInput): ServiceNetworking | un
     : config.tcpProxies
       ? Object.fromEntries(config.tcpProxies.map(port => [port, {}]))
       : undefined;
-  return pruneEmpty({ ...config.networking, customDomains, tcpProxies }) as ServiceNetworking | undefined;
+  // Keep the null removal entries written in `networking`; domains/tcp add entries on top.
+  const declared = config.networking;
+  return pruneEmpty({
+    ...declared,
+    customDomains: customDomains ? { ...declared?.customDomains, ...customDomains } : declared?.customDomains,
+    tcpProxies: tcpProxies ? { ...declared?.tcpProxies, ...tcpProxies } : declared?.tcpProxies,
+  }) as ServiceNetworking | undefined;
 }
 
 function normalizeVariables(variables: Record<string, string | VariableConfig | VariableValue>): Record<string, VariableValue> {
