@@ -182,7 +182,7 @@ describe("Railway IaC authoring", () => {
     });
   });
 
-  it("keeps null removal entries in networking.customDomains and tcpProxies", () => {
+  it("keeps null entries in networking.customDomains and tcpProxies through JSON output", () => {
     expect(service("web", { networking: { customDomains: { "old.example.com": null }, tcpProxies: { "5432": null } } }).networking).toEqual({
       customDomains: { "old.example.com": null },
       tcpProxies: { "5432": null },
@@ -191,6 +191,13 @@ describe("Railway IaC authoring", () => {
       customDomains: { "old.example.com": null, "a.example.com": { port: 8080 } },
     });
     expect(service("web", {}).networking).toBeUndefined();
+
+    const declaredNull = JSON.parse(JSON.stringify(service("web", { networking: { customDomains: { "old.example.com": null }, tcpProxies: { "5432": null } } })));
+    expect(declaredNull.networking).toEqual({
+      customDomains: { "old.example.com": null },
+      tcpProxies: { "5432": null },
+    });
+    expect("networking" in JSON.parse(JSON.stringify(service("web", {})))).toBe(false);
   });
 
   it("keeps deploy.preDeployTimeoutSeconds next to the preDeploy shorthand", () => {

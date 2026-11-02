@@ -484,7 +484,7 @@ function normalizeNetworking(config: ServiceConfigInput): ServiceNetworking | un
     : config.tcpProxies
       ? Object.fromEntries(config.tcpProxies.map(port => [port, {}]))
       : undefined;
-  // Keep the null removal entries written in `networking`; domains/tcp add entries on top.
+  // Keep the entries declared under `networking`, null ones included; domains/tcp entries go on top.
   const declared = config.networking;
   return pruneEmpty({
     ...declared,
