@@ -606,6 +606,19 @@ const media = bucket("media", {
 
 Bucket regions are immutable after creation. Changing region for an existing bucket is rejected with a diagnostic.
 
+A bucket exposes its S3 credentials as variable references, the same way databases do:
+
+```ts
+const api = service("api", {
+  env: {
+    AWS_ACCESS_KEY_ID: media.env.ACCESS_KEY_ID,
+    AWS_SECRET_ACCESS_KEY: media.env.SECRET_ACCESS_KEY,
+    AWS_ENDPOINT_URL_S3: media.env.ENDPOINT,
+    S3_BUCKET: media.env.BUCKET,
+  },
+});
+```
+
 ## Volumes
 
 ```ts
@@ -731,6 +744,12 @@ postgres("db").env.DATABASE_URL
 redis("redis").env.REDIS_URL
 mysql("mysql").env.MYSQL_URL
 mongo("mongo").env.MONGO_URL
+```
+
+Buckets expose the S3 credentials Railway provides (`BUCKET`, `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY`, `REGION`, `ENDPOINT`) plus `RAILWAY_BUCKET_ID`, `RAILWAY_BUCKET_NAME` and the project and environment names and IDs:
+
+```ts
+bucket("media").env.ACCESS_KEY_ID
 ```
 
 ## Notes on public vs internal shape
