@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, type ExecFileSyncOptionsWithStringEncoding } from "node:child_process";
 import process from "node:process";
 import { MINIMUM_IAC_CLI_MESSAGE } from "./compatibility.js";
 
@@ -8,10 +8,7 @@ export function assertMinimumIacCliVersion(): void {
   const executable = process.env._ || "railway";
   let output = "";
   try {
-    output = execFileSync(executable, ["--version"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
+    output = readCliVersionOutput(executable);
   } catch {
     throw new Error(MINIMUM_IAC_CLI_MESSAGE);
   }
@@ -19,6 +16,24 @@ export function assertMinimumIacCliVersion(): void {
   const version = output.match(/\b(\d+)\.(\d+)\.(\d+)\b/);
   if (!version || compareVersions(version.slice(1).map(Number), [5, 42, 1]) < 0) {
     throw new Error(MINIMUM_IAC_CLI_MESSAGE);
+  }
+}
+
+function readCliVersionOutput(executable: string): string {
+  const options: ExecFileSyncOptionsWithStringEncoding = {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  };
+
+  try {
+    return execFileSync(executable, ["--version"], options);
+  } catch (error) {
+    if (process.platform !== "win32") {
+      throw error;
+    }
+
+    const command = executable.includes(" ") ? `"${executable}"` : executable;
+    return execFileSync(command, ["--version"], { ...options, shell: true });
   }
 }
 
