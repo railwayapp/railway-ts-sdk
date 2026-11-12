@@ -38,14 +38,14 @@ jobs:
 
       - name: Build changelog
         id: changelog
-        uses: mikepenz/release-changelog-builder-action@c9dc8369bccbc41e0ac887f8fd674f5925d315f7 # v5.4.1
+        uses: mikepenz/release-changelog-builder-action@v5 # org allowlist permits @v5 only (resolves to c9dc836)
         with:
           configuration: ".github/changelog-configuration.json"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create draft GitHub release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        uses: softprops/action-gh-release@v2 # org allowlist permits @v2 only (resolves to 3bb1273)
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           draft: true
@@ -64,7 +64,7 @@ jobs:
         with:
           ref: ${{ inputs.tag || github.ref }}
 
-      - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
           cache: true
 
