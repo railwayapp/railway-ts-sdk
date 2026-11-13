@@ -73,6 +73,7 @@ export interface ServiceNode extends GraphResourceBase {
   clusterDisplay?: ServiceConfig["clusterDisplay"];
   tracing?: ServiceConfig["tracing"];
   cdn?: ServiceConfig["cdn"];
+  edgeRules?: ServiceConfig["edgeRules"];
 }
 
 export interface DatabaseNode extends Omit<ServiceNode, "address" | "id" | "type" | "kind"> {

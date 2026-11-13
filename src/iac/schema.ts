@@ -34,6 +34,7 @@ export type ServiceConfig = {
   } | null;
   tracing?: ServiceTracing | null;
   cdn?: ServiceCdn | null;
+  edgeRules?: EdgeRules | null;
 };
 
 /**
@@ -67,6 +68,64 @@ export type ServiceCdn = {
   /** What a successful deploy purges from the cache: `html` keeps immutable assets warm, `all` clears everything, `off` purges nothing. Defaults to `html`. */
   purgeOnDeploy?: "off" | "html" | "all" | null;
 };
+
+/**
+ * A rule's condition: one clause over a request attribute, or a combinator of
+ * conditions. Attributes and operators come from the edge's registry
+ * (`ipv4.src`, `http.host`, `http.path` and `http.header`, with `eq`, `neq`,
+ * `in`, `not_in`, `contains` and `matches`); the edge validates them when the
+ * change is committed.
+ */
+export type EdgeRuleExpr =
+  | { and: EdgeRuleExpr[] }
+  | { or: EdgeRuleExpr[] }
+  | { not: EdgeRuleExpr }
+  | {
+      /** Request attribute: `ipv4.src`, `http.host`, `http.path` or `http.header`. */
+      attr: string;
+      /** Comparison: `eq`, `neq`, `in`, `not_in`, `contains` or `matches` (glob), as the attribute allows. */
+      op: string;
+      /** The value, or the list of values for `in` and `not_in`. */
+      value: string | string[];
+      /** The header name; required for `http.header` only. */
+      key?: string | null;
+    };
+
+/** What the edge does when a rule's condition matches. */
+export type EdgeRuleAction = "block" | "allow" | "challenge" | "redirect" | "cache_override";
+
+export type EdgeRuleThen = {
+  action: EdgeRuleAction;
+  /** Action parameters: `status` and `body` for `block`; `status` and either `location` or `host` (plus `preserve_path`, `preserve_query`) for `redirect`; `ttl_seconds` or `bypass` for `cache_override`. */
+  params?: Record<string, unknown> | null;
+};
+
+/**
+ * One edge rule. Rules carry no id: the edge assigns one, and a staged change
+ * keeps a live rule's id when the priority matches. `enabled` and `mode` are
+ * omitted at their defaults.
+ */
+export type EdgeRule = {
+  description?: string | null;
+  /** Evaluation order, lowest first. Required and unique within the service. */
+  priority: number;
+  /** A disabled rule is kept but not evaluated. Defaults to true. */
+  enabled?: boolean | null;
+  /** Defaults to `enforce`, the only mode today. */
+  mode?: "enforce" | null;
+  if: EdgeRuleExpr;
+  then: EdgeRuleThen;
+};
+
+/**
+ * The service's edge rules in this environment, evaluated at the edge before
+ * a request reaches the service. Railway serialises the list sorted by
+ * `priority` and without default-valued fields, so a reordered or
+ * default-laden copy does not plan as drift. An omitted key, `[]` and `null`
+ * all mean no rules; the list is replaced as a whole and applies without a
+ * deploy.
+ */
+export type EdgeRules = EdgeRule[];
 
 /**
  * One weekly UTC window in which scheduled image auto-updates may run.
