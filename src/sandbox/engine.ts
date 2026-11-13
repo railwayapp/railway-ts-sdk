@@ -564,9 +564,11 @@ function creationLine(
   return parts.join(" ");
 }
 
-export function engineFromOptions(options: SandboxOptions = {}): SandboxEngine {
+export async function engineFromOptions(
+  options: SandboxOptions = {},
+): Promise<SandboxEngine> {
   const base = normalizeRailwayClientConfig(options);
-  const environmentId = resolveEnvironmentId(options.environmentId);
+  const environmentId = await resolveEnvironmentId(base, options.environmentId);
   return new SandboxEngine({ ...base, environmentId });
 }
 

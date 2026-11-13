@@ -15,9 +15,11 @@ export class RailwayError extends Error {
 export class RailwayAuthError extends RailwayError {
   readonly variable: string;
 
-  constructor(variable: string) {
+  constructor(variable: string, message?: string, options?: ErrorOptions) {
     super(
-      `Missing Railway credential. Set ${variable} or pass it explicitly.`,
+      message ??
+        `Missing Railway credential. Set ${variable} or pass it explicitly.`,
+      options,
     );
     this.variable = variable;
   }

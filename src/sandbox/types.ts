@@ -119,16 +119,28 @@ export interface SandboxCreationOptions {
 export interface CreateOptions
   extends RailwayClientConfig,
     SandboxCreationOptions {
+  /**
+   * Environment to work in. Defaults to `RAILWAY_ENVIRONMENT_ID`, then to the
+   * project token's environment; required with a bearer (account/workspace) token.
+   */
   environmentId?: string;
 }
 
 export type ForkOptions = SandboxCreationOptions;
 
 export interface ConnectOptions extends RailwayClientConfig {
+  /**
+   * Environment to work in. Defaults to `RAILWAY_ENVIRONMENT_ID`, then to the
+   * project token's environment; required with a bearer (account/workspace) token.
+   */
   environmentId?: string;
 }
 
 export interface ListOptions extends RailwayClientConfig {
+  /**
+   * Environment to work in. Defaults to `RAILWAY_ENVIRONMENT_ID`, then to the
+   * project token's environment; required with a bearer (account/workspace) token.
+   */
   environmentId?: string;
   first?: number;
   after?: string;
@@ -257,6 +269,10 @@ export interface FileWriteOptions {
 }
 
 export interface TemplateBuildOptions extends RailwayClientConfig {
+  /**
+   * Environment to work in. Defaults to `RAILWAY_ENVIRONMENT_ID`, then to the
+   * project token's environment; required with a bearer (account/workspace) token.
+   */
   environmentId?: string;
   /** Region the build sandbox runs in; sandboxes created from the template boot there. */
   region?: string;
@@ -264,5 +280,9 @@ export interface TemplateBuildOptions extends RailwayClientConfig {
 
 /** Connection/environment options for the checkpoint statics (`Sandbox.checkpoints` etc.). */
 export interface CheckpointOptions extends RailwayClientConfig {
+  /**
+   * Environment to work in. Defaults to `RAILWAY_ENVIRONMENT_ID`, then to the
+   * project token's environment; required with a bearer (account/workspace) token.
+   */
   environmentId?: string;
 }

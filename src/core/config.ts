@@ -1,5 +1,10 @@
-import { RailwayAuthError, RailwayConnectionError } from "./errors.js";
+import {
+  RailwayAuthError,
+  RailwayConnectionError,
+  RailwayGraphQLError,
+} from "./errors.js";
 import { createLogger, type Logger } from "./logger.js";
+import { resolveProjectTokenScope } from "./project-token.js";
 
 export const DEFAULT_RAILWAY_GRAPHQL_ENDPOINT =
   "https://backboard.railway.com/graphql/v2";
@@ -175,13 +180,56 @@ export function resolveWebSocketImpl(
   return impl;
 }
 
-export function resolveEnvironmentId(explicit?: string): string {
+/**
+ * Environment resolution order: explicit option → `RAILWAY_ENVIRONMENT_ID` →
+ * the environment the project token is bound to (one `projectToken` query per
+ * token, cached). Bearer tokens (account/workspace, `RAILWAY_API_TOKEN`) span
+ * environments, so without an explicit id they throw `RailwayAuthError`.
+ */
+export async function resolveEnvironmentId(
+  config: NormalizedRailwayClientConfig,
+  explicit?: string,
+): Promise<string> {
   const environmentId = firstNonEmpty(
     explicit,
     readEnv(RAILWAY_ENVIRONMENT_ENV),
   );
-  if (!environmentId) throw new RailwayAuthError(RAILWAY_ENVIRONMENT_ENV);
-  return environmentId;
+  if (environmentId) return environmentId;
+
+  if (config.authType !== "project-token") {
+    throw new RailwayAuthError(
+      RAILWAY_ENVIRONMENT_ENV,
+      "Could not resolve the sandbox environment. Account and workspace tokens span environments, so it cannot be inferred. Use one of:\n" +
+        `  • set ${RAILWAY_PROJECT_TOKEN_ENV} to a Railway project token (recommended — the environment is automatic)\n` +
+        '  • token: "...", authType: "project-token" to pass a project token explicitly\n' +
+        `  • environmentId: "..." or set ${RAILWAY_ENVIRONMENT_ENV}`,
+    );
+  }
+
+  try {
+    return (await resolveProjectTokenScope(config)).environmentId;
+  } catch (error) {
+    throw environmentLookupError(error);
+  }
+}
+
+function environmentLookupError(cause: unknown): Error {
+  const reason = cause instanceof Error ? cause.message : String(cause);
+  const prefix = "Could not resolve the sandbox environment from the project token";
+  if (cause instanceof RailwayGraphQLError) {
+    return new RailwayAuthError(
+      RAILWAY_ENVIRONMENT_ENV,
+      `${prefix}: Railway rejected the lookup (${reason}). ` +
+        `Check that the token is a valid, unrevoked project token, or set ${RAILWAY_ENVIRONMENT_ENV} / pass environmentId.`,
+      { cause },
+    );
+  }
+  return new RailwayConnectionError({
+    message:
+      `${prefix}: the lookup request failed (${reason}). ` +
+      `Retry, or set ${RAILWAY_ENVIRONMENT_ENV} / pass environmentId to skip the lookup.`,
+    cause,
+  });
 }
 
 /**
