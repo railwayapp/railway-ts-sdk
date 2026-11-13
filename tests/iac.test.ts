@@ -68,6 +68,16 @@ describe("Railway IaC authoring", () => {
     expect((definition.resources ?? []).flat().map(resource => resource.name)).toEqual(["a", "b", "c"]);
   });
 
+  it("carries the variables block through to the project definition", () => {
+    // The CLI reads `variables` as the project's variable policy and treats an
+    // omitted block as the default (managed, nothing ignored), so the SDK
+    // passes it through verbatim and leaves it out when unset.
+    const variables = { managed: true, ignore: ["RAILWAY_*", "web/SESSION_SECRET"] };
+    expect(project("app", { variables }).variables).toEqual(variables);
+    expect(project("app", { variables: { managed: false } }).variables).toEqual({ managed: false });
+    expect("variables" in project("app", {})).toBe(false);
+  });
+
   it("normalizes sources", () => {
     expect(github("railwayapp/starters").repo).toBe("railwayapp/starters");
     expect(github("railwayapp/starters").branch).toBe("main");

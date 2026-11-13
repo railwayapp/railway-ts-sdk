@@ -104,6 +104,7 @@ export default defineRailway((ctx) => {
 ```ts
 project(name: string, definition: {
   resources: ResourceNode[];
+  variables?: ProjectVariables;
 })
 ```
 
@@ -114,6 +115,31 @@ return project("acme", {
   resources: [web, worker, db, cache, media],
 });
 ```
+
+### Project variables
+
+`variables` sets which service variables the file owns. Leaving it out is the
+same as `{ managed: true }` with nothing ignored.
+
+```ts
+return project("acme", {
+  variables: { managed: true, ignore: ["RAILWAY_*", "web/SESSION_SECRET"] },
+  resources: [web, worker],
+});
+```
+
+- `managed: true` (the default): the file owns every variable on its services.
+  A variable that exists on Railway must be declared in `env`, marked
+  `preserve()`, or ignored.
+- `managed: false`: IaC never reads or writes variables. Use it when secrets
+  live in an external manager. Declaring `env` on a service is then an error.
+- `ignore`: patterns for variables to leave alone on Railway while managed.
+  `KEY` matches a key on any service and `service/KEY` on one service; `*`
+  matches any run of characters. A pattern that names an unknown service is an
+  error, and one that matches no variable is a warning.
+
+`railway config pull --variables=managed|unmanaged` writes this block. The
+CLI validates it and reports the policy in `railway config plan`.
 
 ## Sources
 
