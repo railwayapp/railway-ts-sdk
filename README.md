@@ -603,7 +603,8 @@ All errors extend `RailwayError`:
 
 ## Requirements
 
-Node.js 22+ (for `await using`). Works in any runtime with a global `fetch`; pass a
+Node.js 22+. Native `await using` needs Node.js 24+, or TypeScript 5.2+ compiling it
+for Node.js 22. Works in any runtime with a global `fetch`; pass a
 `fetch` implementation explicitly where there is none.
 
 ## License
