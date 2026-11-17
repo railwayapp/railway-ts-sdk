@@ -149,6 +149,32 @@ describe("Railway IaC authoring", () => {
     });
   });
 
+  it("exposes bucket credentials as variable references", () => {
+    const files = bucket("Files", { region: "ams" });
+    const api = service("api", {
+      env: {
+        AWS_ACCESS_KEY_ID: files.env.ACCESS_KEY_ID,
+        AWS_SECRET_ACCESS_KEY: files.env.SECRET_ACCESS_KEY,
+        AWS_ENDPOINT_URL_S3: files.env.ENDPOINT,
+        S3_BUCKET: files.env.BUCKET,
+      },
+    });
+
+    expect(api.variables).toEqual({
+      AWS_ACCESS_KEY_ID: { type: "reference", resource: "bucket.Files", output: "ACCESS_KEY_ID" },
+      AWS_SECRET_ACCESS_KEY: { type: "reference", resource: "bucket.Files", output: "SECRET_ACCESS_KEY" },
+      AWS_ENDPOINT_URL_S3: { type: "reference", resource: "bucket.Files", output: "ENDPOINT" },
+      S3_BUCKET: { type: "reference", resource: "bucket.Files", output: "BUCKET" },
+    });
+    // env is not enumerable, so the serialized bucket node is unchanged.
+    expect(JSON.parse(JSON.stringify(files))).toEqual({
+      address: "bucket.Files",
+      type: "bucket",
+      name: "Files",
+      config: { region: "ams" },
+    });
+  });
+
   it("resolves shared variables from the context", () => {
     const ctx = createRailwayContext({ environment: "production" });
 

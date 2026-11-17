@@ -132,11 +132,26 @@ export type PostgresVariable = RailwayProvidedVariable | "DATABASE_PUBLIC_URL" |
 export type RedisVariable = RailwayProvidedVariable | "REDIS_PASSWORD" | "REDIS_PUBLIC_URL" | "REDIS_URL" | "REDISHOST" | "REDISPASSWORD" | "REDISPORT" | "REDISUSER";
 export type MongoVariable = RailwayProvidedVariable | "MONGO_INITDB_ROOT_PASSWORD" | "MONGO_INITDB_ROOT_USERNAME" | "MONGO_PUBLIC_URL" | "MONGO_URL" | "MONGOHOST" | "MONGOPASSWORD" | "MONGOPORT" | "MONGOUSER";
 export type MySqlVariable = RailwayProvidedVariable | "MYSQL_DATABASE" | "MYSQL_PUBLIC_URL" | "MYSQL_ROOT_PASSWORD" | "MYSQL_URL" | "MYSQLDATABASE" | "MYSQLHOST" | "MYSQLPASSWORD" | "MYSQLPORT" | "MYSQLUSER";
+// Variables Railway provides on a storage bucket for S3 clients.
+// https://docs.railway.com/storage-buckets#railway-provided-variables
+export type BucketVariable =
+  | "BUCKET"
+  | "SECRET_ACCESS_KEY"
+  | "ACCESS_KEY_ID"
+  | "REGION"
+  | "ENDPOINT"
+  | "RAILWAY_PROJECT_NAME"
+  | "RAILWAY_PROJECT_ID"
+  | "RAILWAY_ENVIRONMENT_NAME"
+  | "RAILWAY_ENVIRONMENT_ID"
+  | "RAILWAY_BUCKET_NAME"
+  | "RAILWAY_BUCKET_ID";
 export type DatabaseVariable<E extends DatabaseNode["engine"]> = E extends "postgres" ? PostgresVariable : E extends "redis" ? RedisVariable : E extends "mongo" ? MongoVariable : E extends "mysql" ? MySqlVariable : RailwayProvidedVariable | string;
 export type ServiceVariableRef<K extends string = RailwayProvidedVariable | string> = { readonly [P in K]: VariableValue };
 export type SharedVariableRef = { readonly [name: string]: VariableValue } & { readonly [name: string]: any };
 export type ReferencableServiceNode<K extends string = RailwayProvidedVariable | string> = ServiceNode & { readonly env: ServiceVariableRef<K> };
 export type ReferencableDatabaseNode<E extends DatabaseNode["engine"]> = DatabaseNode & { readonly env: ServiceVariableRef<DatabaseVariable<E>> };
+export type ReferencableBucketNode = BucketNode & { readonly env: ServiceVariableRef<BucketVariable> };
 
 export function github(repo: string, options: Omit<SourceConfig, "type" | "repo" | "image" | "autoUpdates"> = {}): SourceConfig {
   if ((options as { autoUpdates?: unknown }).autoUpdates !== undefined) {
@@ -373,8 +388,9 @@ export function volume(name: string, config: VolumeConfig = {}): VolumeNode {
   return { address: resourceAddress("volume", name) as `volume.${string}`, type: "volume", name, config };
 }
 
-export function bucket(name: string, config: BucketConfig = {}): BucketNode {
-  return { address: resourceAddress("bucket", name) as `bucket.${string}`, type: "bucket", name, config };
+export function bucket(name: string, config: BucketConfig = {}): ReferencableBucketNode {
+  const node: BucketNode = { address: resourceAddress("bucket", name) as `bucket.${string}`, type: "bucket", name, config };
+  return withVariableRefs(node) as ReferencableBucketNode;
 }
 
 export function group(name: string, resources: GroupableResourceInput[], options?: Omit<GroupNode, "address" | "type" | "name">): GroupableResourceNode[];
@@ -425,7 +441,7 @@ function createVariableRefAccessor(resource: ResourceNode): ServiceVariableRef<s
   });
 }
 
-function withVariableRefs<T extends ServiceNode | DatabaseNode>(node: T): T {
+function withVariableRefs<T extends ServiceNode | DatabaseNode | BucketNode>(node: T): T {
   Object.defineProperty(node, "env", { enumerable: false, value: createVariableRefAccessor(node) });
   return node;
 }
