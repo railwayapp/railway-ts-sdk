@@ -108,6 +108,7 @@ export interface IntentServiceConfig {
   clusterDisplay?: ServiceConfig["clusterDisplay"];
   tracing?: ServiceConfig["tracing"];
   cdn?: ServiceConfig["cdn"];
+  edgeRules?: ServiceConfig["edgeRules"];
 }
 
 export type ServiceConfigInput = IntentServiceConfig;
@@ -225,6 +226,7 @@ export function service<const Env extends Record<string, string | VariableConfig
     ...(config.clusterDisplay ? { clusterDisplay: config.clusterDisplay } : {}),
     ...(config.tracing ? { tracing: config.tracing } : {}),
     ...(config.cdn ? { cdn: config.cdn } : {}),
+    ...(config.edgeRules ? { edgeRules: config.edgeRules } : {}),
   }) as ServiceNode;
   return withVariableRefs(node) as ReferencableServiceNode<RailwayProvidedVariable | Extract<keyof Env, string>>;
 }

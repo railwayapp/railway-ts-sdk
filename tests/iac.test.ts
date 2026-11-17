@@ -26,6 +26,7 @@ import {
   template,
   validateGraph,
   volume,
+  type EdgeRules,
   type RailwayGraph,
 } from "../src/iac/index.js";
 
@@ -252,6 +253,30 @@ describe("Railway IaC authoring", () => {
     expect(service("web", { cdn: { enabled: false } }).cdn).toEqual({ enabled: false });
     expect(fn("worker", { cdn: { enabled: true } }).cdn).toEqual({ enabled: true });
     expect("cdn" in service("web")).toBe(false);
+  });
+
+  it("carries the edgeRules list through to the service node", () => {
+    // The CLI compiles `edgeRules` into `services[id].edgeRules` and backboard
+    // canonicalises the list (sorted by priority, defaults dropped), so the
+    // SDK passes it through verbatim rather than normalising it.
+    const edgeRules: EdgeRules = [
+      {
+        description: "block the scanner",
+        priority: 10,
+        enabled: false,
+        mode: "enforce",
+        if: { and: [{ attr: "http.path", op: "matches", value: "/admin/*" }, { not: { attr: "ipv4.src", op: "in", value: ["10.0.0.0/8"] } }] },
+        then: { action: "block", params: { status: 403 } },
+      },
+      {
+        priority: 0,
+        if: { attr: "http.header", key: "x-canary", op: "eq", value: "1" },
+        then: { action: "cache_override", params: { bypass: true } },
+      },
+    ];
+    expect(service("web", { edgeRules }).edgeRules).toEqual(edgeRules);
+    expect(fn("worker", { edgeRules }).edgeRules).toEqual(edgeRules);
+    expect("edgeRules" in service("web")).toBe(false);
   });
 
   describe("fn()", () => {
