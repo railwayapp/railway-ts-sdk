@@ -112,6 +112,21 @@ export interface SandboxCreationOptions {
    * them, since a different region is rejected.
    */
   region?: string;
+  /**
+   * What to prepare for the first exec while the sandbox boots.
+   *
+   * - `"token"` (default): mint its shell token, saving a round trip.
+   * - `"socket"` (or `true`): also open its exec socket once the sandbox is
+   *   RUNNING, so the first `exec()` only sends the command. The socket is
+   *   single use and closes after 2s unused or on `destroy()`; in Node an
+   *   unused one can delay process exit by that window, and opening it is
+   *   recorded as an exec session in the workspace audit log even if no
+   *   command runs.
+   * - `false`: neither.
+   *
+   * Without the option, `RAILWAY_SANDBOX_PREWARM` (`off`, `token`, `socket`) decides.
+   */
+  prewarm?: boolean | "token" | "socket";
   /** Runtime env baked into the sandbox, available to every command. Values may use Railway references (e.g. `${{shared.FOO}}`). */
   env?: Record<string, string>;
 }

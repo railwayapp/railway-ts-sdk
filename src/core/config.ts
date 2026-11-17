@@ -15,6 +15,7 @@ const RAILWAY_ENVIRONMENT_ENV = "RAILWAY_ENVIRONMENT_ID";
 const RAILWAY_ENDPOINT_ENV = "RAILWAY_GRAPHQL_ENDPOINT";
 const RAILWAY_TCP_PROXY_WS_ENV = "RAILWAY_TCP_PROXY_WS_ENDPOINT";
 const RAILWAY_VERBOSE_ENV = "RAILWAY_VERBOSE";
+const RAILWAY_SANDBOX_PREWARM_ENV = "RAILWAY_SANDBOX_PREWARM";
 
 const TCP_PROXY_WS_PORT = "2226";
 const TCP_PROXY_WS_PATH = "/ws/exec";
@@ -239,6 +240,26 @@ function environmentLookupError(cause: unknown): Error {
 function readEnv(name: string): string | undefined {
   if (typeof process === "undefined") return undefined;
   return process.env?.[name];
+}
+
+/** What `create()` prepares for the first exec while the sandbox boots. */
+export type PrewarmMode = "off" | "token" | "socket";
+
+/**
+ * Resolves the `prewarm` option: `"token"` (the default) mints the first exec's
+ * shell token during create; `"socket"` (or `true`) also opens its exec socket
+ * once the sandbox is RUNNING; `false` does neither. Without the option,
+ * `RAILWAY_SANDBOX_PREWARM` decides: `0`/`false`/`no`/`off`, `token`, or
+ * `socket`/`1`/`true`.
+ */
+export function resolvePrewarm(explicit: boolean | "token" | "socket" | undefined): PrewarmMode {
+  if (explicit === false) return "off";
+  if (explicit === true || explicit === "socket") return "socket";
+  if (explicit === "token") return "token";
+  const value = readEnv(RAILWAY_SANDBOX_PREWARM_ENV)?.trim().toLowerCase();
+  if (value === "0" || value === "false" || value === "no" || value === "off") return "off";
+  if (value === "socket" || value === "1" || value === "true" || value === "yes") return "socket";
+  return "token";
 }
 
 /** Treats `1`/`true`/`yes` as on so `RAILWAY_VERBOSE=0` doesn't accidentally enable. */

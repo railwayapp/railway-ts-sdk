@@ -91,6 +91,24 @@ await handle.kill(); // terminate it — SIGTERM by default (pass "KILL" to forc
 const result = await handle; // same ExecResult shape as above
 ```
 
+### Fast first command
+
+`create()` mints the sandbox's shell token while it boots, so the first `exec()`
+skips that round trip, and every exec reuses the token while it is valid.
+`create()` resolves once the sandbox reports `RUNNING`, so `fork()`,
+`checkpoint()` and `execHttp()` work straight after it.
+
+Pass `prewarm: "socket"` to also open the first exec's connection as soon as the
+sandbox is running, so that exec only sends its command. Opening it is recorded
+as an exec session in the workspace audit log even if no command follows, and
+an unused one closes after 2 seconds (in Node it can delay process exit by that
+long). `prewarm: false` turns both off. `RAILWAY_SANDBOX_PREWARM` (`off`,
+`token`, `socket`) sets the default:
+
+```ts
+const sandbox = await Sandbox.create({ prewarm: "socket" });
+```
+
 ### Stdin and streaming
 
 Pass `stdin: true` to write to a command. Await each write for backpressure and
@@ -546,6 +564,7 @@ then an environment variable, then a default. Pass explicit values to override.
 | `fetch` | n/a | `globalThis.fetch` |
 | `webSocketImpl` | n/a | `globalThis.WebSocket` (pass the `ws` package where none exists) |
 | `verbose` | `RAILWAY_VERBOSE` | `false` |
+| `prewarm` (on `create`/`fork`) | `RAILWAY_SANDBOX_PREWARM` | `"token"` |
 
 A token read from `RAILWAY_TOKEN` is treated as a [project token](https://docs.railway.com/integrations/api#project-token)
 (`authType: "project-token"`), which scopes access to one project/environment and
