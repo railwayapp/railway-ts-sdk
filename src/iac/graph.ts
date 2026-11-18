@@ -123,12 +123,24 @@ export type GroupableResourceNode = ResourceNode;
 export type GroupableResourceInput = GroupableResourceNode | GroupableResourceNode[];
 export type ProjectResourceInput = ResourceNode | ResourceNode[];
 
+/**
+ * Which service variables the file owns. Omitting the block is the default:
+ * managed, nothing ignored.
+ */
+export interface ProjectVariables {
+  /** `true` (the default): the file owns every variable on its services, so a variable on Railway must be declared, marked `preserve()`, or ignored. `false`: IaC never reads or writes variables, and declaring `env` on a service is an error. */
+  managed?: boolean;
+  /** Variables left alone on Railway while managed: `KEY` matches a key on any service, `service/KEY` on one service, and `*` matches any run of characters, as in `RAILWAY_*`. */
+  ignore?: string[];
+}
+
 export interface ProjectDefinition {
   name: string;
   environments?: string[];
   resources?: ProjectResourceInput[];
   /** @deprecated Use resources instead. */
   services?: ProjectResourceInput[];
+  variables?: ProjectVariables;
 }
 
 export interface GraphCompileOptions {
