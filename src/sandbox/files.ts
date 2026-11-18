@@ -14,7 +14,8 @@ import {
   type RailwayGenerateShellTokenMutationVariables,
 } from "../generated/graphql.js";
 import { SandboxFileNotFoundError, SandboxFilesError } from "./errors.js";
-import { startExec } from "./exec.js";
+import type { ExecHandle } from "./exec.js";
+import type { ExecOptions } from "./types.js";
 import {
   canRetryWrite,
   isNotFound,
@@ -36,6 +37,8 @@ export interface FilesContext {
   config: NormalizedRailwayClientConfig;
   environmentId: string;
   sandboxId: string;
+  /** Runs a command in the sandbox through the engine's exec path. */
+  exec(command: string, options: ExecOptions): ExecHandle;
 }
 
 /** Read scope for inspection ops; the rw scope for anything that mutates. */
@@ -261,8 +264,7 @@ export class SandboxFiles {
   /** Sets `path`'s permissions with a chmod run through the exec primitive. */
   async #applyMode(path: string, mode: number): Promise<void> {
     const octal = mode.toString(8).padStart(3, "0");
-    const result = await startExec(
-      this.#context,
+    const result = await this.#context.exec(
       `chmod ${octal} -- ${shellQuote(path)}`,
       { timeoutSec: 30 },
     );

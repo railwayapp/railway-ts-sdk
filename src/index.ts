@@ -10,6 +10,7 @@ export {
   RailwayConnectionError,
   RailwayError,
   RailwayGraphQLError,
+  RailwayRateLimitError,
   type RailwayGraphQLErrorItem,
   StaleEnvironmentError,
   STALE_ENVIRONMENT_BASE_CODE,

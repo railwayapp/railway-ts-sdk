@@ -62,16 +62,49 @@ export class RailwayGraphQLError extends RailwayError {
   readonly status: number;
   readonly errors: readonly RailwayGraphQLErrorItem[];
   readonly responseBody: unknown;
+  /** From the response's `Retry-After` (rate limits, 503s), when it sent one. */
+  readonly retryAfterMs: number | undefined;
 
   constructor(args: {
     message: string;
     status: number;
     errors?: readonly RailwayGraphQLErrorItem[];
     responseBody?: unknown;
+    retryAfterMs?: number;
   }) {
     super(args.message);
     this.status = args.status;
     this.errors = args.errors ?? [];
     this.responseBody = args.responseBody;
+    this.retryAfterMs = args.retryAfterMs;
+  }
+}
+
+/**
+ * The token ran out of its hourly API budget for longer than an operation can
+ * wait. Nothing is lost: a sandbox that was being waited on keeps booting, and
+ * `resourceId` names it so it can be reached (`Sandbox.connect`) once the limit
+ * resets. A `RailwayGraphQLError` with status 429, so code that already
+ * catches rate limits that way keeps working.
+ */
+export class RailwayRateLimitError extends RailwayGraphQLError {
+  declare readonly retryAfterMs: number;
+  readonly resourceId: string | undefined;
+
+  constructor(args: {
+    message: string;
+    retryAfterMs: number;
+    resourceId?: string;
+    cause?: RailwayGraphQLError;
+  }) {
+    super({
+      message: args.message,
+      status: 429,
+      errors: args.cause?.errors ?? [],
+      responseBody: args.cause?.responseBody,
+      retryAfterMs: args.retryAfterMs,
+    });
+    if (args.cause !== undefined) (this as { cause?: unknown }).cause = args.cause;
+    this.resourceId = args.resourceId;
   }
 }

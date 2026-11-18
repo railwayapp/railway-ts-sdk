@@ -8,15 +8,12 @@ import {
   connectExecWs,
   shouldRetryBeforeStart,
   type ExecWsConnection,
+  type ExecWsSocket,
 } from "../core/exec-ws-client.js";
-import { requestGraphQL } from "../core/graphql-client.js";
 import { ExecInterruptedError } from "./errors.js";
+import type { Prewarm } from "./prewarm.js";
 import { loginShellCommand } from "./shell.js";
-import {
-  RailwayGenerateShellTokenDocument,
-  type RailwayGenerateShellTokenMutation,
-  type RailwayGenerateShellTokenMutationVariables,
-} from "../generated/graphql.js";
+import { abortable } from "./shell-token.js";
 import type {
   ExecOptions,
   ExecResult,
@@ -32,6 +29,12 @@ const KILL_GRACE_MS = 5_000;
 const TERMINATION_CONFIRM_MS = KILL_GRACE_MS * 2;
 /** Pause before the single reconnect after a failure that sent no command. */
 const CONNECT_RETRY_DELAY_MS = 250;
+/**
+ * Longest an exec waits on the sandbox's prewarmed socket before abandoning it
+ * and connecting itself. The proxy holds a booting sandbox's session for at
+ * most ~30s; nothing was sent on the socket, so falling back is safe.
+ */
+export const PREWARM_ADOPT_TIMEOUT_MS = 35_000;
 
 /**
  * Reattach carries a durable session id, not a command, but the `/ws/exec`
@@ -147,6 +150,10 @@ export interface ExecContext {
   config: NormalizedRailwayClientConfig;
   environmentId: string;
   sandboxId: string;
+  /** A `shell`-scoped token for this sandbox; reused unless `fresh`. */
+  shellToken(fresh: boolean, signal: AbortSignal | undefined): Promise<string>;
+  /** Claims the sandbox's prewarmed exec socket, if one is open or opening. */
+  takePrewarm(): Prewarm | undefined;
 }
 
 interface ExecControl {
@@ -338,29 +345,17 @@ async function runExec(
     onSessionName(name);
   };
 
-  const input: RailwayGenerateShellTokenMutationVariables["input"] = {
-    environmentId: context.environmentId,
-    instanceId: context.sandboxId,
-    kind: "sandbox",
-    scope: "shell",
-  };
-  const mintShellToken = async () => {
-    let tokenData: RailwayGenerateShellTokenMutation;
+  // The first attempt reuses the sandbox's token; reconnects mint a fresh one.
+  const shellToken = async (fresh: boolean) => {
     try {
-      tokenData = await requestGraphQL<
-        RailwayGenerateShellTokenMutation,
-        RailwayGenerateShellTokenMutationVariables
-      >(context.config, RailwayGenerateShellTokenDocument, { input }, options.signal);
+      return await context.shellToken(fresh, options.signal);
     } catch (error) {
       // A custom fetch may reject an aborted request with its own AbortError;
       // callers are promised the signal's reason.
       options.signal?.throwIfAborted();
       throw error;
     }
-    options.signal?.throwIfAborted();
-    return tokenData.generateShellToken;
   };
-  const jwt = await mintShellToken();
 
   // Unbounded unless the caller asks for a cap, as in 3.12. Long-running or
   // streamed commands should pass `captureOutput: false` instead.
@@ -533,7 +528,7 @@ async function runExec(
   // client's three, because each one mints a token and may wait out routing.
   const connectWithRetry = async () => {
     try {
-      return await connectExecWs({ config: context.config, jwt, ...init, handlers });
+      return await connectExecWs({ config: context.config, jwt: await shellToken(false), ...init, handlers });
     } catch (error) {
       if (!shouldRetryBeforeStart(error)) throw error;
       options.signal?.throwIfAborted();
@@ -543,16 +538,60 @@ async function runExec(
       await abortableDelay(CONNECT_RETRY_DELAY_MS, options.signal);
       return connectExecWs({
         config: context.config,
-        jwt: await mintShellToken(),
+        jwt: await shellToken(true),
         ...init,
         handlers,
       });
     }
   };
 
+  // The sandbox's prewarmed socket has already been routed and negotiated (or
+  // is being), so this exec only has to send its command. A socket that cannot
+  // be used ran nothing, and the exec connects as usual.
+  const adoptPrewarm = async (): Promise<ExecWsConnection | undefined> => {
+    const prewarm = context.takePrewarm();
+    if (!prewarm) return undefined;
+    let socket: ExecWsSocket;
+    let adoptTimer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const timedOut = new Promise<never>((_, reject) => {
+        adoptTimer = setTimeout(
+          () => reject(new RailwayConnectionError({
+            message: `prewarmed socket did not negotiate within ${PREWARM_ADOPT_TIMEOUT_MS / 1000}s`,
+          })),
+          PREWARM_ADOPT_TIMEOUT_MS,
+        );
+      });
+      socket = await abortable(Promise.race([prewarm.take(), timedOut]), options.signal);
+    } catch (error) {
+      // Nothing was sent on it; close it rather than leave it negotiating.
+      prewarm.abandon();
+      options.signal?.throwIfAborted();
+      context.config.log(
+        `exec: prewarmed socket unavailable (${(error as Error).message}); connecting in sandbox=${context.sandboxId}`,
+      );
+      return undefined;
+    } finally {
+      if (adoptTimer !== undefined) clearTimeout(adoptTimer);
+    }
+    if (!socket.usable) return undefined;
+    // An abort that landed while adoption resolved must not send the command.
+    if (options.signal?.aborted) {
+      socket.close();
+      throw options.signal.reason;
+    }
+    const { signal: _signal, ...execInit } = init;
+    try {
+      return socket.start(execInit, handlers);
+    } catch {
+      socket.close();
+      return undefined;
+    }
+  };
+
   let connection: ExecWsConnection;
   try {
-    connection = await connectWithRetry();
+    connection = (await adoptPrewarm()) ?? (await connectWithRetry());
   } catch (error) {
     if (!(error instanceof ExecControlUnsupportedError)) throw error;
     // The proxy predates exec control and refused the bare hello, so nothing ran.
@@ -571,7 +610,7 @@ async function runExec(
     // One legacy attempt; no further retry stacks on the fallback.
     connection = await connectExecWs({
       config: context.config,
-      jwt: await mintShellToken(),
+      jwt: await shellToken(true),
       ...init,
       legacy: true,
       handlers,

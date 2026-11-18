@@ -48,6 +48,7 @@ export async function requestGraphQL<TResult, TVariables>(
     config.log(
       `← ${operation} failed http=${response.status} errors=${errors.length} in ${elapsed}ms`,
     );
+    const retryAfterMs = parseRetryAfter(response.headers?.get?.("retry-after") ?? null);
     throw new RailwayGraphQLError({
       message:
         errors[0]?.message ??
@@ -55,6 +56,7 @@ export async function requestGraphQL<TResult, TVariables>(
       status: response.status,
       errors,
       responseBody: body,
+      ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
     });
   }
 
@@ -93,4 +95,13 @@ async function parseGraphQLResponse<TResult>(
   } catch {
     return undefined;
   }
+}
+
+/** `Retry-After` as delay-seconds or an HTTP date, in ms; undefined when absent or unreadable. */
+function parseRetryAfter(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number(value.trim());
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  const at = Date.parse(value);
+  return Number.isNaN(at) ? undefined : Math.max(0, at - Date.now());
 }

@@ -1,9 +1,12 @@
 import {
   normalizeRailwayClientConfig,
   resolveEnvironmentId,
+  resolvePrewarm,
   type NormalizedRailwayClientConfig,
   type RailwayClientConfig,
 } from "../core/config.js";
+import { RailwayConnectionError, RailwayGraphQLError, RailwayRateLimitError } from "../core/errors.js";
+import { openExecWs } from "../core/exec-ws-client.js";
 import { requestGraphQL } from "../core/graphql-client.js";
 import {
   RailwaySandboxCreateDocument,
@@ -19,6 +22,9 @@ import {
   RailwaySandboxCheckpointsDocument,
   RailwaySandboxTemplateBuildDocument,
   RailwaySandboxTemplateBuildStatusDocument,
+  RailwayGenerateShellTokenDocument,
+  type RailwayGenerateShellTokenMutation,
+  type RailwayGenerateShellTokenMutationVariables,
   type RailwaySandboxCheckpointCreateMutation,
   type RailwaySandboxCheckpointCreateMutationVariables,
   type RailwaySandboxCheckpointDeleteMutation,
@@ -55,6 +61,8 @@ import {
   SandboxTimeoutError,
 } from "./errors.js";
 import { startExec, type ExecContext, type ExecHandle } from "./exec.js";
+import { Prewarm } from "./prewarm.js";
+import { ShellTokenCache } from "./shell-token.js";
 import { createSandboxFiles, type SandboxFiles } from "./files.js";
 import type {
   CompiledTemplate,
@@ -79,6 +87,35 @@ const READINESS_TIMEOUT_MS = 5 * 60_000;
 const MAX_SESSION_PAGES = 20;
 const POLL_INITIAL_DELAY_MS = 500;
 const POLL_MAX_DELAY_MS = 5_000;
+/**
+ * A sandbox normally reaches RUNNING about two seconds after the create
+ * mutation. Backing off from the first poll put the checks at ~0.5s, ~1.5s,
+ * ~3.5s and ~7.5s, so a boot that missed one check by a few milliseconds was
+ * reported seconds late. Poll at a fixed interval while a normal boot is still
+ * plausible and back off only after that. Every poll counts against the
+ * token's hourly API limit (as low as 100/hour), so the interval stays coarse.
+ */
+const SANDBOX_POLL_FAST_DELAY_MS = 500;
+const SANDBOX_POLL_FAST_WINDOW_MS = 6_000;
+/** First backed-off delay after the fixed-interval window. */
+const SANDBOX_POLL_BACKOFF_START_MS = 1_000;
+/**
+ * Longest `Retry-After` a readiness poll waits out. A token past its hourly
+ * budget is told to wait many minutes; polling blindly through that only ends
+ * in a timeout that misreports the state, so a longer wait fails at once.
+ */
+const POLL_MAX_RETRY_AFTER_MS = 60_000;
+/** The exec bridge's token scope. */
+const SHELL_SCOPE = "shell";
+
+/** A poll failure worth polling through: rate limited, a server error, or the network. */
+function isTransientPollError(error: unknown): boolean {
+  if (error instanceof RailwayGraphQLError) {
+    return error.status === 429 || error.status >= 500;
+  }
+  // fetch rejects a network failure with a TypeError; aborts are DOMExceptions.
+  return error instanceof TypeError;
+}
 
 const sleep = (ms: number): Promise<void> =>
   new Promise(resolve => setTimeout(resolve, ms));
@@ -96,6 +133,8 @@ export interface SandboxOptions extends RailwayClientConfig {
  */
 export class SandboxEngine {
   readonly #config: SandboxEngineConfig;
+  readonly #tokens = new Map<string, ShellTokenCache>();
+  readonly #prewarms = new Map<string, Prewarm>();
 
   constructor(config: SandboxEngineConfig) {
     this.#config = config;
@@ -162,11 +201,80 @@ export class SandboxEngine {
       RailwaySandboxCreateMutationVariables
     >(this.#config, RailwaySandboxCreateDocument, { input });
 
-    this.#config.log(
-      `created sandbox ${data.sandboxCreate.id} status=${data.sandboxCreate.status}`,
-    );
+    const created = data.sandboxCreate;
+    this.#config.log(`created sandbox ${created.id} status=${created.status}`);
 
-    return this.#waitForRunning(data.sandboxCreate);
+    const prewarm = resolvePrewarm(options.prewarm);
+    if (prewarm === "off" || isSandboxTerminal(created.status)) {
+      return this.#waitForRunning(created);
+    }
+
+    // Mint the first exec's shell token while the sandbox boots, so that exec
+    // skips the round trip. Minting is not an access and leaves no audit trace.
+    const id = created.id;
+    void this.#shellTokens(id).get(SHELL_SCOPE).catch(() => {});
+    try {
+      const info = await this.#waitForRunning(created);
+      // Opt-in: open the first exec's socket now that the sandbox routes.
+      // Its session is authorized (and audited as an exec) when it opens.
+      if (prewarm === "socket") this.#prewarm(id);
+      return info;
+    } catch (error) {
+      this.#tokens.delete(id);
+      throw error;
+    }
+  }
+
+  #shellTokens(sandboxId: string): ShellTokenCache {
+    let cache = this.#tokens.get(sandboxId);
+    if (!cache) {
+      cache = new ShellTokenCache(async (scope, signal) => {
+        const input: RailwayGenerateShellTokenMutationVariables["input"] = {
+          environmentId: this.#config.environmentId,
+          instanceId: sandboxId,
+          kind: "sandbox",
+          scope,
+        };
+        const data = await requestGraphQL<
+          RailwayGenerateShellTokenMutation,
+          RailwayGenerateShellTokenMutationVariables
+        >(this.#config, RailwayGenerateShellTokenDocument, { input }, signal);
+        return data.generateShellToken;
+      });
+      this.#tokens.set(sandboxId, cache);
+    }
+    return cache;
+  }
+
+  /** Opens the sandbox's single-use exec socket ahead of its first exec. */
+  #prewarm(sandboxId: string): Prewarm {
+    this.#discardPrewarm(sandboxId);
+    const prewarm: Prewarm = new Prewarm({
+      jwt: this.#shellTokens(sandboxId).get(SHELL_SCOPE),
+      open: jwt => openExecWs({ config: this.#config, jwt }),
+      onIdleClose: () => {
+        if (this.#prewarms.get(sandboxId) === prewarm) this.#prewarms.delete(sandboxId);
+        this.#config.log(`exec prewarm for sandbox ${sandboxId} closed unused`);
+      },
+    });
+    this.#prewarms.set(sandboxId, prewarm);
+    prewarm.ready.catch(error => {
+      if (this.#prewarms.get(sandboxId) === prewarm) this.#prewarms.delete(sandboxId);
+      this.#config.log(`exec prewarm for sandbox ${sandboxId} unavailable: ${(error as Error).message}`);
+    });
+    return prewarm;
+  }
+
+  #discardPrewarm(sandboxId: string): void {
+    this.#prewarms.get(sandboxId)?.close();
+    this.#prewarms.delete(sandboxId);
+  }
+
+  /** The prewarmed socket for one exec to adopt, if one is open or opening. */
+  #takePrewarm(sandboxId: string): Prewarm | undefined {
+    const prewarm = this.#prewarms.get(sandboxId);
+    this.#prewarms.delete(sandboxId);
+    return prewarm?.live ? prewarm : undefined;
   }
 
   async buildTemplate(
@@ -346,6 +454,8 @@ export class SandboxEngine {
 
     return this.#pollUntilReady({
       poll: () => this.getTemplateBuild(build.id),
+      label: `template build ${build.id}`,
+      resourceId: build.id,
       isReady: build => build.status === "READY",
       isTerminal: build => build.status === "FAILED",
       describe: build => `template build ${build.id} status=${build.status}`,
@@ -374,6 +484,13 @@ export class SandboxEngine {
 
     return this.#pollUntilReady({
       poll: () => this.#getOrThrow(created.id),
+      label: `sandbox ${created.id}`,
+      resourceId: created.id,
+      fast: {
+        delayMs: SANDBOX_POLL_FAST_DELAY_MS,
+        windowMs: SANDBOX_POLL_FAST_WINDOW_MS,
+        backoffStartMs: SANDBOX_POLL_BACKOFF_START_MS,
+      },
       isReady: info => info.status === "RUNNING",
       isTerminal: info => isSandboxTerminal(info.status),
       describe: info => `sandbox ${info.id} status=${info.status}`,
@@ -406,14 +523,50 @@ export class SandboxEngine {
     onTerminal: (value: T) => never;
     onTimeout: (value: T) => never;
     describe?: (value: T) => string;
+    /** Poll every `delayMs` for the first `windowMs`, then back off from `backoffStartMs`. */
+    fast?: { delayMs: number; windowMs: number; backoffStartMs: number };
+    /** What is being waited on, for errors ("sandbox <id>"). */
+    label: string;
+    resourceId: string;
   }): Promise<T> {
     const start = Date.now();
     const describe = args.describe;
-    let delay = POLL_INITIAL_DELAY_MS;
-    let last: T;
+    const fast = args.fast;
+    let delay = fast ? fast.delayMs : POLL_INITIAL_DELAY_MS;
+    // The delay the next backed-off poll waits.
+    let backoff = fast
+      ? fast.backoffStartMs
+      : Math.min(POLL_INITIAL_DELAY_MS * 2, POLL_MAX_DELAY_MS);
+    let last: T | undefined;
     do {
       await sleep(delay);
-      last = await args.poll();
+      try {
+        last = await args.poll();
+      } catch (error) {
+        // A sandbox already exists here; a rate limit or blip must not lose it.
+        if (!isTransientPollError(error)) throw error;
+        const retryAfterMs = error instanceof RailwayGraphQLError ? error.retryAfterMs : undefined;
+        if (retryAfterMs !== undefined) {
+          const remaining = READINESS_TIMEOUT_MS - (Date.now() - start);
+          if (retryAfterMs > POLL_MAX_RETRY_AFTER_MS || retryAfterMs > remaining) {
+            throw new RailwayRateLimitError({
+              message:
+                `Rate limited while waiting for ${args.label} to become ready: Railway asks to retry ` +
+                `in ${Math.ceil(retryAfterMs / 1000)}s. It was created and keeps starting; reach it with ` +
+                `its id once the limit resets.`,
+              retryAfterMs,
+              resourceId: args.resourceId,
+              cause: error as RailwayGraphQLError,
+            });
+          }
+          this.#config.log(`readiness poll rate limited; retrying in ${Math.ceil(retryAfterMs / 1000)}s`);
+          delay = retryAfterMs;
+          continue;
+        }
+        this.#config.log(`readiness poll failed (${(error as Error).message}); polling on`);
+        delay = Math.min(Math.max(delay, backoff), POLL_MAX_DELAY_MS);
+        continue;
+      }
       const elapsedSec = ((Date.now() - start) / 1000).toFixed(1);
       if (args.isReady(last)) {
         if (describe) this.#config.log(`${describe(last)} ready after ${elapsedSec}s`);
@@ -423,13 +576,23 @@ export class SandboxEngine {
         if (describe) this.#config.log(`${describe(last)} hit terminal state`);
         return args.onTerminal(last);
       }
-      delay = Math.min(delay * 2, POLL_MAX_DELAY_MS);
+      if (fast && Date.now() - start < fast.windowMs) {
+        delay = fast.delayMs;
+      } else {
+        delay = backoff;
+        backoff = Math.min(backoff * 2, POLL_MAX_DELAY_MS);
+      }
       if (describe) {
         this.#config.log(
           `waiting on ${describe(last)}, retry in ${delay}ms (elapsed ${elapsedSec}s)`,
         );
       }
     } while (Date.now() - start < READINESS_TIMEOUT_MS);
+    if (last === undefined) {
+      throw new RailwayConnectionError({
+        message: `Readiness polling failed for ${READINESS_TIMEOUT_MS / 1000}s; the resource's state is unknown.`,
+      });
+    }
     if (describe) {
       const elapsedSec = ((Date.now() - start) / 1000).toFixed(1);
       this.#config.log(`${describe(last)} timed out after ${elapsedSec}s`);
@@ -442,6 +605,9 @@ export class SandboxEngine {
       config: this.#config,
       environmentId: this.#config.environmentId,
       sandboxId: id,
+      shellToken: (fresh, signal) =>
+        this.#shellTokens(id).get(SHELL_SCOPE, { fresh, signal }),
+      takePrewarm: () => this.#takePrewarm(id),
     };
     return startExec(context, target, options);
   }
@@ -451,6 +617,7 @@ export class SandboxEngine {
       config: this.#config,
       environmentId: this.#config.environmentId,
       sandboxId: id,
+      exec: (command, options) => this.exec(id, command, options),
     });
   }
 
@@ -460,6 +627,8 @@ export class SandboxEngine {
       environmentId: this.#config.environmentId,
     };
     this.#config.log(`destroy sandbox ${id}`);
+    this.#discardPrewarm(id);
+    this.#tokens.delete(id);
     await requestGraphQL<
       RailwaySandboxDestroyMutation,
       RailwaySandboxDestroyMutationVariables
