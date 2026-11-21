@@ -457,25 +457,37 @@ class FlagsModule {
       return;
     }
 
+    const config = this.#config;
     this.#lastRefreshStartedAt = Date.now();
     this.#refreshInFlight = (async () => {
       const registries = [this.#defaultRegistry, ...this.#scopedRegistries.values()];
-      try {
-        await Promise.all(registries.map((registry) => refreshRegistry(registry, this.#config!)));
-        this.#currentBackoffMs = 0;
-      } catch {
-        for (const registry of registries) {
-          registry.markStale();
+      const results = await Promise.allSettled(
+        registries.map((registry) => refreshRegistry(registry, config)),
+      );
+
+      // Only registries whose own refresh failed go stale. A scope that cannot be
+      // fetched must not poison registries that refreshed successfully.
+      let failed = false;
+      results.forEach((result, index) => {
+        if (result.status === "rejected") {
+          registries[index]!.markStale();
+          failed = true;
         }
-        this.#currentBackoffMs =
-          this.#currentBackoffMs > 0
-            ? Math.min(
-                this.#currentBackoffMs * DEFAULT_BACKOFF_MULTIPLIER,
-                DEFAULT_MAX_BACKOFF_MS,
-              )
-            : Math.min(DEFAULT_ACTIVE_REFRESH_INTERVAL_MS, DEFAULT_MAX_BACKOFF_MS);
-        throw new Error("flags registry refresh failed");
+      });
+
+      if (!failed) {
+        this.#currentBackoffMs = 0;
+        return;
       }
+
+      this.#currentBackoffMs =
+        this.#currentBackoffMs > 0
+          ? Math.min(
+              this.#currentBackoffMs * DEFAULT_BACKOFF_MULTIPLIER,
+              DEFAULT_MAX_BACKOFF_MS,
+            )
+          : Math.min(DEFAULT_ACTIVE_REFRESH_INTERVAL_MS, DEFAULT_MAX_BACKOFF_MS);
+      throw new Error("flags registry refresh failed");
     })().finally(() => {
       this.#refreshInFlight = null;
     });

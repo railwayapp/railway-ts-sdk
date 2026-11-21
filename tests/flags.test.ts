@@ -395,6 +395,44 @@ describe("flags module", () => {
     vi.useRealTimers();
   });
 
+  it("keeps healthy registries fresh when another scope fails to refresh", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    vi.stubEnv(RAILWAY_PROJECT_ID_ENV, "default_project");
+
+    const fetch: typeof globalThis.fetch = async (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as { variables?: { owner?: string } };
+      if (body.variables?.owner === "project:broken") {
+        return new Response("unavailable", { status: 500 });
+      }
+      return new Response(
+        JSON.stringify({
+          data: {
+            signals: [
+              { name: "checkout-v2", type: "bool", default: true, version: "1", rules: [] },
+            ],
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    await flags.init({ token: "token_123", fetch });
+    const broken = flags.scope({ projectId: "broken" });
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.waitFor(() => {
+      expect(broken.evaluateBoolean("checkout-v2", undefined, false).reason).toBe("STALE");
+    });
+
+    const healthy = flags.evaluateBoolean("checkout-v2", undefined, false);
+    expect(healthy.reason).not.toBe("STALE");
+    expect(healthy.value).toBe(true);
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
   it("sends explicit scope when provided", async () => {
     const requests: unknown[] = [];
     const fetch: typeof globalThis.fetch = async (_input, init) => {
