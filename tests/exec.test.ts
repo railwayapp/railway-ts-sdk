@@ -19,6 +19,7 @@ import {
   refusedUpgradeWebSocket,
   sandboxInfo,
 } from "./test-helpers.js";
+import { connectionProtocol, watchHandshake } from "../src/core/ws-handshake.js";
 import { createExecWsMock } from "./exec-ws-mock.js";
 
 const auth = { token: "token_123", environmentId: "environment_123" };
@@ -976,8 +977,7 @@ describe("shell token reuse", () => {
     expect(mints(mock)).toBe(2);
   });
 
-  it("attributes a refused upgrade to its own socket when connections share a token", async () => {
-    const { connectionProtocol, watchHandshake } = await import("../src/core/ws-handshake.js");
+  it("attributes a refused upgrade to its own socket when connections share a token", () => {
     const token = jwt("shared");
     const [refused, accepted] = [connectionProtocol(), connectionProtocol()];
     const watches = [watchHandshake(refused, "exec"), watchHandshake(accepted, "exec")];
