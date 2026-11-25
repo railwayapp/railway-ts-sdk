@@ -6,9 +6,9 @@ import {
   type RailwayGenerateShellTokenMutationVariables,
 } from "../generated/graphql.js";
 
-export type ShellTokenScope = "shell" | "files:read" | "files:read files:write";
+type ShellTokenScope = "shell" | "files:read" | "files:read files:write";
 
-export interface ShellTokenTarget {
+interface ShellTokenTarget {
   config: NormalizedRailwayClientConfig;
   environmentId: string;
   sandboxId: string;
