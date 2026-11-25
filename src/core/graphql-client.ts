@@ -3,6 +3,7 @@ import { Kind, print, type DocumentNode } from "graphql";
 
 import type { NormalizedRailwayClientConfig } from "./config.js";
 import {
+  parseRetryAfter,
   RailwayGraphQLError,
   RailwayRateLimitError,
   type RailwayGraphQLErrorItem,
@@ -78,15 +79,6 @@ export async function requestGraphQL<TResult, TVariables>(
 
   config.log(`← ${operation} ok in ${elapsed}ms`);
   return body.data;
-}
-
-/** `Retry-After` is either delay-seconds or an HTTP date. */
-function parseRetryAfter(value: string | null): number | undefined {
-  if (!value) return undefined;
-  const seconds = Number(value);
-  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
-  const date = Date.parse(value);
-  return Number.isNaN(date) ? undefined : Math.max(0, date - Date.now());
 }
 
 function operationName(document: DocumentNode): string {

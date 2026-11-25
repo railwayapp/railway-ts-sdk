@@ -7,8 +7,9 @@ import {
   ExecControlUnsupportedError,
   ExecNotStartedError,
   RailwayConnectionError,
-  rateLimitFromClose,
+  rateLimitFromHandshake,
 } from "./errors.js";
+import { watchHandshake } from "./ws-handshake.js";
 import type { RailwayWsSocket } from "./ws-socket.js";
 
 /**
@@ -157,6 +158,7 @@ export function connectExecWs(args: {
       creditWaiters.push(wake);
       abort.addEventListener("abort", onWaitAbort, { once: true });
     });
+    const handshake = watchHandshake(jwt);
     const socket = new WS(config.tcpProxyWsEndpoint, [
       SHELL_SUBPROTOCOL,
       jwt,
@@ -170,6 +172,7 @@ export function connectExecWs(args: {
       }
     };
     const onAbort = () => {
+      handshake.dispose();
       closed = true;
       signal?.removeEventListener("abort", onAbort);
       reject(signal?.reason);
@@ -255,6 +258,7 @@ export function connectExecWs(args: {
     };
 
     socket.onopen = () => {
+      handshake.dispose();
       if (closed) return;
       if (legacy) {
         // No flow control to negotiate: stdin is paced by bufferedAmount alone.
@@ -338,11 +342,12 @@ export function connectExecWs(args: {
     };
 
     socket.onclose = event => {
+      handshake.dispose();
       closed = true;
       wakeCreditWaiters();
       signal?.removeEventListener("abort", onAbort);
       if (!opened) {
-        const rateLimited = rateLimitFromClose("exec", event);
+        const rateLimited = rateLimitFromHandshake("exec", handshake.response());
         if (rateLimited) {
           reject(rateLimited);
           return;
@@ -369,9 +374,10 @@ export function connectExecWs(args: {
 
     socket.onerror = event => {
       if (opened) return;
+      handshake.dispose();
       closed = true;
       signal?.removeEventListener("abort", onAbort);
-      reject(notStarted(
+      reject(rateLimitFromHandshake("exec", handshake.response()) ?? notStarted(
         "tcp-proxy exec WebSocket connection failed; no command was sent.",
         { retryable: true, cause: event },
       ));

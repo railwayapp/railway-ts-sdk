@@ -9,7 +9,12 @@ import {
   SandboxFiles,
   SandboxFilesError,
 } from "../src/index.js";
-import { clearRailwayEnv, createFetchMock, sandboxInfo } from "./test-helpers.js";
+import {
+  clearRailwayEnv,
+  createFetchMock,
+  refusedUpgradeWebSocket,
+  sandboxInfo,
+} from "./test-helpers.js";
 import {
   createFilesWsMock,
   FRAME_READ_CHUNK,
@@ -427,16 +432,17 @@ describe("files.read", () => {
     expect(bytes[1024 + mb - 1]).toBe(8);
   }, 15_000);
 
-  it("surfaces a tcp-proxy rate limit after open without retrying", async () => {
-    const { sandbox, ws } = await filesSandbox(2);
-    const promise = sandbox.files.read("/file");
-    const socket = await ws.nextSocket();
-    await socket.nextRequest();
-    socket.serverClose(4029, "retry_after=15");
-    const error = (await promise.catch(e => e)) as RailwayRateLimitError;
+  it("surfaces a rate-limited upgrade without retrying", async () => {
+    const ws = refusedUpgradeWebSocket({ status: 429, retryAfter: "15" });
+    const mock = createFetchMock([
+      { data: { sandboxCreate: sandboxInfo() } },
+      ...Array.from({ length: 4 }, (_, i) => shellToken(`jwt_${i}`)),
+    ]);
+    const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch, webSocketImpl: ws.webSocketImpl });
+    const error = (await sandbox.files.read("/file").catch(e => e)) as RailwayRateLimitError;
     expect(error).toBeInstanceOf(RailwayRateLimitError);
     expect(error.retryAfterMs).toBe(15_000);
-    expect(ws.sockets).toHaveLength(1);
+    expect(ws.attempts()).toBe(1);
   });
 
   it("gives up after repeated connection drops", async () => {

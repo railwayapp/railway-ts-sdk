@@ -53,14 +53,6 @@ export class ExecNotStartedError extends RailwayConnectionError {}
 export class ExecControlUnsupportedError extends RailwayConnectionError {}
 
 /**
- * Close code tcp-proxy sends when it accepts a WebSocket only to refuse it for
- * rate limiting. A plain HTTP 429 on the upgrade is invisible to the WHATWG
- * WebSocket API (it surfaces as a bare 1006), so the limit rides a close code
- * every runtime can read. The reason carries `retry_after=<seconds>`.
- */
-const RATE_LIMIT_CLOSE_CODE = 4029;
-
-/**
  * Railway refused the request for rate limiting. Nothing ran; the SDK does not
  * retry it, so callers decide whether and when to try again.
  */
@@ -78,17 +70,25 @@ export class RailwayRateLimitError extends RailwayError {
   }
 }
 
-/** Maps a tcp-proxy rate-limit close to its error; undefined for any other close. */
-export function rateLimitFromClose(
+/** Maps a refused tcp-proxy upgrade to a rate-limit error; undefined for any other outcome. */
+export function rateLimitFromHandshake(
   endpoint: "exec" | "files",
-  event: { code: number; reason: string },
+  response: { status: number; retryAfter: string | undefined } | undefined,
 ): RailwayRateLimitError | undefined {
-  if (event.code !== RATE_LIMIT_CLOSE_CODE) return undefined;
-  const seconds = /retry_after=(\d+(?:\.\d+)?)/.exec(event.reason)?.[1];
+  if (response?.status !== 429) return undefined;
   return new RailwayRateLimitError({
     message: `tcp-proxy rate-limited the ${endpoint} connection`,
-    retryAfterMs: seconds === undefined ? undefined : Number(seconds) * 1000,
+    retryAfterMs: parseRetryAfter(response.retryAfter),
   });
+}
+
+/** `Retry-After` is either delay-seconds or an HTTP date. */
+export function parseRetryAfter(value: string | null | undefined): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  const date = Date.parse(value);
+  return Number.isNaN(date) ? undefined : Math.max(0, date - Date.now());
 }
 
 /** Stable code backboard sets in error extensions when an apply's base config is stale. */

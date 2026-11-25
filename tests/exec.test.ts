@@ -1,3 +1,4 @@
+import diagnosticsChannel from "node:diagnostics_channel";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { deriveTcpProxyWsEndpoint } from "../src/core/config.js";
@@ -12,7 +13,12 @@ import {
   type ExecOptions,
   type ExecTarget,
 } from "../src/index.js";
-import { clearRailwayEnv, createFetchMock, sandboxInfo } from "./test-helpers.js";
+import {
+  clearRailwayEnv,
+  createFetchMock,
+  refusedUpgradeWebSocket,
+  sandboxInfo,
+} from "./test-helpers.js";
 import { createExecWsMock } from "./exec-ws-mock.js";
 
 const auth = { token: "token_123", environmentId: "environment_123" };
@@ -195,13 +201,19 @@ describe("exec", () => {
     expect(ws.sockets).toHaveLength(1);
   });
 
-  it("surfaces a tcp-proxy rate limit with its retry delay and does not retry", async () => {
-    const { handle, ws, socket } = await execSocket("echo hi", {}, undefined, { manualCapabilities: true });
-    socket.serverClose(4029, "retry_after=15");
-    const error = (await handle.catch(e => e)) as RailwayRateLimitError;
+  it("surfaces a rate-limited upgrade with its retry delay and does not retry", async () => {
+    const ws = refusedUpgradeWebSocket({ status: 429, retryAfter: "15" });
+    const mock = createFetchMock([
+      { data: { sandboxCreate: sandboxInfo() } },
+      shellToken("jwt_a"),
+      shellToken("jwt_b"),
+    ]);
+    const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch, webSocketImpl: ws.webSocketImpl });
+    const error = (await sandbox.exec("echo hi").catch(e => e)) as RailwayRateLimitError;
     expect(error).toBeInstanceOf(RailwayRateLimitError);
     expect(error.retryAfterMs).toBe(15_000);
-    expect(ws.sockets).toHaveLength(1);
+    expect(ws.attempts()).toBe(1);
+    expect(diagnosticsChannel.hasSubscribers("undici:request:headers")).toBe(false);
   });
 
   it("makes a single legacy attempt after an old proxy, with no retry stacked on it", async () => {

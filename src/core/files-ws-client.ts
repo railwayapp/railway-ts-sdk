@@ -3,7 +3,8 @@ import {
   type NormalizedRailwayClientConfig,
   type WebSocketConstructor,
 } from "./config.js";
-import { RailwayConnectionError, rateLimitFromClose } from "./errors.js";
+import { RailwayConnectionError, rateLimitFromHandshake } from "./errors.js";
+import { watchHandshake } from "./ws-handshake.js";
 import type { RailwayWsSocket } from "./ws-socket.js";
 
 /**
@@ -120,6 +121,7 @@ export function connectFilesWs(args: {
     let nextId = 1;
     const pending = new Map<string, PendingOp>();
 
+    const handshake = watchHandshake(jwt);
     const socket = new WS(endpoint, [
       SHELL_SUBPROTOCOL,
       jwt,
@@ -391,6 +393,7 @@ export function connectFilesWs(args: {
     };
 
     socket.onopen = () => {
+      handshake.dispose();
       opened = true;
       if (socket.bufferedAmount === undefined) {
         config.log(
@@ -410,25 +413,35 @@ export function connectFilesWs(args: {
     };
 
     socket.onclose = event => {
+      handshake.dispose();
       closed = true;
-      const detail = `code ${event.code}${event.reason ? `: ${event.reason}` : ""}`;
-      // tcp-proxy refuses rate-limited sessions right after accepting them, so
-      // the refusal can land before or after open.
-      const error =
-        rateLimitFromClose("files", event) ??
+      if (!opened) {
+        reject(
+          rateLimitFromHandshake("files", handshake.response()) ??
+          new RailwayConnectionError({
+            message: `tcp-proxy files WebSocket closed before opening (code ${event.code}${
+              event.reason ? `: ${event.reason}` : ""
+            }).`,
+            closeCode: event.code,
+          }),
+        );
+        return;
+      }
+      failAll(
         new RailwayConnectionError({
-          message: opened
-            ? `tcp-proxy files WebSocket closed (${detail}).`
-            : `tcp-proxy files WebSocket closed before opening (${detail}).`,
+          message: `tcp-proxy files WebSocket closed (code ${event.code}${
+            event.reason ? `: ${event.reason}` : ""
+          }).`,
           closeCode: event.code,
-        });
-      if (opened) failAll(error);
-      else reject(error);
+        }),
+      );
     };
 
     socket.onerror = event => {
       if (opened) return;
+      handshake.dispose();
       reject(
+        rateLimitFromHandshake("files", handshake.response()) ??
         new RailwayConnectionError({
           message: "tcp-proxy files WebSocket connection failed.",
           cause: event,
