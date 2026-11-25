@@ -72,12 +72,18 @@ function loadDiagnostics(): Diagnostics | null {
   return diagnostics;
 }
 
+// Unique per process, without `crypto.randomUUID` (browsers expose it only in
+// secure contexts). The random prefix keeps separately bundled SDK copies, which
+// share the diagnostics channel, from colliding.
+const processPrefix = Math.random().toString(36).slice(2, 10);
+let connectionCount = 0;
+
 /**
  * A subprotocol unique to one connection. tcp-proxy ignores it: it negotiates
  * `railway-shell` and reads the token from the last value.
  */
 export function connectionProtocol(): string {
-  return `railway-conn.${crypto.randomUUID()}`;
+  return `railway-conn.${processPrefix}.${++connectionCount}`;
 }
 
 /**
