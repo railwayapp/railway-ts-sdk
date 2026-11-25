@@ -153,11 +153,13 @@ export function connectExecWs(args: {
       creditWaiters.push(wake);
       abort.addEventListener("abort", onWaitAbort, { once: true });
     });
-    const handshake = watchHandshake(jwt, "exec");
     const socket = new WS(config.tcpProxyWsEndpoint, [
       SHELL_SUBPROTOCOL,
       jwt,
     ]) as unknown as RailwayWsSocket;
+    // After construction so a constructor that throws leaves nothing subscribed;
+    // the response arrives asynchronously, so none can be missed.
+    const handshake = watchHandshake(jwt, "exec");
     socket.binaryType = "arraybuffer";
     const assertOpen = () => {
       if (closed) {

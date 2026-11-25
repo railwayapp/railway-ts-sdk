@@ -121,11 +121,13 @@ export function connectFilesWs(args: {
     let nextId = 1;
     const pending = new Map<string, PendingOp>();
 
-    const handshake = watchHandshake(jwt, "files");
     const socket = new WS(endpoint, [
       SHELL_SUBPROTOCOL,
       jwt,
     ]) as unknown as RailwayWsSocket;
+    // After construction so a constructor that throws leaves nothing subscribed;
+    // the response arrives asynchronously, so none can be missed.
+    const handshake = watchHandshake(jwt, "files");
     socket.binaryType = "arraybuffer";
 
     const failAll = (error: Error) => {
