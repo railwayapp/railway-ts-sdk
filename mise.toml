@@ -2,9 +2,6 @@
 node = "24"
 "npm:pnpm" = "11.3.0"
 
-[env]
-NODE_OPTIONS = "--use-system-ca"
-
 [tasks.install]
 description = "Install dependencies"
 run = "pnpm install"
