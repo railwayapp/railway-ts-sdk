@@ -3,7 +3,7 @@ import {
   type NormalizedRailwayClientConfig,
   type WebSocketConstructor,
 } from "./config.js";
-import { RailwayConnectionError, rateLimitFromHandshake } from "./errors.js";
+import { RailwayConnectionError } from "./errors.js";
 import { watchHandshake } from "./ws-handshake.js";
 import type { RailwayWsSocket } from "./ws-socket.js";
 
@@ -121,7 +121,7 @@ export function connectFilesWs(args: {
     let nextId = 1;
     const pending = new Map<string, PendingOp>();
 
-    const handshake = watchHandshake(jwt);
+    const handshake = watchHandshake(jwt, "files");
     const socket = new WS(endpoint, [
       SHELL_SUBPROTOCOL,
       jwt,
@@ -417,7 +417,7 @@ export function connectFilesWs(args: {
       closed = true;
       if (!opened) {
         reject(
-          rateLimitFromHandshake("files", handshake.response()) ??
+          handshake.rateLimitError() ??
           new RailwayConnectionError({
             message: `tcp-proxy files WebSocket closed before opening (code ${event.code}${
               event.reason ? `: ${event.reason}` : ""
@@ -441,7 +441,7 @@ export function connectFilesWs(args: {
       if (opened) return;
       handshake.dispose();
       reject(
-        rateLimitFromHandshake("files", handshake.response()) ??
+        handshake.rateLimitError() ??
         new RailwayConnectionError({
           message: "tcp-proxy files WebSocket connection failed.",
           cause: event,

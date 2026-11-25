@@ -7,7 +7,6 @@ import {
   ExecControlUnsupportedError,
   ExecNotStartedError,
   RailwayConnectionError,
-  rateLimitFromHandshake,
 } from "./errors.js";
 import { watchHandshake } from "./ws-handshake.js";
 import type { RailwayWsSocket } from "./ws-socket.js";
@@ -158,7 +157,7 @@ export function connectExecWs(args: {
       creditWaiters.push(wake);
       abort.addEventListener("abort", onWaitAbort, { once: true });
     });
-    const handshake = watchHandshake(jwt);
+    const handshake = watchHandshake(jwt, "exec");
     const socket = new WS(config.tcpProxyWsEndpoint, [
       SHELL_SUBPROTOCOL,
       jwt,
@@ -347,7 +346,7 @@ export function connectExecWs(args: {
       wakeCreditWaiters();
       signal?.removeEventListener("abort", onAbort);
       if (!opened) {
-        const rateLimited = rateLimitFromHandshake("exec", handshake.response());
+        const rateLimited = handshake.rateLimitError();
         if (rateLimited) {
           reject(rateLimited);
           return;
@@ -377,7 +376,7 @@ export function connectExecWs(args: {
       handshake.dispose();
       closed = true;
       signal?.removeEventListener("abort", onAbort);
-      reject(rateLimitFromHandshake("exec", handshake.response()) ?? notStarted(
+      reject(handshake.rateLimitError() ?? notStarted(
         "tcp-proxy exec WebSocket connection failed; no command was sent.",
         { retryable: true, cause: event },
       ));

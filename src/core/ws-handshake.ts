@@ -1,42 +1,44 @@
-type Diagnostics = typeof import("node:diagnostics_channel");
-
 /**
- * The HTTP response to a WebSocket upgrade that was refused. The WHATWG
- * WebSocket API hides it (a refused upgrade surfaces as a bare 1006), but
- * Node's built-in WebSocket runs the handshake through undici, which publishes
- * every response on `undici:request:headers`. Each SDK connection presents a
- * freshly minted JWT as its last subprotocol, so the token identifies which
- * pending handshake a response belongs to.
+ * Recovers the HTTP response to a refused tcp-proxy WebSocket upgrade. The
+ * WHATWG WebSocket API hides it (a refused upgrade surfaces as a bare 1006),
+ * but Node's built-in WebSocket runs the handshake through undici, which
+ * publishes every response on `undici:request:headers`. Each SDK connection
+ * presents a freshly minted JWT as its last subprotocol, so the token
+ * identifies which pending handshake a response belongs to.
  *
  * Elsewhere (browsers, Deno, a custom `webSocketImpl`) nothing is published and
- * callers see only the close code, as before.
+ * callers see only the close code.
  */
-export interface HandshakeResponse {
+
+import { parseRetryAfter, RailwayRateLimitError } from "./errors.js";
+
+type Diagnostics = typeof import("node:diagnostics_channel");
+
+interface HandshakeResponse {
   status: number;
   retryAfter: string | undefined;
 }
 
-export interface HandshakeWatch {
-  /** The response, once one arrived for this handshake. */
-  response(): HandshakeResponse | undefined;
+interface HandshakeWatch {
+  /** The rate-limit error when the upgrade was refused with 429. */
+  rateLimitError(): RailwayRateLimitError | undefined;
   /** Stops watching; idempotent. Call once the socket opens or fails. */
   dispose(): void;
 }
-
-const CHANNEL = "undici:request:headers";
 
 interface UndiciHeadersMessage {
   request?: { headers?: unknown };
   response?: { statusCode?: unknown; headers?: unknown };
 }
 
+const CHANNEL = "undici:request:headers";
+
 const pending = new Map<string, { response?: HandshakeResponse }>();
 let diagnostics: Diagnostics | null | undefined;
 
 /**
  * Runs for every undici response while subscribed. Node rethrows subscriber
- * errors as uncaught exceptions, so this only reads defensively and never
- * throws on an unexpected message shape.
+ * errors as uncaught exceptions, so this must not throw on an unexpected shape.
  */
 function onHeaders(message: unknown): void {
   const { request, response } = (message ?? {}) as UndiciHeadersMessage;
@@ -62,9 +64,11 @@ function headerValue(pairs: readonly unknown[], name: string): string | undefine
 }
 
 function loadDiagnostics(): Diagnostics | null {
-  if (diagnostics !== undefined) return diagnostics;
-  const nodeProcess = (globalThis as { process?: NodeJS.Process }).process;
-  diagnostics = nodeProcess?.getBuiltinModule?.("node:diagnostics_channel") ?? null;
+  if (diagnostics === undefined) {
+    diagnostics = typeof process === "undefined"
+      ? null
+      : process.getBuiltinModule?.("node:diagnostics_channel") ?? null;
+  }
   return diagnostics;
 }
 
@@ -73,15 +77,21 @@ function loadDiagnostics(): Diagnostics | null {
  * channel is subscribed only while a handshake is pending, so idle processes
  * pay nothing and undici skips publishing.
  */
-export function watchHandshake(jwt: string): HandshakeWatch {
+export function watchHandshake(jwt: string, endpoint: "exec" | "files"): HandshakeWatch {
   const channels = loadDiagnostics();
-  if (!channels) return { response: () => undefined, dispose: () => {} };
+  if (!channels) return { rateLimitError: () => undefined, dispose: () => {} };
   const entry: { response?: HandshakeResponse } = {};
   if (pending.size === 0) channels.subscribe(CHANNEL, onHeaders);
   pending.set(jwt, entry);
   let disposed = false;
   return {
-    response: () => entry.response,
+    rateLimitError: () => {
+      if (entry.response?.status !== 429) return undefined;
+      return new RailwayRateLimitError({
+        message: `tcp-proxy rate-limited the ${endpoint} connection`,
+        retryAfterMs: parseRetryAfter(entry.response.retryAfter),
+      });
+    },
     dispose: () => {
       if (disposed) return;
       disposed = true;

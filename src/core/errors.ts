@@ -70,18 +70,6 @@ export class RailwayRateLimitError extends RailwayError {
   }
 }
 
-/** Maps a refused tcp-proxy upgrade to a rate-limit error; undefined for any other outcome. */
-export function rateLimitFromHandshake(
-  endpoint: "exec" | "files",
-  response: { status: number; retryAfter: string | undefined } | undefined,
-): RailwayRateLimitError | undefined {
-  if (response?.status !== 429) return undefined;
-  return new RailwayRateLimitError({
-    message: `tcp-proxy rate-limited the ${endpoint} connection`,
-    retryAfterMs: parseRetryAfter(response.retryAfter),
-  });
-}
-
 /** `Retry-After` is either delay-seconds or an HTTP date. */
 export function parseRetryAfter(value: string | null | undefined): number | undefined {
   if (!value) return undefined;
