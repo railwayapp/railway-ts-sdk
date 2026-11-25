@@ -26,23 +26,30 @@ export interface HandshakeWatch {
 const CHANNEL = "undici:request:headers";
 
 interface UndiciHeadersMessage {
-  request: { path?: string; headers?: unknown };
-  response: { statusCode: number; headers: unknown[] };
+  request?: { headers?: unknown };
+  response?: { statusCode?: unknown; headers?: unknown };
 }
 
 const pending = new Map<string, { response?: HandshakeResponse }>();
 let diagnostics: Diagnostics | null | undefined;
 
+/**
+ * Runs for every undici response while subscribed. Node rethrows subscriber
+ * errors as uncaught exceptions, so this only reads defensively and never
+ * throws on an unexpected message shape.
+ */
 function onHeaders(message: unknown): void {
-  const { request, response } = message as UndiciHeadersMessage;
-  if (!request.path?.startsWith("/ws/") || !Array.isArray(request.headers)) return;
+  const { request, response } = (message ?? {}) as UndiciHeadersMessage;
+  if (!Array.isArray(request?.headers) || typeof response?.statusCode !== "number") return;
   const protocols = headerValue(request.headers, "sec-websocket-protocol");
   const jwt = protocols?.split(",").at(-1)?.trim();
   const entry = jwt === undefined ? undefined : pending.get(jwt);
   if (!entry) return;
   entry.response = {
     status: response.statusCode,
-    retryAfter: headerValue(response.headers, "retry-after"),
+    retryAfter: Array.isArray(response.headers)
+      ? headerValue(response.headers, "retry-after")
+      : undefined,
   };
 }
 
