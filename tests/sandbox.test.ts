@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  RailwayRateLimitError,
   Sandbox,
   SandboxFailedError,
   SandboxNotFoundError,
@@ -175,6 +176,17 @@ describe("Sandbox.create", () => {
         variables: { NODE_ENV: "production", API_KEY: "${{shared.API_KEY}}" },
       },
     });
+  });
+});
+
+describe("rate limits", () => {
+  it("maps an HTTP 429 to RailwayRateLimitError with Retry-After", async () => {
+    const mock = createFetchMock([
+      new Response("rate limit exceeded", { status: 429, headers: { "Retry-After": "30" } }),
+    ]);
+    const error = (await Sandbox.create({ ...auth, fetch: mock.fetch }).catch(e => e)) as RailwayRateLimitError;
+    expect(error).toBeInstanceOf(RailwayRateLimitError);
+    expect(error.retryAfterMs).toBe(30_000);
   });
 });
 

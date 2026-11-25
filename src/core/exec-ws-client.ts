@@ -4,6 +4,7 @@ import {
   type WebSocketConstructor,
 } from "./config.js";
 import { ExecControlUnsupportedError, ExecNotStartedError, RailwayConnectionError } from "./errors.js";
+import { watchHandshake } from "./ws-handshake.js";
 import type { RailwayWsSocket } from "./ws-socket.js";
 
 /**
@@ -156,6 +157,9 @@ export function connectExecWs(args: {
       SHELL_SUBPROTOCOL,
       jwt,
     ]) as unknown as RailwayWsSocket;
+    // After construction so a constructor that throws leaves nothing subscribed;
+    // the response arrives asynchronously, so none can be missed.
+    const handshake = watchHandshake(jwt, "exec");
     socket.binaryType = "arraybuffer";
     const assertOpen = () => {
       if (closed) {
@@ -165,6 +169,7 @@ export function connectExecWs(args: {
       }
     };
     const onAbort = () => {
+      handshake.dispose();
       closed = true;
       signal?.removeEventListener("abort", onAbort);
       reject(signal?.reason);
@@ -250,6 +255,7 @@ export function connectExecWs(args: {
     };
 
     socket.onopen = () => {
+      handshake.dispose();
       if (closed) return;
       if (legacy) {
         // No flow control to negotiate: stdin is paced by bufferedAmount alone.
@@ -333,10 +339,16 @@ export function connectExecWs(args: {
     };
 
     socket.onclose = event => {
+      handshake.dispose();
       closed = true;
       wakeCreditWaiters();
       signal?.removeEventListener("abort", onAbort);
       if (!opened) {
+        const rateLimited = handshake.rateLimitError();
+        if (rateLimited) {
+          reject(rateLimited);
+          return;
+        }
         const detail = `code ${event.code}${event.reason ? `: ${event.reason}` : ""}`;
         // The proxy routes the session after accepting the socket, so a close
         // here can be a denial, a routing failure, or a deploy, not only an old
@@ -359,9 +371,10 @@ export function connectExecWs(args: {
 
     socket.onerror = event => {
       if (opened) return;
+      handshake.dispose();
       closed = true;
       signal?.removeEventListener("abort", onAbort);
-      reject(notStarted(
+      reject(handshake.rateLimitError() ?? notStarted(
         "tcp-proxy exec WebSocket connection failed; no command was sent.",
         { retryable: true, cause: event },
       ));

@@ -3,7 +3,9 @@ import { Kind, print, type DocumentNode } from "graphql";
 
 import type { NormalizedRailwayClientConfig } from "./config.js";
 import {
+  parseRetryAfter,
   RailwayGraphQLError,
+  RailwayRateLimitError,
   type RailwayGraphQLErrorItem,
 } from "./errors.js";
 import { USER_AGENT } from "./version.js";
@@ -43,6 +45,14 @@ export async function requestGraphQL<TResult, TVariables>(
   signal?.throwIfAborted();
   const errors = body?.errors ?? [];
   const elapsed = Date.now() - start;
+
+  if (response.status === 429) {
+    config.log(`← ${operation} rate-limited in ${elapsed}ms`);
+    throw new RailwayRateLimitError({
+      message: `Railway rate-limited the ${operation} request`,
+      retryAfterMs: parseRetryAfter(response.headers.get("retry-after")),
+    });
+  }
 
   if (!response.ok || errors.length > 0) {
     config.log(

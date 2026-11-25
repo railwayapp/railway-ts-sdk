@@ -4,6 +4,7 @@ import {
   type WebSocketConstructor,
 } from "./config.js";
 import { RailwayConnectionError } from "./errors.js";
+import { watchHandshake } from "./ws-handshake.js";
 import type { RailwayWsSocket } from "./ws-socket.js";
 
 /**
@@ -124,6 +125,9 @@ export function connectFilesWs(args: {
       SHELL_SUBPROTOCOL,
       jwt,
     ]) as unknown as RailwayWsSocket;
+    // After construction so a constructor that throws leaves nothing subscribed;
+    // the response arrives asynchronously, so none can be missed.
+    const handshake = watchHandshake(jwt, "files");
     socket.binaryType = "arraybuffer";
 
     const failAll = (error: Error) => {
@@ -391,6 +395,7 @@ export function connectFilesWs(args: {
     };
 
     socket.onopen = () => {
+      handshake.dispose();
       opened = true;
       if (socket.bufferedAmount === undefined) {
         config.log(
@@ -410,9 +415,11 @@ export function connectFilesWs(args: {
     };
 
     socket.onclose = event => {
+      handshake.dispose();
       closed = true;
       if (!opened) {
         reject(
+          handshake.rateLimitError() ??
           new RailwayConnectionError({
             message: `tcp-proxy files WebSocket closed before opening (code ${event.code}${
               event.reason ? `: ${event.reason}` : ""
@@ -434,7 +441,9 @@ export function connectFilesWs(args: {
 
     socket.onerror = event => {
       if (opened) return;
+      handshake.dispose();
       reject(
+        handshake.rateLimitError() ??
         new RailwayConnectionError({
           message: "tcp-proxy files WebSocket connection failed.",
           cause: event,

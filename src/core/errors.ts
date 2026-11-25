@@ -52,6 +52,33 @@ export class ExecNotStartedError extends RailwayConnectionError {}
  */
 export class ExecControlUnsupportedError extends RailwayConnectionError {}
 
+/**
+ * Railway refused the request for rate limiting. Nothing ran; the SDK does not
+ * retry it, so callers decide whether and when to try again.
+ */
+export class RailwayRateLimitError extends RailwayError {
+  /** How long the server asked callers to wait, when it said. */
+  readonly retryAfterMs: number | undefined;
+
+  constructor(args: { message: string; retryAfterMs?: number | undefined }) {
+    super(
+      args.retryAfterMs === undefined
+        ? `${args.message}.`
+        : `${args.message}; retry after ${Math.ceil(args.retryAfterMs / 1000)}s.`,
+    );
+    this.retryAfterMs = args.retryAfterMs;
+  }
+}
+
+/** `Retry-After` is either delay-seconds or an HTTP date. */
+export function parseRetryAfter(value: string | null | undefined): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  const date = Date.parse(value);
+  return Number.isNaN(date) ? undefined : Math.max(0, date - Date.now());
+}
+
 /** Stable code backboard sets in error extensions when an apply's base config is stale. */
 export const STALE_ENVIRONMENT_BASE_CODE = "STALE_ENVIRONMENT_BASE";
 

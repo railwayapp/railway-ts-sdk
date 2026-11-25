@@ -2,6 +2,7 @@ import {
   RailwayAuthError,
   RailwayConnectionError,
   RailwayGraphQLError,
+  RailwayRateLimitError,
 } from "./errors.js";
 import { createLogger, type Logger } from "./logger.js";
 import { resolveProjectTokenScope } from "./project-token.js";
@@ -214,6 +215,7 @@ export async function resolveEnvironmentId(
 }
 
 function environmentLookupError(cause: unknown): Error {
+  if (cause instanceof RailwayRateLimitError) return cause;
   const reason = cause instanceof Error ? cause.message : String(cause);
   const prefix = "Could not resolve the sandbox environment from the project token";
   if (cause instanceof RailwayGraphQLError) {

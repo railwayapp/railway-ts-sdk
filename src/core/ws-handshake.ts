@@ -1,0 +1,102 @@
+/**
+ * Recovers the HTTP response to a refused tcp-proxy WebSocket upgrade. The
+ * WHATWG WebSocket API hides it (a refused upgrade surfaces as a bare 1006),
+ * but Node's built-in WebSocket runs the handshake through undici, which
+ * publishes every response on `undici:request:headers`. Each SDK connection
+ * presents a freshly minted JWT as its last subprotocol, so the token
+ * identifies which pending handshake a response belongs to.
+ *
+ * Elsewhere (browsers, Deno, a custom `webSocketImpl`) nothing is published and
+ * callers see only the close code.
+ */
+
+import { parseRetryAfter, RailwayRateLimitError } from "./errors.js";
+
+type Diagnostics = typeof import("node:diagnostics_channel");
+
+interface HandshakeResponse {
+  status: number;
+  retryAfter: string | undefined;
+}
+
+interface HandshakeWatch {
+  /** The rate-limit error when the upgrade was refused with 429. */
+  rateLimitError(): RailwayRateLimitError | undefined;
+  /** Stops watching; idempotent. Call once the socket opens or fails. */
+  dispose(): void;
+}
+
+interface UndiciHeadersMessage {
+  request?: { headers?: unknown };
+  response?: { statusCode?: unknown; headers?: unknown };
+}
+
+const CHANNEL = "undici:request:headers";
+
+const pending = new Map<string, { response?: HandshakeResponse }>();
+let diagnostics: Diagnostics | null | undefined;
+
+/**
+ * Runs for every undici response while subscribed. Node rethrows subscriber
+ * errors as uncaught exceptions, so this must not throw on an unexpected shape.
+ */
+function onHeaders(message: unknown): void {
+  const { request, response } = (message ?? {}) as UndiciHeadersMessage;
+  if (!Array.isArray(request?.headers) || typeof response?.statusCode !== "number") return;
+  const protocols = headerValue(request.headers, "sec-websocket-protocol");
+  const jwt = protocols?.split(",").at(-1)?.trim();
+  const entry = jwt === undefined ? undefined : pending.get(jwt);
+  if (!entry) return;
+  entry.response = {
+    status: response.statusCode,
+    retryAfter: Array.isArray(response.headers)
+      ? headerValue(response.headers, "retry-after")
+      : undefined,
+  };
+}
+
+/** Flat `[name, value, ...]` pairs; undici uses strings for requests, Buffers for responses. */
+function headerValue(pairs: readonly unknown[], name: string): string | undefined {
+  for (let i = 0; i + 1 < pairs.length; i += 2) {
+    if (String(pairs[i]).toLowerCase() === name) return String(pairs[i + 1]);
+  }
+  return undefined;
+}
+
+function loadDiagnostics(): Diagnostics | null {
+  if (diagnostics === undefined) {
+    diagnostics = typeof process === "undefined"
+      ? null
+      : process.getBuiltinModule?.("node:diagnostics_channel") ?? null;
+  }
+  return diagnostics;
+}
+
+/**
+ * Watches the handshake for the socket about to be opened with `jwt`. The
+ * channel is subscribed only while a handshake is pending, so idle processes
+ * pay nothing and undici skips publishing.
+ */
+export function watchHandshake(jwt: string, endpoint: "exec" | "files"): HandshakeWatch {
+  const channels = loadDiagnostics();
+  if (!channels) return { rateLimitError: () => undefined, dispose: () => {} };
+  const entry: { response?: HandshakeResponse } = {};
+  if (pending.size === 0) channels.subscribe(CHANNEL, onHeaders);
+  pending.set(jwt, entry);
+  let disposed = false;
+  return {
+    rateLimitError: () => {
+      if (entry.response?.status !== 429) return undefined;
+      return new RailwayRateLimitError({
+        message: `tcp-proxy rate-limited the ${endpoint} connection`,
+        retryAfterMs: parseRetryAfter(entry.response.retryAfter),
+      });
+    },
+    dispose: () => {
+      if (disposed) return;
+      disposed = true;
+      if (pending.get(jwt) === entry) pending.delete(jwt);
+      if (pending.size === 0) channels.unsubscribe(CHANNEL, onHeaders);
+    },
+  };
+}
