@@ -585,6 +585,9 @@ All errors extend `RailwayError`:
   `RailwayConnectionError`.
 - `RailwayGraphQLError`: the Railway API returned an error. Carries `.status`,
   `.errors`, and `.responseBody`.
+- `RailwayRateLimitError`: Railway refused the request or exec/file connection for
+  rate limiting. Nothing ran and the SDK does not retry it. Carries `.retryAfterMs`
+  when the server says how long to wait.
 - `StaleEnvironmentError`: an IaC `apply` was rejected because the environment changed
   since the plan was computed. Re-run `plan` and review before applying again.
 - `SandboxNotFoundError`: `connect` or `refresh` could not find the sandbox. Carries

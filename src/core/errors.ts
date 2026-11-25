@@ -52,6 +52,45 @@ export class ExecNotStartedError extends RailwayConnectionError {}
  */
 export class ExecControlUnsupportedError extends RailwayConnectionError {}
 
+/**
+ * Close code tcp-proxy sends when it accepts a WebSocket only to refuse it for
+ * rate limiting. A plain HTTP 429 on the upgrade is invisible to the WHATWG
+ * WebSocket API (it surfaces as a bare 1006), so the limit rides a close code
+ * every runtime can read. The reason carries `retry_after=<seconds>`.
+ */
+const RATE_LIMIT_CLOSE_CODE = 4029;
+
+/**
+ * Railway refused the request for rate limiting. Nothing ran; the SDK does not
+ * retry it, so callers decide whether and when to try again.
+ */
+export class RailwayRateLimitError extends RailwayError {
+  /** How long the server asked callers to wait, when it said. */
+  readonly retryAfterMs: number | undefined;
+
+  constructor(args: { message: string; retryAfterMs?: number | undefined }) {
+    super(
+      args.retryAfterMs === undefined
+        ? `${args.message}.`
+        : `${args.message}; retry after ${Math.ceil(args.retryAfterMs / 1000)}s.`,
+    );
+    this.retryAfterMs = args.retryAfterMs;
+  }
+}
+
+/** Maps a tcp-proxy rate-limit close to its error; undefined for any other close. */
+export function rateLimitFromClose(
+  endpoint: "exec" | "files",
+  event: { code: number; reason: string },
+): RailwayRateLimitError | undefined {
+  if (event.code !== RATE_LIMIT_CLOSE_CODE) return undefined;
+  const seconds = /retry_after=(\d+(?:\.\d+)?)/.exec(event.reason)?.[1];
+  return new RailwayRateLimitError({
+    message: `tcp-proxy rate-limited the ${endpoint} connection`,
+    retryAfterMs: seconds === undefined ? undefined : Number(seconds) * 1000,
+  });
+}
+
 /** Stable code backboard sets in error extensions when an apply's base config is stale. */
 export const STALE_ENVIRONMENT_BASE_CODE = "STALE_ENVIRONMENT_BASE";
 

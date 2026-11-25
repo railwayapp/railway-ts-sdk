@@ -3,7 +3,12 @@ import {
   type NormalizedRailwayClientConfig,
   type WebSocketConstructor,
 } from "./config.js";
-import { ExecControlUnsupportedError, ExecNotStartedError, RailwayConnectionError } from "./errors.js";
+import {
+  ExecControlUnsupportedError,
+  ExecNotStartedError,
+  RailwayConnectionError,
+  rateLimitFromClose,
+} from "./errors.js";
 import type { RailwayWsSocket } from "./ws-socket.js";
 
 /**
@@ -337,6 +342,11 @@ export function connectExecWs(args: {
       wakeCreditWaiters();
       signal?.removeEventListener("abort", onAbort);
       if (!opened) {
+        const rateLimited = rateLimitFromClose("exec", event);
+        if (rateLimited) {
+          reject(rateLimited);
+          return;
+        }
         const detail = `code ${event.code}${event.reason ? `: ${event.reason}` : ""}`;
         // The proxy routes the session after accepting the socket, so a close
         // here can be a denial, a routing failure, or a deploy, not only an old

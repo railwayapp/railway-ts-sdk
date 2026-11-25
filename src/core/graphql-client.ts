@@ -4,6 +4,7 @@ import { Kind, print, type DocumentNode } from "graphql";
 import type { NormalizedRailwayClientConfig } from "./config.js";
 import {
   RailwayGraphQLError,
+  RailwayRateLimitError,
   type RailwayGraphQLErrorItem,
 } from "./errors.js";
 import { USER_AGENT } from "./version.js";
@@ -44,6 +45,14 @@ export async function requestGraphQL<TResult, TVariables>(
   const errors = body?.errors ?? [];
   const elapsed = Date.now() - start;
 
+  if (response.status === 429) {
+    config.log(`← ${operation} rate-limited in ${elapsed}ms`);
+    throw new RailwayRateLimitError({
+      message: `Railway rate-limited the ${operation} request`,
+      retryAfterMs: parseRetryAfter(response.headers.get("retry-after")),
+    });
+  }
+
   if (!response.ok || errors.length > 0) {
     config.log(
       `← ${operation} failed http=${response.status} errors=${errors.length} in ${elapsed}ms`,
@@ -69,6 +78,15 @@ export async function requestGraphQL<TResult, TVariables>(
 
   config.log(`← ${operation} ok in ${elapsed}ms`);
   return body.data;
+}
+
+/** `Retry-After` is either delay-seconds or an HTTP date. */
+function parseRetryAfter(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  const date = Date.parse(value);
+  return Number.isNaN(date) ? undefined : Math.max(0, date - Date.now());
 }
 
 function operationName(document: DocumentNode): string {

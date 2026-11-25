@@ -3,7 +3,7 @@ import {
   type NormalizedRailwayClientConfig,
   type WebSocketConstructor,
 } from "./config.js";
-import { RailwayConnectionError } from "./errors.js";
+import { RailwayConnectionError, rateLimitFromClose } from "./errors.js";
 import type { RailwayWsSocket } from "./ws-socket.js";
 
 /**
@@ -411,25 +411,19 @@ export function connectFilesWs(args: {
 
     socket.onclose = event => {
       closed = true;
-      if (!opened) {
-        reject(
-          new RailwayConnectionError({
-            message: `tcp-proxy files WebSocket closed before opening (code ${event.code}${
-              event.reason ? `: ${event.reason}` : ""
-            }).`,
-            closeCode: event.code,
-          }),
-        );
-        return;
-      }
-      failAll(
+      const detail = `code ${event.code}${event.reason ? `: ${event.reason}` : ""}`;
+      // tcp-proxy refuses rate-limited sessions right after accepting them, so
+      // the refusal can land before or after open.
+      const error =
+        rateLimitFromClose("files", event) ??
         new RailwayConnectionError({
-          message: `tcp-proxy files WebSocket closed (code ${event.code}${
-            event.reason ? `: ${event.reason}` : ""
-          }).`,
+          message: opened
+            ? `tcp-proxy files WebSocket closed (${detail}).`
+            : `tcp-proxy files WebSocket closed before opening (${detail}).`,
           closeCode: event.code,
-        }),
-      );
+        });
+      if (opened) failAll(error);
+      else reject(error);
     };
 
     socket.onerror = event => {

@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { deriveTcpProxyWsEndpoint } from "../src/core/config.js";
-import { ExecControlUnsupportedError, ExecNotStartedError } from "../src/core/errors.js";
+import {
+  ExecControlUnsupportedError,
+  ExecNotStartedError,
+  RailwayRateLimitError,
+} from "../src/core/errors.js";
 import {
   ExecHandle,
   Sandbox,
@@ -188,6 +192,15 @@ describe("exec", () => {
     expect(error).toBeInstanceOf(ExecNotStartedError);
     expect(error).not.toBeInstanceOf(ExecControlUnsupportedError);
     expect(error.message).toContain(`code ${code}: ${reason}`);
+    expect(ws.sockets).toHaveLength(1);
+  });
+
+  it("surfaces a tcp-proxy rate limit with its retry delay and does not retry", async () => {
+    const { handle, ws, socket } = await execSocket("echo hi", {}, undefined, { manualCapabilities: true });
+    socket.serverClose(4029, "retry_after=15");
+    const error = (await handle.catch(e => e)) as RailwayRateLimitError;
+    expect(error).toBeInstanceOf(RailwayRateLimitError);
+    expect(error.retryAfterMs).toBe(15_000);
     expect(ws.sockets).toHaveLength(1);
   });
 

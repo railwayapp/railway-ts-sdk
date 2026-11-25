@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { deriveFilesWsEndpoint } from "../src/core/config.js";
-import { RailwayConnectionError } from "../src/core/errors.js";
+import { RailwayConnectionError, RailwayRateLimitError } from "../src/core/errors.js";
 import { loginShellCommand } from "../src/sandbox/shell.js";
 import {
   Sandbox,
@@ -426,6 +426,18 @@ describe("files.read", () => {
     expect(bytes[1024]).toBe(8);
     expect(bytes[1024 + mb - 1]).toBe(8);
   }, 15_000);
+
+  it("surfaces a tcp-proxy rate limit after open without retrying", async () => {
+    const { sandbox, ws } = await filesSandbox(2);
+    const promise = sandbox.files.read("/file");
+    const socket = await ws.nextSocket();
+    await socket.nextRequest();
+    socket.serverClose(4029, "retry_after=15");
+    const error = (await promise.catch(e => e)) as RailwayRateLimitError;
+    expect(error).toBeInstanceOf(RailwayRateLimitError);
+    expect(error.retryAfterMs).toBe(15_000);
+    expect(ws.sockets).toHaveLength(1);
+  });
 
   it("gives up after repeated connection drops", async () => {
     const { sandbox, ws } = await filesSandbox(4);
