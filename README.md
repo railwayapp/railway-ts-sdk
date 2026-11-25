@@ -208,21 +208,6 @@ whose event loop is blocked for tens of seconds can lose a running exec (it reje
 with `ExecInterruptedError`). Keep heavy synchronous work off the thread that streams
 exec output.
 
-### Running a command without a WebSocket
-
-Where a WebSocket isn't practical, such as a short-lived serverless function or a harness
-that only makes HTTP calls, `execHttp` sends the command in one HTTPS request
-and returns `{ exitCode, stdout, stderr, truncated, timedOut }`. It has no streaming,
-stdin, or cancellation. Each stream is cut at 16,000 bytes, and the server enforces
-`timeoutSec` (2 minutes by default, 10 at most); a timed-out command reports
-`exitCode: -1` with the stdout so far discarded. Use `exec` for anything larger or longer.
-`sandbox.files` still uses a WebSocket, so an HTTP-only caller writes files through the
-command itself (for example a heredoc).
-
-```ts
-const { exitCode, stdout } = await sandbox.execHttp("node --version", { timeoutSec: 30 });
-```
-
 ## Files
 
 `sandbox.files` reads and writes files in the sandbox filesystem. Content streams in

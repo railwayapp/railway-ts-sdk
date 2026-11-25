@@ -81,8 +81,6 @@ export {
   type ExecReattachTarget,
   type ExecResult,
   type ExecSignal,
-  type ExecHttpOptions,
-  type ExecHttpResult,
   type ExecStdin,
   type ExecTarget,
   type FileReadFormat,

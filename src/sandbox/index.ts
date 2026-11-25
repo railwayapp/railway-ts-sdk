@@ -15,8 +15,6 @@ export type {
   CheckpointOptions,
   ConnectOptions,
   CreateOptions,
-  ExecHttpOptions,
-  ExecHttpResult,
   ExecOptions,
   ExecReattachTarget,
   ExecResult,

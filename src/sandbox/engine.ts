@@ -7,7 +7,6 @@ import {
 import { requestGraphQL } from "../core/graphql-client.js";
 import {
   RailwaySandboxCreateDocument,
-  RailwaySandboxExecDocument,
   RailwaySandboxSessionsDocument,
   RailwaySandboxDestroyDocument,
   RailwaySandboxHeartbeatDocument,
@@ -34,8 +33,6 @@ import {
   type RailwaySandboxHeartbeatMutation,
   type RailwaySandboxHeartbeatMutationVariables,
   type RailwaySandboxSessionFieldsFragment,
-  type RailwaySandboxExecMutation,
-  type RailwaySandboxExecMutationVariables,
   type RailwaySandboxSessionsQuery,
   type RailwaySandboxSessionsQueryVariables,
   type RailwaySandboxesQuery,
@@ -63,8 +60,6 @@ import type {
   ExecTarget,
   ForkOptions,
   ListOptions,
-  ExecHttpOptions,
-  ExecHttpResult,
   SandboxCheckpointInfo,
   SandboxCreationOptions,
   SandboxInfo,
@@ -287,32 +282,6 @@ export class SandboxEngine {
     }
     this.#config.log(`sessions: stopped after ${MAX_SESSION_PAGES} pages in sandbox ${sandboxId}`);
     return sessions;
-  }
-
-  /** One-request exec over HTTPS: no streaming, stdin, or cancellation. */
-  async execHttp(
-    sandboxId: string,
-    command: string,
-    options: ExecHttpOptions = {},
-  ): Promise<ExecHttpResult> {
-    if (
-      options.timeoutSec !== undefined &&
-      !(Number.isInteger(options.timeoutSec) && options.timeoutSec > 0)
-    ) {
-      // The HTTPS exec takes whole seconds, unlike the streaming exec's timer.
-      throw new TypeError("`timeoutSec` must be a positive whole number of seconds.");
-    }
-    this.#config.log(`execHttp in sandbox ${sandboxId}`);
-    const data = await requestGraphQL<
-      RailwaySandboxExecMutation,
-      RailwaySandboxExecMutationVariables
-    >(this.#config, RailwaySandboxExecDocument, {
-      environmentId: this.#config.environmentId,
-      id: sandboxId,
-      command,
-      ...(options.timeoutSec !== undefined ? { timeoutSec: options.timeoutSec } : {}),
-    });
-    return { ...data.sandboxExec };
   }
 
   async deleteCheckpoint(id: string): Promise<void> {

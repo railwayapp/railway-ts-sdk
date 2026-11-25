@@ -1,7 +1,6 @@
 import type { RailwayClientConfig } from "../core/config.js";
 import type {
   RailwaySandboxCheckpointFieldsFragment,
-  RailwaySandboxExecMutation,
   RailwaySandboxFieldsFragment,
   RailwaySandboxSessionFieldsFragment,
   RailwaySandboxTemplateBuildFieldsFragment,
@@ -77,18 +76,6 @@ export interface SandboxSessionInfo {
   /** When the session started (ISO timestamp); null when the runtime does not report it. */
   createdAt: string | null;
 }
-
-/** Options for `sandbox.execHttp`. */
-export interface ExecHttpOptions {
-  /** Server-side deadline in whole seconds. Defaults to 2 minutes; capped at 10 minutes. */
-  timeoutSec?: number;
-}
-
-/**
- * Result of `sandbox.execHttp`. Each stream is cut at 16,000 bytes (`truncated`). On a
- * server timeout `timedOut` is true and `exitCode` is -1.
- */
-export type ExecHttpResult = RailwaySandboxExecMutation["sandboxExec"];
 
 /** Knobs shared by every sandbox-creating call: `create`, `create(template)`, `create(checkpoint)`, and `fork`. */
 export interface SandboxCreationOptions {
