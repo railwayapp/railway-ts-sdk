@@ -4,7 +4,7 @@ import {
   type WebSocketConstructor,
 } from "./config.js";
 import { ExecControlUnsupportedError, ExecNotStartedError, RailwayConnectionError } from "./errors.js";
-import { watchHandshake } from "./ws-handshake.js";
+import { connectionProtocol, watchHandshake } from "./ws-handshake.js";
 import type { RailwayWsSocket } from "./ws-socket.js";
 
 /**
@@ -153,13 +153,15 @@ export function connectExecWs(args: {
       creditWaiters.push(wake);
       abort.addEventListener("abort", onWaitAbort, { once: true });
     });
+    const protocol = connectionProtocol();
     const socket = new WS(config.tcpProxyWsEndpoint, [
       SHELL_SUBPROTOCOL,
+      protocol,
       jwt,
     ]) as unknown as RailwayWsSocket;
     // After construction so a constructor that throws leaves nothing subscribed;
     // the response arrives asynchronously, so none can be missed.
-    const handshake = watchHandshake(jwt, "exec");
+    const handshake = watchHandshake(protocol, "exec");
     socket.binaryType = "arraybuffer";
     const assertOpen = () => {
       if (closed) {

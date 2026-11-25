@@ -131,7 +131,7 @@ describe("files.read", () => {
       },
     });
     expect(socket.url).toBe("wss://ssh.railway.com:2226/ws/files");
-    expect(socket.protocols).toEqual(["railway-shell", "jwt_0"]);
+    expect(socket.protocols).toEqual(["railway-shell", expect.stringMatching(/^railway-conn\./), "jwt_0"]);
     expect(socket.readyState).toBe(1);
   });
 

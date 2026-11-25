@@ -4,7 +4,7 @@ import {
   type WebSocketConstructor,
 } from "./config.js";
 import { RailwayConnectionError } from "./errors.js";
-import { watchHandshake } from "./ws-handshake.js";
+import { connectionProtocol, watchHandshake } from "./ws-handshake.js";
 import type { RailwayWsSocket } from "./ws-socket.js";
 
 /**
@@ -121,13 +121,15 @@ export function connectFilesWs(args: {
     let nextId = 1;
     const pending = new Map<string, PendingOp>();
 
+    const protocol = connectionProtocol();
     const socket = new WS(endpoint, [
       SHELL_SUBPROTOCOL,
+      protocol,
       jwt,
     ]) as unknown as RailwayWsSocket;
     // After construction so a constructor that throws leaves nothing subscribed;
     // the response arrives asynchronously, so none can be missed.
-    const handshake = watchHandshake(jwt, "files");
+    const handshake = watchHandshake(protocol, "files");
     socket.binaryType = "arraybuffer";
 
     const failAll = (error: Error) => {
