@@ -3,11 +3,7 @@ import {
   type NormalizedRailwayClientConfig,
   type WebSocketConstructor,
 } from "./config.js";
-import {
-  ExecControlUnsupportedError,
-  ExecNotStartedError,
-  RailwayConnectionError,
-} from "./errors.js";
+import { ExecControlUnsupportedError, ExecNotStartedError, RailwayConnectionError } from "./errors.js";
 import { watchHandshake } from "./ws-handshake.js";
 import type { RailwayWsSocket } from "./ws-socket.js";
 
