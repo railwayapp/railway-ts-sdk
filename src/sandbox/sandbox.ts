@@ -104,7 +104,7 @@ export class Sandbox implements AsyncDisposable {
       if (name === "") {
         throw new TypeError("Checkpoint name must be a non-empty string.");
       }
-      const engine = engineFromOptions(maybeOptions);
+      const engine = await engineFromOptions(maybeOptions);
       const info = await engine.create(maybeOptions, { name });
       return new Sandbox(engine, info);
     }
@@ -114,7 +114,7 @@ export class Sandbox implements AsyncDisposable {
     }
 
     if (isSandboxTemplate(sourceOrOptions)) {
-      const engine = engineFromOptions(maybeOptions);
+      const engine = await engineFromOptions(maybeOptions);
       const compiled = compileSandboxTemplate(sourceOrOptions);
       if (compiled.instructions.length === 0) {
         // No build steps → nothing to build. Build-time variables have no
@@ -126,7 +126,7 @@ export class Sandbox implements AsyncDisposable {
       return new Sandbox(engine, info);
     }
 
-    const engine = engineFromOptions(sourceOrOptions);
+    const engine = await engineFromOptions(sourceOrOptions);
     const info = await engine.create(sourceOrOptions);
     return new Sandbox(engine, info);
   }
@@ -135,7 +135,7 @@ export class Sandbox implements AsyncDisposable {
     id: string,
     options: ConnectOptions = {},
   ): Promise<Sandbox> {
-    const engine = engineFromOptions(options);
+    const engine = await engineFromOptions(options);
     const info = await engine.get(id);
     if (!info) {
       throw new SandboxNotFoundError({ id, environmentId: engine.environmentId });
@@ -144,7 +144,7 @@ export class Sandbox implements AsyncDisposable {
   }
 
   static async list(options: ListOptions = {}): Promise<SandboxInfo[]> {
-    const engine = engineFromOptions(options);
+    const engine = await engineFromOptions(options);
     return engine.list(options);
   }
 
@@ -152,7 +152,8 @@ export class Sandbox implements AsyncDisposable {
   static async checkpoints(
     options: CheckpointOptions = {},
   ): Promise<SandboxCheckpointInfo[]> {
-    return engineFromOptions(options).listCheckpoints();
+    const engine = await engineFromOptions(options);
+    return engine.listCheckpoints();
   }
 
   /** Rename a checkpoint by id; new sandboxes boot from it via the new name. */
@@ -165,7 +166,8 @@ export class Sandbox implements AsyncDisposable {
     if (trimmed === "") {
       throw new TypeError("Checkpoint name must be a non-empty string.");
     }
-    return engineFromOptions(options).renameCheckpoint(id, trimmed);
+    const engine = await engineFromOptions(options);
+    return engine.renameCheckpoint(id, trimmed);
   }
 
   /** Delete a checkpoint by id (find it by `key` via `Sandbox.checkpoints`). */
@@ -173,7 +175,8 @@ export class Sandbox implements AsyncDisposable {
     id: string,
     options: CheckpointOptions = {},
   ): Promise<void> {
-    await engineFromOptions(options).deleteCheckpoint(id);
+    const engine = await engineFromOptions(options);
+    await engine.deleteCheckpoint(id);
   }
 
   /**

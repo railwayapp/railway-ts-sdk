@@ -1,5 +1,7 @@
+import diagnosticsChannel from "node:diagnostics_channel";
 import { vi } from "vitest";
 
+import type { WebSocketConstructor } from "../src/core/config.js";
 import type { SandboxInfo } from "../src/index.js";
 import type {
   SandboxCheckpointInfo,
@@ -103,4 +105,50 @@ function parseJsonBody(body: BodyInit | null | undefined): FetchCall["body"] {
   } catch {
     return { query: "" };
   }
+}
+
+/**
+ * A WebSocket whose upgrade is refused the way Node's built-in one reports it:
+ * undici publishes the HTTP response on `undici:request:headers`, then the
+ * socket errors and closes with a bare 1006 without ever opening.
+ */
+export function refusedUpgradeWebSocket(response: {
+  status: number;
+  retryAfter?: string;
+}): { webSocketImpl: WebSocketConstructor; attempts: () => number } {
+  let attempts = 0;
+  class RefusedSocket {
+    binaryType = "blob";
+    onopen: (() => void) | null = null;
+    onmessage: ((event: { data: unknown }) => void) | null = null;
+    onclose: ((event: { code: number; reason: string }) => void) | null = null;
+    onerror: ((event: unknown) => void) | null = null;
+
+    constructor(url: string, protocols: string[]) {
+      attempts++;
+      queueMicrotask(() => {
+        diagnosticsChannel.channel("undici:request:headers").publish({
+          request: {
+            path: new URL(url).pathname,
+            headers: ["sec-websocket-protocol", protocols.join(", ")],
+          },
+          response: {
+            statusCode: response.status,
+            headers: response.retryAfter === undefined
+              ? []
+              : [Buffer.from("Retry-After"), Buffer.from(response.retryAfter)],
+          },
+        });
+        this.onerror?.({});
+        this.onclose?.({ code: 1006, reason: "" });
+      });
+    }
+
+    send(): void {}
+    close(): void {}
+  }
+  return {
+    webSocketImpl: RefusedSocket as unknown as WebSocketConstructor,
+    attempts: () => attempts,
+  };
 }

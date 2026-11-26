@@ -7,14 +7,9 @@ import {
   FilesRemoteError,
   type FilesWsConnection,
 } from "../core/files-ws-client.js";
-import { requestGraphQL } from "../core/graphql-client.js";
-import {
-  RailwayGenerateShellTokenDocument,
-  type RailwayGenerateShellTokenMutation,
-  type RailwayGenerateShellTokenMutationVariables,
-} from "../generated/graphql.js";
 import { SandboxFileNotFoundError, SandboxFilesError } from "./errors.js";
 import { startExec } from "./exec.js";
+import type { ShellTokens } from "./shell-token.js";
 import {
   canRetryWrite,
   isNotFound,
@@ -36,6 +31,7 @@ export interface FilesContext {
   config: NormalizedRailwayClientConfig;
   environmentId: string;
   sandboxId: string;
+  shellTokens: ShellTokens;
 }
 
 /** Read scope for inspection ops; the rw scope for anything that mutates. */
@@ -448,24 +444,23 @@ export class SandboxFiles {
     this.#idleConnections.push(entry);
   }
 
-  /** Mints a files-scoped token and opens a `/ws/files` session with it. */
+  /**
+   * Opens a `/ws/files` session on a files-scoped token. A failed dial drops the
+   * cached token, so a retry after a refused upgrade mints a fresh one.
+   */
   async #dial(scope: FilesScope): Promise<FilesWsConnection> {
-    const { config, environmentId, sandboxId } = this.#context;
-    const input: RailwayGenerateShellTokenMutationVariables["input"] = {
-      environmentId,
-      instanceId: sandboxId,
-      kind: "sandbox",
-      scope,
-    };
-    const tokenData = await requestGraphQL<
-      RailwayGenerateShellTokenMutation,
-      RailwayGenerateShellTokenMutationVariables
-    >(config, RailwayGenerateShellTokenDocument, { input });
-    return connectFilesWs({
-      config,
-      jwt: tokenData.generateShellToken,
-      endpoint: deriveFilesWsEndpoint(config.tcpProxyWsEndpoint),
-    });
+    const { config, sandboxId, shellTokens } = this.#context;
+    const jwt = await shellTokens.get(this.#context, scope);
+    try {
+      return await connectFilesWs({
+        config,
+        jwt,
+        endpoint: deriveFilesWsEndpoint(config.tcpProxyWsEndpoint),
+      });
+    } catch (error) {
+      shellTokens.evict(sandboxId, scope, jwt);
+      throw error;
+    }
   }
 
   #wrapError(operation: string, path: string, error: unknown): unknown {

@@ -55,6 +55,7 @@ import {
   SandboxTimeoutError,
 } from "./errors.js";
 import { startExec, type ExecContext, type ExecHandle } from "./exec.js";
+import { ShellTokens } from "./shell-token.js";
 import { createSandboxFiles, type SandboxFiles } from "./files.js";
 import type {
   CompiledTemplate,
@@ -96,6 +97,7 @@ export interface SandboxOptions extends RailwayClientConfig {
  */
 export class SandboxEngine {
   readonly #config: SandboxEngineConfig;
+  readonly #shellTokens = new ShellTokens();
 
   constructor(config: SandboxEngineConfig) {
     this.#config = config;
@@ -442,6 +444,7 @@ export class SandboxEngine {
       config: this.#config,
       environmentId: this.#config.environmentId,
       sandboxId: id,
+      shellTokens: this.#shellTokens,
     };
     return startExec(context, target, options);
   }
@@ -451,6 +454,7 @@ export class SandboxEngine {
       config: this.#config,
       environmentId: this.#config.environmentId,
       sandboxId: id,
+      shellTokens: this.#shellTokens,
     });
   }
 
@@ -564,9 +568,11 @@ function creationLine(
   return parts.join(" ");
 }
 
-export function engineFromOptions(options: SandboxOptions = {}): SandboxEngine {
+export async function engineFromOptions(
+  options: SandboxOptions = {},
+): Promise<SandboxEngine> {
   const base = normalizeRailwayClientConfig(options);
-  const environmentId = resolveEnvironmentId(options.environmentId);
+  const environmentId = await resolveEnvironmentId(base, options.environmentId);
   return new SandboxEngine({ ...base, environmentId });
 }
 

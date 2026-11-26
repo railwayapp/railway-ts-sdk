@@ -79,10 +79,8 @@ class SandboxTemplateRecipe implements SandboxTemplate {
     const compiled = this.compile();
     // Nothing to build without instructions; build-time env alone has no effect.
     if (compiled.instructions.length > 0) {
-      await engineFromOptions(options).buildTemplateUntilReady(
-        compiled,
-        options.region,
-      );
+      const engine = await engineFromOptions(options);
+      await engine.buildTemplateUntilReady(compiled, options.region);
     }
     return this;
   }

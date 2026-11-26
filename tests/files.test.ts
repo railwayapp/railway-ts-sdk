@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { deriveFilesWsEndpoint } from "../src/core/config.js";
-import { RailwayConnectionError } from "../src/core/errors.js";
+import { RailwayConnectionError, RailwayRateLimitError } from "../src/core/errors.js";
 import { loginShellCommand } from "../src/sandbox/shell.js";
 import {
   Sandbox,
@@ -9,7 +9,12 @@ import {
   SandboxFiles,
   SandboxFilesError,
 } from "../src/index.js";
-import { clearRailwayEnv, createFetchMock, sandboxInfo } from "./test-helpers.js";
+import {
+  clearRailwayEnv,
+  createFetchMock,
+  refusedUpgradeWebSocket,
+  sandboxInfo,
+} from "./test-helpers.js";
 import {
   createFilesWsMock,
   FRAME_READ_CHUNK,
@@ -126,7 +131,7 @@ describe("files.read", () => {
       },
     });
     expect(socket.url).toBe("wss://ssh.railway.com:2226/ws/files");
-    expect(socket.protocols).toEqual(["railway-shell", "jwt_0"]);
+    expect(socket.protocols).toEqual(["railway-shell", expect.stringMatching(/^railway-conn\./), "jwt_0"]);
     expect(socket.readyState).toBe(1);
   });
 
@@ -426,6 +431,19 @@ describe("files.read", () => {
     expect(bytes[1024]).toBe(8);
     expect(bytes[1024 + mb - 1]).toBe(8);
   }, 15_000);
+
+  it("surfaces a rate-limited upgrade without retrying", async () => {
+    const ws = refusedUpgradeWebSocket({ status: 429, retryAfter: "15" });
+    const mock = createFetchMock([
+      { data: { sandboxCreate: sandboxInfo() } },
+      ...Array.from({ length: 4 }, (_, i) => shellToken(`jwt_${i}`)),
+    ]);
+    const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch, webSocketImpl: ws.webSocketImpl });
+    const error = (await sandbox.files.read("/file").catch(e => e)) as RailwayRateLimitError;
+    expect(error).toBeInstanceOf(RailwayRateLimitError);
+    expect(error.retryAfterMs).toBe(15_000);
+    expect(ws.attempts()).toBe(1);
+  });
 
   it("gives up after repeated connection drops", async () => {
     const { sandbox, ws } = await filesSandbox(4);

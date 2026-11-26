@@ -1,0 +1,14 @@
+# Workflow actions are pinned to full commit SHAs (the `# vX.Y.Z` comment names
+# the release). Dependabot proposes pin bumps so they do not go stale; the
+# cooldown keeps brand-new releases out until they have had a week of exposure.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]

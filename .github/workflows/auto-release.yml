@@ -27,7 +27,7 @@ jobs:
       tag: v${{ steps.bump.outputs.version }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: main
           fetch-depth: 0
@@ -72,7 +72,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          LAST_TAG=$(git tag --list 'v*.*.*' --sort=-v:refname | head -1)
           rm -f /tmp/bump_types
           touch /tmp/bump_types
 
@@ -108,8 +108,9 @@ jobs:
           fi
 
           echo "bump=$BUMP" >> "$GITHUB_OUTPUT"
+          echo "last-tag=$LAST_TAG" >> "$GITHUB_OUTPUT"
 
-      - uses: jdx/mise-action@v2
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
           cache: true
 
@@ -121,10 +122,18 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+      # main is PR-only, so the bump commit is never pushed there: it hangs off
+      # main and only its tag is published. main's package.json therefore lags
+      # npm, and the next version is computed from the latest tag.
       - name: Bump version and create tag
         id: bump
+        env:
+          LAST_TAG: ${{ steps.release-type.outputs.last-tag }}
         run: |
           set -euo pipefail
+          if [ -n "$LAST_TAG" ]; then
+            npm version "${LAST_TAG#v}" --no-git-tag-version --allow-same-version
+          fi
           npm version ${{ steps.release-type.outputs.bump }} --no-git-tag-version
           pnpm install --lockfile-only
           VERSION=$(node -p "require('./package.json').version")
@@ -133,8 +142,8 @@ jobs:
           git tag "v$VERSION"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Push changes and tag
-        run: git push --atomic origin main "v${{ steps.bump.outputs.version }}"
+      - name: Push tag
+        run: git push origin "v${{ steps.bump.outputs.version }}"
 
   publish:
     name: Trigger release

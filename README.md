@@ -31,7 +31,7 @@ bun add railway
 ```ts
 import { Sandbox } from "railway";
 
-// reads RAILWAY_API_TOKEN + RAILWAY_ENVIRONMENT_ID from the environment
+// reads a project token from RAILWAY_TOKEN; the environment comes from the token
 const sandbox = await Sandbox.create();
 
 const { stdout } = await sandbox.exec("echo hello");
@@ -541,7 +541,7 @@ then an environment variable, then a default. Pass explicit values to override.
 | Option | Environment variable | Default |
 | --- | --- | --- |
 | `token` | `RAILWAY_TOKEN` (project token, recommended), then `RAILWAY_API_TOKEN` | _(required)_ |
-| `environmentId` | `RAILWAY_ENVIRONMENT_ID` | _(required)_ |
+| `environmentId` | `RAILWAY_ENVIRONMENT_ID` | the project token's environment; required with a bearer token |
 | `endpoint` | `RAILWAY_GRAPHQL_ENDPOINT` | `https://backboard.railway.com/graphql/v2` |
 | `fetch` | n/a | `globalThis.fetch` |
 | `webSocketImpl` | n/a | `globalThis.WebSocket` (pass the `ws` package where none exists) |
@@ -549,8 +549,12 @@ then an environment variable, then a default. Pass explicit values to override.
 
 A token read from `RAILWAY_TOKEN` is treated as a [project token](https://docs.railway.com/integrations/api#project-token)
 (`authType: "project-token"`), which scopes access to one project/environment and
-lets feature flags infer their scope automatically. `RAILWAY_API_TOKEN` (bearer
-account/workspace token) is the fallback. Explicit tokens default to bearer; pass
+lets the SDK infer the rest: sandboxes use the token's environment (looked up once
+per token with the `projectToken` query and cached), and feature flags infer their
+scope. So `RAILWAY_TOKEN` alone is enough; set `environmentId` only to target a
+different environment explicitly. `RAILWAY_API_TOKEN` (bearer account/workspace token)
+is the fallback. It spans environments, so it also needs `environmentId` or
+`RAILWAY_ENVIRONMENT_ID`. Explicit tokens default to bearer; pass
 `authType: "project-token"` when supplying a project token explicitly.
 
 ```ts
@@ -576,9 +580,14 @@ template build seems stuck. Tokens and `env` values are never logged.
 All errors extend `RailwayError`:
 
 - `RailwayAuthError`: a required credential (`token` / `environmentId`) could not be
-  resolved. Names the missing variable on `.variable`.
+  resolved, or Railway rejected the project token while looking up its environment.
+  Names the missing variable on `.variable`. A failed lookup request (network) throws
+  `RailwayConnectionError`.
 - `RailwayGraphQLError`: the Railway API returned an error. Carries `.status`,
   `.errors`, and `.responseBody`.
+- `RailwayRateLimitError`: Railway refused the request or exec/file connection for
+  rate limiting. Nothing ran and the SDK does not retry it. Carries `.retryAfterMs`
+  when the server says how long to wait.
 - `StaleEnvironmentError`: an IaC `apply` was rejected because the environment changed
   since the plan was computed. Re-run `plan` and review before applying again.
 - `SandboxNotFoundError`: `connect` or `refresh` could not find the sandbox. Carries
@@ -597,8 +606,9 @@ All errors extend `RailwayError`:
 
 ## Requirements
 
-Node.js 22+ (for `await using`). Works in any runtime with a global `fetch`; pass a
-`fetch` implementation explicitly where there is none.
+Node.js 22+. Node.js 24+ runs `await using` natively; on Node.js 22, compile it with
+TypeScript 5.2+ and a `target` below `ESNext`, such as `ES2022`. Works in any runtime
+with a global `fetch`; pass a `fetch` implementation explicitly where there is none.
 
 ## License
 
