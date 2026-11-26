@@ -19,6 +19,7 @@ import {
   refusedUpgradeWebSocket,
   sandboxInfo,
 } from "./test-helpers.js";
+import { connectionProtocol, watchHandshake } from "../src/core/ws-handshake.js";
 import { createExecWsMock } from "./exec-ws-mock.js";
 
 const auth = { token: "token_123", environmentId: "environment_123" };
@@ -343,7 +344,7 @@ describe("exec", () => {
       },
     });
     expect(socket.url).toBe("wss://ssh.railway.com:2226/ws/exec");
-    expect(socket.protocols).toEqual(["railway-shell", "jwt_abc"]);
+    expect(socket.protocols).toEqual(["railway-shell", expect.stringMatching(/^railway-conn\./), "jwt_abc"]);
     expect(socket.sentText.find(f => f.type === "init_exec")).toEqual({
       type: "init_exec",
       data: { command: "bash -lc 'echo hi'" },
@@ -899,5 +900,93 @@ describe("exec", () => {
       closeCode: 1011,
       stdout: "partial\n",
     });
+  });
+});
+
+describe("shell token reuse", () => {
+  /** A JWT-shaped token: the SDK reads only `iat`/`exp` from the payload. */
+  const jwt = (name: string, lifetimeSec = 300) => {
+    const payload = Buffer.from(JSON.stringify({ iat: 1_000, exp: 1_000 + lifetimeSec, jti: name })).toString("base64url");
+    return `eyJhbGciOiJFUzI1NiJ9.${payload}.${name}`;
+  };
+  const tokenOf = (socket: { protocols: string[] }) => socket.protocols.at(-1)!.split(".")[2];
+  const mints = (mock: { calls: { body: { query: string } }[] }) =>
+    mock.calls.filter(c => c.body.query.includes("generateShellToken")).length;
+
+  async function finish(ws: ReturnType<typeof createExecWsMock>, handle: ExecHandle) {
+    const socket = await ws.nextSocket();
+    await vi.waitFor(() => expect(socket.sentText.map(f => f.type)).toContain("init_exec"));
+    socket.serverExit(0);
+    await handle;
+    return socket;
+  }
+
+  it("reuses one token across execs until a minute before it expires", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { sandbox, ws, mock } = await wsSandbox([shellToken(jwt("a")), shellToken(jwt("b"))]);
+    expect(tokenOf(await finish(ws, sandbox.exec("one")))).toBe("a");
+    vi.advanceTimersByTime(239_000);
+    expect(tokenOf(await finish(ws, sandbox.exec("two")))).toBe("a");
+    vi.advanceTimersByTime(2_000);
+    expect(tokenOf(await finish(ws, sandbox.exec("three")))).toBe("b");
+    expect(mints(mock)).toBe(2);
+  });
+
+  it("shares one in-flight mint between concurrent execs", async () => {
+    const { sandbox, ws, mock } = await wsSandbox([shellToken(jwt("a"))]);
+    const handles = [sandbox.exec("one"), sandbox.exec("two")];
+    await vi.waitFor(() => expect(ws.sockets).toHaveLength(2));
+    for (const socket of ws.sockets) {
+      await vi.waitFor(() => expect(socket.sentText.map(f => f.type)).toContain("init_exec"));
+      socket.serverExit(0);
+    }
+    await Promise.all(handles);
+    expect(ws.sockets.map(tokenOf)).toEqual(["a", "a"]);
+    expect(mints(mock)).toBe(1);
+  });
+
+  it("drops a cached token whose connection failed and retries on a fresh one", async () => {
+    const { sandbox, ws, mock } = await wsSandbox([shellToken(jwt("a")), shellToken(jwt("b"))], { manualOpen: true });
+    const first = sandbox.exec("one");
+    const opened = await vi.waitFor(() => ws.sockets[0] ?? Promise.reject(new Error("no socket")));
+    opened.serverOpen();
+    await vi.waitFor(() => expect(opened.sentText.map(f => f.type)).toContain("init_exec"));
+    opened.serverExit(0);
+    await first;
+
+    const second = sandbox.exec("two");
+    const refused = await vi.waitFor(() => ws.sockets[1] ?? Promise.reject(new Error("no socket")));
+    expect(tokenOf(refused)).toBe("a");
+    refused.serverClose(1006, "");
+    const retry = await vi.waitFor(() => ws.sockets[2] ?? Promise.reject(new Error("no socket")));
+    expect(tokenOf(retry)).toBe("b");
+    retry.serverOpen();
+    await vi.waitFor(() => expect(retry.sentText.map(f => f.type)).toContain("init_exec"));
+    retry.serverExit(0);
+    await expect(second).resolves.toMatchObject({ exitCode: 0 });
+    expect(mints(mock)).toBe(2);
+  });
+
+  it("does not cache a failed mint", async () => {
+    const { sandbox, ws, mock } = await wsSandbox([
+      { errors: [{ message: "backboard unavailable" }] },
+      shellToken(jwt("a")),
+    ]);
+    await expect(sandbox.exec("one")).rejects.toThrow("backboard unavailable");
+    expect(tokenOf(await finish(ws, sandbox.exec("two")))).toBe("a");
+    expect(mints(mock)).toBe(2);
+  });
+
+  it("attributes a refused upgrade to its own socket when connections share a token", () => {
+    const token = jwt("shared");
+    const [refused, accepted] = [connectionProtocol(), connectionProtocol()];
+    const watches = [watchHandshake(refused, "exec"), watchHandshake(accepted, "exec")];
+    diagnosticsChannel.channel("undici:request:headers").publish({
+      request: { headers: ["sec-websocket-protocol", `railway-shell, ${refused}, ${token}`] },
+      response: { statusCode: 429, headers: [] },
+    });
+    expect(watches[0]!.rateLimitError()).toBeInstanceOf(RailwayRateLimitError);
+    expect(watches[1]!.rateLimitError()).toBeUndefined();
+    for (const watch of watches) watch.dispose();
   });
 });

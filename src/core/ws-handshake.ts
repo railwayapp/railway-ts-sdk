@@ -3,8 +3,9 @@
  * WHATWG WebSocket API hides it (a refused upgrade surfaces as a bare 1006),
  * but Node's built-in WebSocket runs the handshake through undici, which
  * publishes every response on `undici:request:headers`. Each SDK connection
- * presents a freshly minted JWT as its last subprotocol, so the token
- * identifies which pending handshake a response belongs to.
+ * offers a unique `connectionProtocol()` among its subprotocols, which
+ * identifies the pending handshake a response belongs to (the JWT cannot: it
+ * is shared by every connection until it expires).
  *
  * Elsewhere (browsers, Deno, a custom `webSocketImpl`) nothing is published and
  * callers see only the close code.
@@ -43,9 +44,8 @@ let diagnostics: Diagnostics | null | undefined;
 function onHeaders(message: unknown): void {
   const { request, response } = (message ?? {}) as UndiciHeadersMessage;
   if (!Array.isArray(request?.headers) || typeof response?.statusCode !== "number") return;
-  const protocols = headerValue(request.headers, "sec-websocket-protocol");
-  const jwt = protocols?.split(",").at(-1)?.trim();
-  const entry = jwt === undefined ? undefined : pending.get(jwt);
+  const protocols = headerValue(request.headers, "sec-websocket-protocol")?.split(",") ?? [];
+  const entry = protocols.map(p => pending.get(p.trim())).find(Boolean);
   if (!entry) return;
   entry.response = {
     status: response.statusCode,
@@ -72,17 +72,32 @@ function loadDiagnostics(): Diagnostics | null {
   return diagnostics;
 }
 
+// Unique per process, without `crypto.randomUUID` (browsers expose it only in
+// secure contexts). The random prefix keeps separately bundled SDK copies, which
+// share the diagnostics channel, from colliding.
+const processPrefix = Math.random().toString(36).slice(2, 10);
+let connectionCount = 0;
+
 /**
- * Watches the handshake for the socket about to be opened with `jwt`. The
- * channel is subscribed only while a handshake is pending, so idle processes
- * pay nothing and undici skips publishing.
+ * A subprotocol unique to one connection. tcp-proxy ignores it: it negotiates
+ * `railway-shell` and reads the token from the last value.
  */
-export function watchHandshake(jwt: string, endpoint: "exec" | "files"): HandshakeWatch {
+export function connectionProtocol(): string {
+  return `railway-conn.${processPrefix}.${++connectionCount}`;
+}
+
+/**
+ * Watches the handshake for the socket about to be opened offering `protocol`
+ * (from `connectionProtocol()`). The channel is subscribed only while a
+ * handshake is pending, so idle processes pay nothing and undici skips
+ * publishing.
+ */
+export function watchHandshake(protocol: string, endpoint: "exec" | "files"): HandshakeWatch {
   const channels = loadDiagnostics();
   if (!channels) return { rateLimitError: () => undefined, dispose: () => {} };
   const entry: { response?: HandshakeResponse } = {};
   if (pending.size === 0) channels.subscribe(CHANNEL, onHeaders);
-  pending.set(jwt, entry);
+  pending.set(protocol, entry);
   let disposed = false;
   return {
     rateLimitError: () => {
@@ -95,7 +110,7 @@ export function watchHandshake(jwt: string, endpoint: "exec" | "files"): Handsha
     dispose: () => {
       if (disposed) return;
       disposed = true;
-      if (pending.get(jwt) === entry) pending.delete(jwt);
+      if (pending.get(protocol) === entry) pending.delete(protocol);
       if (pending.size === 0) channels.unsubscribe(CHANNEL, onHeaders);
     },
   };

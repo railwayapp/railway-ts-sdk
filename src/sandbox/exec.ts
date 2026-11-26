@@ -9,14 +9,9 @@ import {
   shouldRetryBeforeStart,
   type ExecWsConnection,
 } from "../core/exec-ws-client.js";
-import { requestGraphQL } from "../core/graphql-client.js";
 import { ExecInterruptedError } from "./errors.js";
 import { loginShellCommand } from "./shell.js";
-import {
-  RailwayGenerateShellTokenDocument,
-  type RailwayGenerateShellTokenMutation,
-  type RailwayGenerateShellTokenMutationVariables,
-} from "../generated/graphql.js";
+import type { ShellTokens } from "./shell-token.js";
 import type {
   ExecOptions,
   ExecResult,
@@ -147,6 +142,7 @@ export interface ExecContext {
   config: NormalizedRailwayClientConfig;
   environmentId: string;
   sandboxId: string;
+  shellTokens: ShellTokens;
 }
 
 interface ExecControl {
@@ -161,7 +157,7 @@ interface ExecControl {
 /**
  * Runs an exec over the tcp-proxy `/ws/exec` bridge: a non-PTY session with
  * separated stdout/stderr and a real exit code. A `shell`-scoped JWT (minted by
- * `generateShellToken`) authorizes the path.
+ * `generateShellToken`, reused until near expiry) authorizes the path.
  *
  * Durable sessions survive disconnects. Only detach closes a live session
  * without terminating it; timeout/abort send signals and await a remote exit.
@@ -338,29 +334,12 @@ async function runExec(
     onSessionName(name);
   };
 
-  const input: RailwayGenerateShellTokenMutationVariables["input"] = {
-    environmentId: context.environmentId,
-    instanceId: context.sandboxId,
-    kind: "sandbox",
-    scope: "shell",
-  };
-  const mintShellToken = async () => {
-    let tokenData: RailwayGenerateShellTokenMutation;
-    try {
-      tokenData = await requestGraphQL<
-        RailwayGenerateShellTokenMutation,
-        RailwayGenerateShellTokenMutationVariables
-      >(context.config, RailwayGenerateShellTokenDocument, { input }, options.signal);
-    } catch (error) {
-      // A custom fetch may reject an aborted request with its own AbortError;
-      // callers are promised the signal's reason.
-      options.signal?.throwIfAborted();
-      throw error;
-    }
+  const shellToken = async () => {
+    const token = await context.shellTokens.get(context, "shell", options.signal);
     options.signal?.throwIfAborted();
-    return tokenData.generateShellToken;
+    return token;
   };
-  const jwt = await mintShellToken();
+  const jwt = await shellToken();
 
   // Unbounded unless the caller asks for a cap, as in 3.12. Long-running or
   // streamed commands should pass `captureOutput: false` instead.
@@ -527,10 +506,11 @@ async function runExec(
       },
   };
   // A connection that fails before the command is sent left nothing running, so
-  // one reconnect on a fresh token is safe. Only transient failures (a dropped
-  // socket, a deploy) are retried; denials, routing failures, the readiness
-  // timeout, an old proxy, and aborts are not. One attempt, unlike the files
-  // client's three, because each one mints a token and may wait out routing.
+  // one reconnect is safe. Only transient failures (a dropped socket, a deploy)
+  // are retried; denials, routing failures, the readiness timeout, an old proxy,
+  // and aborts are not. The cached token is dropped first in case it was the
+  // cause (a refused upgrade is a bare 1006). One attempt, unlike the files
+  // client's three, because each one may wait out routing.
   const connectWithRetry = async () => {
     try {
       return await connectExecWs({ config: context.config, jwt, ...init, handlers });
@@ -540,10 +520,11 @@ async function runExec(
       context.config.log(
         `exec: ${(error as Error).message} Retrying once in sandbox=${context.sandboxId}`,
       );
+      context.shellTokens.evict(context.sandboxId, "shell", jwt);
       await abortableDelay(CONNECT_RETRY_DELAY_MS, options.signal);
       return connectExecWs({
         config: context.config,
-        jwt: await mintShellToken(),
+        jwt: await shellToken(),
         ...init,
         handlers,
       });
@@ -571,7 +552,7 @@ async function runExec(
     // One legacy attempt; no further retry stacks on the fallback.
     connection = await connectExecWs({
       config: context.config,
-      jwt: await mintShellToken(),
+      jwt: await shellToken(),
       ...init,
       legacy: true,
       handlers,
