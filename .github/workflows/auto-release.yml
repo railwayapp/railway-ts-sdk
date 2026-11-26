@@ -27,7 +27,7 @@ jobs:
       tag: v${{ steps.bump.outputs.version }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           fetch-depth: 0
@@ -110,7 +110,7 @@ jobs:
           echo "bump=$BUMP" >> "$GITHUB_OUTPUT"
           echo "last-tag=$LAST_TAG" >> "$GITHUB_OUTPUT"
 
-      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+      - uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
           cache: true
 
