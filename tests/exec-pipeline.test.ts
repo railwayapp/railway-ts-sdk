@@ -13,6 +13,8 @@ const jwt = (name: string) => {
 const shellToken = (name: string) => ({ data: { generateShellToken: jwt(name) } });
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 const pipelineCaps = { version: 3, stdin_chunks: 8, stdin_chunk_bytes: 16384, reuse: true, pipeline: true };
+const reuseCaps = { version: 3, stdin_chunks: 8, stdin_chunk_bytes: 16384, reuse: true };
+const validSessionName = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 beforeEach(clearRailwayEnv);
 afterEach(() => {
@@ -38,20 +40,124 @@ async function sandboxWith(
 
 const types = (socket: MockExecSocket) => socket.sentText.map(f => f.type);
 const inits = (socket: MockExecSocket) => socket.sentText.filter(f => f.type === "init_exec");
+const initData = (socket: MockExecSocket, index = 0) =>
+  inits(socket)[index]!.data as Record<string, unknown>;
 
-describe("pipelined exec start", () => {
-  it("sends init_exec right after the hello without waiting for capabilities", async () => {
-    const { sandbox, ws } = await sandboxWith([shellToken("a")], { reusePeer: true, pipelinePeer: true, manualCapabilities: true });
+function settledFlag(promise: PromiseLike<unknown>) {
+  const state = { settled: false };
+  promise.then(() => { state.settled = true; }, () => { state.settled = true; });
+  return state;
+}
+
+describe("pooled exec on a proxy without pipelining", () => {
+  it("waits for capabilities before sending init_exec", async () => {
+    const { sandbox, ws } = await sandboxWith([shellToken("a")], { reusePeer: true, manualCapabilities: true });
     const exec = sandbox.exec("echo hi");
-    const socket = await ws.nextSocket();
-    await vi.waitFor(() => expect(inits(socket)).toHaveLength(1));
-    expect(socket.sentText[0]).toEqual({ type: "exec_hello", data: { reuse: true, pipeline: true } });
-    expect(types(socket)).toEqual(["exec_hello", "init_exec", "stdin_close"]);
+    const a = await ws.nextSocket();
+    await tick();
+    await tick();
+    expect(a.sentText).toEqual([{ type: "exec_hello", data: { reuse: true, pipeline: true } }]);
 
-    socket.serverFrame({ type: "exec_capabilities", data: pipelineCaps });
-    socket.serverStarted();
-    socket.serverStdout("hi\n");
-    socket.serverExit(0);
+    a.serverFrame({ type: "exec_capabilities", data: reuseCaps });
+    await vi.waitFor(() => expect(types(a)).toEqual(["exec_hello", "init_exec", "stdin_close"]));
+    a.serverStdout("hi\n");
+    a.serverExit(0);
+    await expect(exec).resolves.toMatchObject({ exitCode: 0, stdout: "hi\n" });
+  });
+
+  it("sends no command when aborted before capabilities", async () => {
+    const { sandbox, ws } = await sandboxWith([shellToken("a")], { reusePeer: true, manualCapabilities: true });
+    const controller = new AbortController();
+    const exec = sandbox.exec("touch /ran", { signal: controller.signal });
+    const a = await ws.nextSocket();
+    await tick();
+    const reason = new Error("stop");
+    controller.abort(reason);
+    await expect(exec).rejects.toBe(reason);
+    expect(types(a)).toEqual(["exec_hello"]);
+    expect(a.readyState).toBe(3);
+    expect(ws.sockets).toHaveLength(1);
+  });
+
+  it("signals the command at once on kill() after capabilities", async () => {
+    const { sandbox, ws } = await sandboxWith([shellToken("a")], { reusePeer: true });
+    const exec = sandbox.exec("sleep 10");
+    const a = await ws.nextSocket();
+    await vi.waitFor(() => expect(inits(a)).toHaveLength(1));
+    await tick();
+    await exec.kill("TERM");
+    expect(a.sentText.filter(f => f.type === "signal")).toEqual([{ type: "signal", data: { signal: "TERM" } }]);
+    a.serverExit(-1);
+    await expect(exec).resolves.toMatchObject({ exitCode: -1 });
+  });
+
+  it("commits at capabilities and closes after exit when the proxy does not reuse", async () => {
+    const { sandbox, ws } = await sandboxWith([shellToken("a")], {});
+    const exec = sandbox.exec("echo hi");
+    const a = await ws.nextSocket();
+    await vi.waitFor(() => expect(inits(a)).toHaveLength(1));
+    expect(types(a)).toEqual(["exec_hello", "init_exec", "stdin_close"]);
+    a.serverStdout("hi\n");
+    a.serverExit(0);
+    await expect(exec).resolves.toMatchObject({ exitCode: 0, stdout: "hi\n" });
+    await vi.waitFor(() => expect(a.readyState).toBe(3));
+  });
+
+  it("does not retry a close after capabilities", async () => {
+    const { sandbox, ws } = await sandboxWith([shellToken("a"), shellToken("b")], { reusePeer: true });
+    const exec = sandbox.exec("sleep 10");
+    const a = await ws.nextSocket();
+    await vi.waitFor(() => expect(inits(a)).toHaveLength(1));
+    await tick();
+    a.serverClose(1006);
+    await expect(exec).rejects.toBeInstanceOf(ExecInterruptedError);
+    await tick();
+    expect(ws.sockets).toHaveLength(1);
+  });
+
+  it("retries a close before capabilities, which sent no command", async () => {
+    const { sandbox, ws } = await sandboxWith([shellToken("a"), shellToken("b")], { manualCapabilities: true });
+    const exec = sandbox.exec("echo hi");
+    const a = await ws.nextSocket();
+    await tick();
+    a.serverClose(1006);
+    const b = await ws.nextSocket();
+    expect(inits(a)).toHaveLength(0);
+    b.serverFrame({ type: "exec_capabilities", data: { version: 2, stdin_chunks: 8, stdin_chunk_bytes: 16384 } });
+    await vi.waitFor(() => expect(inits(b)).toHaveLength(1));
+    b.serverExit(0);
+    await expect(exec).resolves.toMatchObject({ exitCode: 0 });
+  });
+
+  it("rejects invalid capabilities before sending a command", async () => {
+    const { sandbox, ws } = await sandboxWith([shellToken("a")], { manualCapabilities: true });
+    const exec = sandbox.exec("echo hi");
+    const a = await ws.nextSocket();
+    await tick();
+    a.serverFrame({ type: "exec_capabilities", data: { version: 1 } });
+    const error = (await exec.catch(e => e)) as Error;
+    expect(error.message).toContain("Unsupported exec control capabilities; no command was sent");
+    expect(inits(a)).toHaveLength(0);
+  });
+});
+
+describe("pooled exec on a pipelining proxy", () => {
+  it("sends init_exec after early capabilities, before the command starts", async () => {
+    const { sandbox, ws } = await sandboxWith([shellToken("a")], { reusePeer: true, pipelinePeer: true, manualCapabilities: true, manualStart: true });
+    const exec = sandbox.exec("echo hi");
+    const state = settledFlag(exec);
+    const a = await ws.nextSocket();
+    await tick();
+    expect(types(a)).toEqual(["exec_hello"]);
+
+    a.serverFrame({ type: "exec_capabilities", data: pipelineCaps });
+    await vi.waitFor(() => expect(types(a)).toEqual(["exec_hello", "init_exec", "stdin_close"]));
+    await tick();
+    expect(state.settled).toBe(false);
+
+    a.serverStarted();
+    a.serverStdout("hi\n");
+    a.serverExit(0);
     await expect(exec).resolves.toMatchObject({ exitCode: 0, stdout: "hi\n" });
   });
 
@@ -73,16 +179,43 @@ describe("pipelined exec start", () => {
     expect(ws.sockets).toHaveLength(1);
   });
 
-  it("retries once on a fresh socket when the proxy closes before exec_started", async () => {
-    const { sandbox, ws, mock } = await sandboxWith([shellToken("a"), shellToken("b")], { reusePeer: true, pipelinePeer: true, manualStart: true });
-    const exec = sandbox.exec("echo hi");
+  it("names each fresh durable exec with its own random session name", async () => {
+    const { sandbox, ws } = await sandboxWith([shellToken("a")], { reusePeer: true, pipelinePeer: true });
+    const first = sandbox.exec("echo one", { env: { A: "1" }, cwd: "/work" });
     const a = await ws.nextSocket();
     await vi.waitFor(() => expect(inits(a)).toHaveLength(1));
-    a.serverClose(1012, "service restart");
+    a.serverExit(0);
+    await first;
+    const second = sandbox.exec("echo two");
+    await vi.waitFor(() => expect(inits(a)).toHaveLength(2));
+    a.serverExit(0);
+    await second;
+    const third = sandbox.exec("echo three", { ephemeral: true });
+    await vi.waitFor(() => expect(inits(a)).toHaveLength(3));
+    a.serverExit(0);
+    await third;
+
+    const one = initData(a, 0);
+    const two = initData(a, 1);
+    expect(one).toMatchObject({ env: { A: "1" }, cwd: "/work" });
+    expect(one.durable_session_name).toMatch(validSessionName);
+    expect(two.durable_session_name).toMatch(validSessionName);
+    expect(one.durable_session_name).not.toBe(two.durable_session_name);
+    expect(initData(a, 2)).not.toHaveProperty("durable_session_name");
+  });
+
+  it.each([1006, 1001, 1012, 1013])("reattaches with the same name after a %i close between init_exec and exec_started", async code => {
+    const { sandbox, ws, mock } = await sandboxWith([shellToken("a"), shellToken("b")], { reusePeer: true, pipelinePeer: true, manualStart: true });
+    const exec = sandbox.exec("echo hi", { env: { A: "1" }, cwd: "/work" });
+    const a = await ws.nextSocket();
+    await vi.waitFor(() => expect(inits(a)).toHaveLength(1));
+    a.serverClose(code);
 
     const b = await ws.nextSocket();
     expect(b.protocols.at(-1)!.split(".")[2]).toBe("b");
     await vi.waitFor(() => expect(inits(b)).toHaveLength(1));
+    expect(initData(b)).toEqual(initData(a));
+    expect(initData(b).durable_session_name).toMatch(validSessionName);
     b.serverStarted();
     b.serverStdout("hi\n");
     b.serverExit(0);
@@ -90,18 +223,67 @@ describe("pipelined exec start", () => {
     expect(mock.calls).toHaveLength(3);
   });
 
-  it("gives up after one retry before exec_started", async () => {
+  it.each([1006, 1012])("rejects an ephemeral exec as outcome unknown after a %i close between init_exec and exec_started", async code => {
+    const { sandbox, ws } = await sandboxWith([shellToken("a"), shellToken("b")], { reusePeer: true, pipelinePeer: true, manualStart: true });
+    const exec = sandbox.exec("echo hi", { ephemeral: true });
+    const a = await ws.nextSocket();
+    await vi.waitFor(() => expect(inits(a)).toHaveLength(1));
+    a.serverClose(code);
+    const error = (await exec.catch(e => e)) as Error;
+    expect(error).toBeInstanceOf(ExecInterruptedError);
+    expect(error).not.toBeInstanceOf(ExecNotStartedError);
+    await tick();
+    expect(ws.sockets).toHaveLength(1);
+  });
+
+  it("reports outcome unknown when the reattach also drops before exec_started", async () => {
     const { sandbox, ws } = await sandboxWith([shellToken("a"), shellToken("b")], { reusePeer: true, pipelinePeer: true, manualStart: true });
     const exec = sandbox.exec("echo hi");
     const a = await ws.nextSocket();
     await vi.waitFor(() => expect(inits(a)).toHaveLength(1));
-    a.serverClose(1001, "going away");
+    a.serverClose(1006);
     const b = await ws.nextSocket();
     await vi.waitFor(() => expect(inits(b)).toHaveLength(1));
     b.serverClose(1001, "going away");
     const error = (await exec.catch(e => e)) as Error;
-    expect(error).toBeInstanceOf(ExecNotStartedError);
-    expect(error.message).toContain("before the command started");
+    expect(error).toBeInstanceOf(ExecInterruptedError);
+    expect(error).not.toBeInstanceOf(ExecNotStartedError);
+    await tick();
+    expect(ws.sockets).toHaveLength(2);
+  });
+
+  it("reports outcome unknown for a drop before exec_started on the retry after a close before capabilities", async () => {
+    const { sandbox, ws } = await sandboxWith([shellToken("a"), shellToken("b")], { reusePeer: true, pipelinePeer: true, manualCapabilities: true, manualStart: true });
+    const exec = sandbox.exec("echo hi");
+    const a = await ws.nextSocket();
+    await tick();
+    a.serverClose(1006);
+    const b = await ws.nextSocket();
+    b.serverFrame({ type: "exec_capabilities", data: pipelineCaps });
+    await vi.waitFor(() => expect(inits(b)).toHaveLength(1));
+    b.serverClose(1006);
+    await expect(exec).rejects.toBeInstanceOf(ExecInterruptedError);
+    await tick();
+    expect(ws.sockets).toHaveLength(2);
+  });
+
+  it("reports outcome unknown for a drop before exec_started after a retired socket's redial", async () => {
+    const { sandbox, ws } = await sandboxWith([shellToken("a")], { reusePeer: true, pipelinePeer: true, manualStart: true });
+    const first = sandbox.exec("echo one");
+    const a = await ws.nextSocket();
+    await vi.waitFor(() => expect(inits(a)).toHaveLength(1));
+    a.serverStarted();
+    a.serverExit(0);
+    await first;
+
+    const second = sandbox.exec("echo two");
+    await vi.waitFor(() => expect(inits(a)).toHaveLength(2));
+    a.serverClose(1000, "idle timeout");
+    const b = await ws.nextSocket();
+    await vi.waitFor(() => expect(inits(b)).toHaveLength(1));
+    b.serverClose(1006);
+    await expect(second).rejects.toBeInstanceOf(ExecInterruptedError);
+    await tick();
     expect(ws.sockets).toHaveLength(2);
   });
 
@@ -111,17 +293,6 @@ describe("pipelined exec start", () => {
     const a = await ws.nextSocket();
     await vi.waitFor(() => expect(inits(a)).toHaveLength(1));
     await tick();
-    a.serverClose(1012, "service restart");
-    await expect(exec).rejects.toBeInstanceOf(ExecInterruptedError);
-    await tick();
-    expect(ws.sockets).toHaveLength(1);
-  });
-
-  it("treats an abrupt close after init_exec and before exec_started as outcome unknown", async () => {
-    const { sandbox, ws } = await sandboxWith([shellToken("a"), shellToken("b")], { reusePeer: true, pipelinePeer: true, manualStart: true });
-    const exec = sandbox.exec("echo hi");
-    const a = await ws.nextSocket();
-    await vi.waitFor(() => expect(inits(a)).toHaveLength(1));
     a.serverClose(1006);
     await expect(exec).rejects.toBeInstanceOf(ExecInterruptedError);
     await tick();
@@ -151,74 +322,33 @@ describe("pipelined exec start", () => {
     expect(ws.sockets).toHaveLength(1);
   });
 
-  it("commits at capabilities on a proxy that does not pipeline and closes after exit", async () => {
-    const { sandbox, ws } = await sandboxWith([shellToken("a")], {});
-    const exec = sandbox.exec("echo hi");
-    const a = await ws.nextSocket();
-    await vi.waitFor(() => expect(inits(a)).toHaveLength(1));
-    expect(types(a)).toEqual(["exec_hello", "init_exec", "stdin_close"]);
-    a.serverStdout("hi\n");
-    a.serverExit(0);
-    await expect(exec).resolves.toMatchObject({ exitCode: 0, stdout: "hi\n" });
-    await vi.waitFor(() => expect(a.readyState).toBe(3));
-  });
-
-  it("does not retry a close after capabilities from a proxy that does not pipeline", async () => {
-    const { sandbox, ws } = await sandboxWith([shellToken("a"), shellToken("b")], { reusePeer: true });
+  it("sends kill() before exec_started at once and rejects as not started when the proxy cancels", async () => {
+    const { sandbox, ws } = await sandboxWith([shellToken("a"), shellToken("b")], { reusePeer: true, pipelinePeer: true, manualStart: true });
     const exec = sandbox.exec("sleep 10");
     const a = await ws.nextSocket();
     await vi.waitFor(() => expect(inits(a)).toHaveLength(1));
-    await tick();
-    a.serverClose(1012, "service restart");
-    await expect(exec).rejects.toBeInstanceOf(ExecInterruptedError);
+    await expect(exec.kill("TERM")).resolves.toBe(true);
+    expect(a.sentText.at(-1)).toEqual({ type: "signal", data: { signal: "TERM" } });
+    const error = (await exec.catch(e => e)) as Error;
+    expect(error).toBeInstanceOf(ExecNotStartedError);
+    expect(error.message).toContain("cancelled before start");
     await tick();
     expect(ws.sockets).toHaveLength(1);
   });
 
-  it("retries a close before capabilities on any proxy", async () => {
-    const { sandbox, ws } = await sandboxWith([shellToken("a"), shellToken("b")], { manualCapabilities: true });
-    const exec = sandbox.exec("echo hi");
+  it("follows the started command when kill() before exec_started races the start", async () => {
+    const { sandbox, ws } = await sandboxWith([shellToken("a")], { reusePeer: true, pipelinePeer: true, manualStart: true });
+    const exec = sandbox.exec("sleep 10");
     const a = await ws.nextSocket();
     await vi.waitFor(() => expect(inits(a)).toHaveLength(1));
-    a.serverClose(1013, "try again later");
-    const b = await ws.nextSocket();
-    await vi.waitFor(() => expect(inits(b)).toHaveLength(1));
-    b.serverFrame({ type: "exec_capabilities", data: { version: 2, stdin_chunks: 8, stdin_chunk_bytes: 16384 } });
-    b.serverExit(0);
-    await expect(exec).resolves.toMatchObject({ exitCode: 0 });
-  });
-
-  it("does not claim no command was sent when pipelined capabilities are invalid", async () => {
-    const { sandbox, ws } = await sandboxWith([shellToken("a")], { manualCapabilities: true });
-    const exec = sandbox.exec("echo hi");
-    const a = await ws.nextSocket();
-    await vi.waitFor(() => expect(inits(a)).toHaveLength(1));
-    a.serverFrame({ type: "exec_capabilities", data: { version: 1 } });
-    const error = (await exec.catch(e => e)) as Error;
-    expect(error).toBeInstanceOf(ExecInterruptedError);
-    expect(error.message).not.toContain("no command was sent");
-    expect(error.message).toContain("Unsupported exec control capabilities");
-    await vi.waitFor(() => expect(a.readyState).toBe(3));
-  });
-
-  it("holds stdin until capabilities arrive", async () => {
-    const { sandbox, ws } = await sandboxWith([shellToken("a")], { reusePeer: true, pipelinePeer: true, manualCapabilities: true });
-    const exec = sandbox.exec("cat", { stdin: true });
-    const a = await ws.nextSocket();
-    await vi.waitFor(() => expect(inits(a)).toHaveLength(1));
-    const write = exec.stdin.write("data");
-    await tick();
-    expect(a.sentStdin).toHaveLength(0);
-
-    a.serverFrame({ type: "exec_capabilities", data: pipelineCaps });
     a.serverStarted();
-    await write;
-    expect(new TextDecoder().decode(a.sentStdin[0])).toBe("data");
-    a.serverExit(0);
-    await expect(exec).resolves.toMatchObject({ exitCode: 0 });
+    await exec.kill("TERM");
+    expect(types(a)).toContain("signal");
+    a.serverExit(-1);
+    await expect(exec).resolves.toMatchObject({ exitCode: -1 });
   });
 
-  it("closes the socket and sends nothing further on abort before exec_started", async () => {
+  it("sends the signal and closes the socket on abort before exec_started", async () => {
     const { sandbox, ws } = await sandboxWith([shellToken("a")], { reusePeer: true, pipelinePeer: true, manualStart: true });
     const controller = new AbortController();
     const exec = sandbox.exec("sleep 10", { signal: controller.signal });
@@ -229,22 +359,24 @@ describe("pipelined exec start", () => {
     controller.abort(reason);
     await expect(exec).rejects.toBe(reason);
     expect(a.readyState).toBe(3);
-    expect(types(a)).toEqual(sent);
+    expect(types(a)).toEqual([...sent, "signal"]);
     expect(ws.sockets).toHaveLength(1);
   });
 
-  it("sends a kill() made before exec_started once the command starts", async () => {
+  it("holds stdin until exec_started", async () => {
     const { sandbox, ws } = await sandboxWith([shellToken("a")], { reusePeer: true, pipelinePeer: true, manualStart: true });
-    const exec = sandbox.exec("sleep 10");
+    const exec = sandbox.exec("cat", { stdin: true });
     const a = await ws.nextSocket();
     await vi.waitFor(() => expect(inits(a)).toHaveLength(1));
-    await exec.kill("TERM");
+    const write = exec.stdin.write("data");
     await tick();
-    expect(types(a)).not.toContain("signal");
+    expect(a.sentStdin).toHaveLength(0);
+
     a.serverStarted();
-    await vi.waitFor(() => expect(types(a)).toContain("signal"));
-    a.serverExit(-1);
-    await expect(exec).resolves.toMatchObject({ exitCode: -1 });
+    await write;
+    expect(new TextDecoder().decode(a.sentStdin[0])).toBe("data");
+    a.serverExit(0);
+    await expect(exec).resolves.toMatchObject({ exitCode: 0 });
   });
 
   it("starts timeoutSec at exec_started", async () => {
@@ -262,7 +394,7 @@ describe("pipelined exec start", () => {
     await expect(exec).resolves.toMatchObject({ timedOut: true, exitCode: -1 });
   });
 
-  it("waits for exec_started on a reused socket and retries a pre-start close", async () => {
+  it("reattaches by name after a pre-start close on a reused socket", async () => {
     const { sandbox, ws } = await sandboxWith([shellToken("a"), shellToken("b")], { reusePeer: true, pipelinePeer: true, manualStart: true });
     const first = sandbox.exec("echo one");
     const a = await ws.nextSocket();
@@ -276,6 +408,7 @@ describe("pipelined exec start", () => {
     a.serverClose(1001, "going away");
     const b = await ws.nextSocket();
     await vi.waitFor(() => expect(inits(b)).toHaveLength(1));
+    expect(initData(b)).toEqual(initData(a, 1));
     b.serverStarted();
     b.serverExit(0);
     await expect(second).resolves.toMatchObject({ exitCode: 0 });
@@ -298,16 +431,30 @@ describe("pipelined exec start", () => {
     await expect(second).resolves.toMatchObject({ exitCode: 0 });
     expect(mock.calls).toHaveLength(2);
   });
+});
 
-  it("leaves the wire unchanged without execSocketPool", async () => {
-    const { sandbox, ws } = await sandboxWith([shellToken("a")], { manualCapabilities: true }, false);
+describe("exec without execSocketPool", () => {
+  it("leaves the wire unchanged", async () => {
+    const { sandbox, ws } = await sandboxWith([shellToken("a")], { manualCapabilities: true, pipelinePeer: true }, false);
     const exec = sandbox.exec("echo hi");
     const a = await ws.nextSocket();
     await tick();
     expect(a.sentText).toEqual([{ type: "exec_hello" }]);
     a.serverFrame({ type: "exec_capabilities", data: { version: 2, stdin_chunks: 8, stdin_chunk_bytes: 16384 } });
     await vi.waitFor(() => expect(types(a)).toEqual(["exec_hello", "init_exec", "stdin_close"]));
+    expect(Object.keys(initData(a))).toEqual(["command"]);
     a.serverExit(0);
     await expect(exec).resolves.toMatchObject({ exitCode: 0 });
+  });
+
+  it("does not retry a 1006 after init_exec", async () => {
+    const { sandbox, ws } = await sandboxWith([shellToken("a"), shellToken("b")], {}, false);
+    const exec = sandbox.exec("echo hi");
+    const a = await ws.nextSocket();
+    await vi.waitFor(() => expect(inits(a)).toHaveLength(1));
+    a.serverClose(1006);
+    await expect(exec).rejects.toBeInstanceOf(ExecInterruptedError);
+    await tick();
+    expect(ws.sockets).toHaveLength(1);
   });
 });

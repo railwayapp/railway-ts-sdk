@@ -47,7 +47,7 @@ export function createExecWsMock(options: {
   reusePeer?: boolean;
   /** Answer a pipelining hello with `pipeline: true` and send `exec_started` for each init_exec. */
   pipelinePeer?: boolean;
-  /** With pipelinePeer, the test sends `exec_started` itself. */
+  /** With pipelinePeer, the test sends `exec_started` itself. A `signal` before it closes 1000 "cancelled before start". */
   manualStart?: boolean;
   onSend?: (frame: { type: string }) => void;
 } = {}): ExecWsMock {
@@ -71,6 +71,7 @@ export function createExecWsMock(options: {
     readyState = 0;
     bufferedAmount = 0;
     private pipelined = false;
+    private awaitingStart = false;
 
     constructor(url: string, protocols?: string | string[]) {
       this.url = url;
@@ -115,7 +116,11 @@ export function createExecWsMock(options: {
             },
           });
         }
-        if (frame.type === "init_exec" && this.pipelined && !options.manualStart) this.serverStarted();
+        if (frame.type === "init_exec" && this.pipelined) {
+          this.awaitingStart = true;
+          if (!options.manualStart) this.serverStarted();
+        }
+        if (frame.type === "signal" && this.awaitingStart) this.serverClose(1000, "cancelled before start");
         return;
       }
       const bytes =
@@ -166,6 +171,7 @@ export function createExecWsMock(options: {
     }
 
     serverStarted(): void {
+      this.awaitingStart = false;
       this.serverFrame({ type: "exec_started" });
     }
 
