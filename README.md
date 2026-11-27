@@ -154,8 +154,8 @@ and wait for the remote exit. Timeout resolves with `timedOut: true` and `exitCo
 once the kill is confirmed, or `exitCode: null` if no exit arrives within 10 seconds.
 Abort rejects with the signal's reason, or with `RailwayConnectionError` if the exit is
 not confirmed in time. A dropped connection rejects with `ExecInterruptedError`. The
-`timeoutSec` clock starts once the command has been sent (with `execSocketPool`, once it
-has started); pass `signal` to bound the
+`timeoutSec` clock starts once the command has started (with `execSocketPool: false`, once
+it has been sent); pass `signal` to bound the
 wait for a sandbox that is still starting.
 
 ### Ephemeral and durable sessions
@@ -547,7 +547,7 @@ then an environment variable, then a default. Pass explicit values to override.
 | `fetch` | n/a | `globalThis.fetch` |
 | `webSocketImpl` | n/a | `globalThis.WebSocket` (pass the `ws` package where none exists) |
 | `verbose` | `RAILWAY_VERBOSE` | `false` |
-| `execSocketPool` | n/a | off: one WebSocket per exec |
+| `execSocketPool` | n/a | on: idle exec WebSockets are reused; `false` opens one per exec |
 
 A token read from `RAILWAY_TOKEN` is treated as a [project token](https://docs.railway.com/integrations/api#project-token)
 (`authType: "project-token"`), which scopes access to one project/environment and
@@ -573,11 +573,13 @@ import in the browser and edge runtimes; provide credentials explicitly there.
 
 ### Exec socket reuse
 
-Pass `execSocketPool: {}` to run each sandbox's execs over idle WebSockets instead of
-opening one per exec. `idleTimeoutMs` closes every socket that stays idle that long. Unset,
-other idle sockets close after 2 minutes, and the most recently idle one stays open (keeping
-Node.js running) until the server closes it or the sandbox is destroyed. Each open socket
-counts against the sandbox's connection limit.
+Each sandbox's execs run over idle WebSockets instead of opening one per exec. Pass
+`execSocketPool: false` to turn this off. `execSocketPool: { idleTimeoutMs }` closes every
+socket that stays idle that long. Unset, other idle sockets close after 2 minutes, and the
+most recently idle one stays open until the server closes it or the sandbox is destroyed.
+On Node.js an idle socket does not keep the process running. Where it would (other runtimes,
+or a custom `webSocketImpl`), idle sockets close after 5 seconds unless `idleTimeoutMs` is
+set. Each open socket counts against the sandbox's connection limit.
 
 With the pool, a server that supports it accepts the command while it routes to the
 sandbox and reports when the command starts. Until then, `kill()` or an abort cancels it
