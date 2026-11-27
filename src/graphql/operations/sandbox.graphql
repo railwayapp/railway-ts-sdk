@@ -156,23 +156,3 @@ query RailwaySandboxSessions(
     }
   }
 }
-
-mutation RailwaySandboxExec(
-  $environmentId: String!
-  $id: String!
-  $command: String!
-  $timeoutSec: Int
-) {
-  sandboxExec(
-    environmentId: $environmentId
-    id: $id
-    command: $command
-    timeoutSec: $timeoutSec
-  ) {
-    exitCode
-    stdout
-    stderr
-    truncated
-    timedOut
-  }
-}

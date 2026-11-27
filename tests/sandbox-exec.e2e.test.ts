@@ -163,17 +163,6 @@ describe.runIf(live)("exec e2e (live)", () => {
     }
   }, 60_000);
 
-  it("runs a command over one HTTPS request with execHttp()", async () => {
-    const result = await sandbox.execHttp("printf out; printf err >&2; exit 7", { timeoutSec: 30 });
-    expect(result).toMatchObject({
-      exitCode: 7,
-      stdout: "out",
-      stderr: "err",
-      truncated: false,
-      timedOut: false,
-    });
-  }, 60_000);
-
   it("fire-and-forget: start a command without reading it, then reconnect and harvest the full output", async () => {
     const handle = sandbox.exec(
       "sleep 1; for i in $(seq 1 20); do echo line-$i; done; exit 0",
@@ -277,21 +266,6 @@ describe.runIf(live)("exec e2e (live)", () => {
     expect(result.exitCode).toBe(-1);
     expect(lineNumbers(result.stdout).length).toBeLessThan(total);
   }, 120_000);
-
-  // mono #41812: execHttp decoded per chunk and counted UTF-16 units.
-  it.each([
-    ["4-byte emoji", "\\U0001F680", 5_000, "🚀"],
-    ["2-byte é", "\\u00e9", 17_000, "é"],
-  ])("execHttp cuts %s at 16,000 bytes on a character boundary", async (_label, escape, count, char) => {
-    const result = await sandbox.execHttp(
-      `python3 -c 'import sys; sys.stdout.write("${escape}" * ${count})'`,
-      { timeoutSec: 30 },
-    );
-    expect(result).toMatchObject({ exitCode: 0, truncated: true, timedOut: false });
-    expect(Buffer.byteLength(result.stdout)).toBe(16_000);
-    expect(result.stdout).not.toContain("�");
-    expect(result.stdout.replaceAll(char, "")).toBe("");
-  }, 60_000);
 
   it("ephemeral execs have no session name and cannot be detached", async () => {
     const handle = sandbox.exec("sleep 2; echo done", { ephemeral: true });
