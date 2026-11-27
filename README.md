@@ -154,7 +154,8 @@ and wait for the remote exit. Timeout resolves with `timedOut: true` and `exitCo
 once the kill is confirmed, or `exitCode: null` if no exit arrives within 10 seconds.
 Abort rejects with the signal's reason, or with `RailwayConnectionError` if the exit is
 not confirmed in time. A dropped connection rejects with `ExecInterruptedError`. The
-`timeoutSec` clock starts once the command has been sent; pass `signal` to bound the
+`timeoutSec` clock starts once the command has been sent (with `execSocketPool`, once it
+has started); pass `signal` to bound the
 wait for a sandbox that is still starting.
 
 ### Ephemeral and durable sessions
@@ -577,6 +578,12 @@ opening one per exec. `idleTimeoutMs` closes a socket that stays idle that long;
 idle sockets stay open (keeping Node.js running) until the server closes them or the
 sandbox is destroyed. Each open socket counts against the sandbox's connection limit.
 
+With the pool, a new socket sends the command without waiting for the sandbox to be
+routed. A connection that closes before the server reports the command started is
+retried once as above, except an abrupt drop (close code 1006), which rejects with
+`ExecInterruptedError` because the command may have started. Aborting before the
+start closes the socket without running anything.
+
 ### Verbose logging
 
 Set `verbose: true` (or `RAILWAY_VERBOSE=1`) to print human-readable progress to **stderr** —
@@ -594,7 +601,7 @@ All errors extend `RailwayError`:
 - `RailwayGraphQLError`: the Railway API returned an error. Carries `.status`,
   `.errors`, and `.responseBody`.
 - `ExecConnectionLimitError`: the sandbox already has as many exec connections as it
-  allows. No command was sent and the SDK does not retry it. A subclass of
+  allows. No command ran and the SDK does not retry it. A subclass of
   `ExecNotStartedError`.
 - `RailwayRateLimitError`: Railway refused the request or exec/file connection for
   rate limiting. Nothing ran and the SDK does not retry it. Carries `.retryAfterMs`
