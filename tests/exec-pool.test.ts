@@ -161,7 +161,7 @@ describe("exec socket pool", () => {
     expect(inits(a)).toHaveLength(1);
   });
 
-  it("retries on a fresh socket when the idle close races the next init_exec", async () => {
+  it.each(["idle timeout", "tunnel stream budget spent", "tunnel closed"])('retries on a fresh socket after a "%s" close races the next init_exec', async reason => {
     const { sandbox, ws } = await pooledSandbox([shellToken("a")], {});
     const first = sandbox.exec("echo one");
     const a = await ws.nextSocket();
@@ -170,7 +170,7 @@ describe("exec socket pool", () => {
 
     const second = sandbox.exec("echo two");
     await vi.waitFor(() => expect(inits(a)).toHaveLength(2));
-    a.serverClose(1000, "idle timeout");
+    a.serverClose(1000, reason);
     const b = await ws.nextSocket();
     await runOn(b, 1, "two\n");
     await expect(second).resolves.toMatchObject({ exitCode: 0, stdout: "two\n" });

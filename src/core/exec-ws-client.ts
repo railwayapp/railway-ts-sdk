@@ -129,9 +129,14 @@ export interface ExecSocket {
   close(): void;
 }
 
-/** Close reasons the proxy sends when it retires a reused socket before reading init_exec. */
-const IDLE_CLOSE_REASON = "idle timeout";
 const TOKEN_EXPIRED = "token_expired";
+/** Reasons the proxy gives when it retires a reused socket without reading init_exec. */
+const RETIRE_REASONS: ReadonlySet<string> = new Set([
+  "idle timeout",
+  "tunnel stream budget spent",
+  "tunnel closed",
+  TOKEN_EXPIRED,
+]);
 const POLICY_VIOLATION_CLOSE_CODE = 1008;
 
 /**
@@ -480,8 +485,7 @@ export function openExecSocket(args: {
       }
       const exec = current;
       if (exec && !exec.ended) {
-        const retired = event.reason === IDLE_CLOSE_REASON || event.reason === TOKEN_EXPIRED;
-        if (!(retired && retiredBeforeStart(exec, event.reason, event.code))) {
+        if (!(RETIRE_REASONS.has(event.reason) && retiredBeforeStart(exec, event.reason, event.code))) {
           endExec(exec);
           exec.handlers.onClose({ code: event.code, reason: event.reason });
         }
