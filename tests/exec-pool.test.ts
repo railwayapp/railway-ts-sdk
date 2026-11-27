@@ -215,6 +215,24 @@ describe("exec socket pool", () => {
     expect(mock.calls).toHaveLength(3);
   });
 
+  it("resends an ended stdin's EOF on the redialled socket", async () => {
+    const { sandbox, ws } = await pooledSandbox([shellToken("a")], {});
+    const first = sandbox.exec("echo one");
+    const a = await ws.nextSocket();
+    await runOn(a, 1, "one\n");
+    await first;
+
+    const second = sandbox.exec("cat", { stdin: true });
+    await second.stdin.end();
+    a.serverClose(1000, "idle timeout");
+    const b = await ws.nextSocket();
+    await vi.waitFor(() => expect(inits(b)).toHaveLength(1));
+    await vi.waitFor(() => expect(b.sentText.filter(f => f.type === "stdin_close")).toHaveLength(1));
+    b.serverExit(0);
+    await expect(second).resolves.toMatchObject({ exitCode: 0 });
+    expect(b.sentText.filter(f => f.type === "stdin_close")).toHaveLength(1);
+  });
+
   it("does not retry a reused exec once its stdin was sent", async () => {
     const { sandbox, ws } = await pooledSandbox([shellToken("a")], {});
     const first = sandbox.exec("echo one");

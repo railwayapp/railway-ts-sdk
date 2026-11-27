@@ -292,6 +292,8 @@ export function openExecSocket(args: {
         },
         closeStdin: () => {
           assertOpen();
+          if (exec.stdinClosed) return;
+          exec.stdinClosed = true;
           socket.send(JSON.stringify({ type: "stdin_close" }));
         },
         signal: name => {
@@ -509,6 +511,7 @@ class ExecState {
   broken = false;
   sawFrame = false;
   inputSent = false;
+  stdinClosed = false;
   #creditWaiters: Array<() => void> = [];
 
   constructor(

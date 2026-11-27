@@ -160,6 +160,7 @@ interface ExecControl {
   detached: boolean;
   finished: boolean;
   terminating: boolean;
+  stdinEnded: boolean;
   stdinController: AbortController;
 }
 
@@ -221,6 +222,7 @@ export function startExec(
     detached: false,
     finished: false,
     terminating: false,
+    stdinEnded: !options.stdin,
     stdinController: new AbortController(),
   };
   if (options.ephemeral) {
@@ -260,7 +262,6 @@ export function startExec(
     return name;
   };
 
-  let stdinEnded = !options.stdin;
   let stdinTail = Promise.resolve();
   const assertWritable = () => {
     if (control.finished || control.detached || control.terminating) {
@@ -280,7 +281,7 @@ export function startExec(
   };
   const stdin: ExecStdin = {
     async write(data) {
-      if (stdinEnded) {
+      if (control.stdinEnded) {
         throw new RailwayError(
           "Exec stdin is closed; pass stdin: true to enable writes.",
         );
@@ -294,8 +295,8 @@ export function startExec(
     async end() {
       // Ending stdin of a command that already exited (e.g. `head -1`) is a no-op.
       if (control.finished) return;
-      if (stdinEnded) return stdinTail;
-      stdinEnded = true;
+      if (control.stdinEnded) return stdinTail;
+      control.stdinEnded = true;
       return enqueueStdin(connection => connection.closeStdin());
     },
   };
@@ -511,7 +512,7 @@ async function runExec(
       if (!connected) return;
       control.connection = next;
       if (control.pendingSignal) signalRemote(control.pendingSignal);
-      if (!options.stdin) next.closeStdin();
+      if (control.stdinEnded) next.closeStdin();
     })().catch(err => {
       rejectNext(err);
       settle({ error: err });
