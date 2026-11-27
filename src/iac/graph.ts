@@ -125,6 +125,8 @@ export type ProjectResourceInput = ResourceNode | ResourceNode[];
 
 export interface ProjectDefinition {
   name: string;
+  /** Project UUID. A label in `name` does not choose the target. */
+  id?: string;
   environments?: string[];
   resources?: ProjectResourceInput[];
   /** @deprecated Use resources instead. */
