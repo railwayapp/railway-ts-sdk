@@ -43,6 +43,7 @@ export class ExecSocketPool {
   }
 
   #release(socket: ExecSocket): void {
+    clearTimeout(this.#idle.get(socket));
     if (this.#closed || socket.closed) {
       socket.close();
       return;

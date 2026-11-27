@@ -148,6 +148,45 @@ describe("exec socket pool", () => {
     await expect(second).resolves.toMatchObject({ stdout: "two\n" });
   });
 
+  it("does not hand out a busy socket after detach() on a finished exec", async () => {
+    const { sandbox, ws } = await pooledSandbox([shellToken("a")], {});
+    const first = sandbox.exec("echo one");
+    const a = await ws.nextSocket();
+    await vi.waitFor(() => expect(inits(a)).toHaveLength(1));
+    a.serverDurableSession("sess-1");
+    await runOn(a, 1, "one\n");
+    await first;
+
+    const second = sandbox.exec("sleep 100");
+    await vi.waitFor(() => expect(inits(a)).toHaveLength(2));
+    await first.detach();
+    const third = sandbox.exec("echo three");
+    const b = await ws.nextSocket();
+    await runOn(b, 1, "three\n");
+    await expect(third).resolves.toMatchObject({ stdout: "three\n" });
+    a.serverExit(0);
+    await expect(second).resolves.toMatchObject({ exitCode: 0 });
+  });
+
+  it("does not let a finished exec's detach() arm an idle timer under a later exec", async () => {
+    const { sandbox, ws } = await pooledSandbox([shellToken("a")], { idleTimeoutMs: 1_000 });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const first = sandbox.exec("echo one");
+    const a = await ws.nextSocket();
+    await vi.waitFor(() => expect(inits(a)).toHaveLength(1));
+    a.serverDurableSession("sess-1");
+    await runOn(a, 1, "one\n");
+    await first;
+    await first.detach();
+
+    const second = sandbox.exec("sleep 100");
+    await vi.waitFor(() => expect(inits(a)).toHaveLength(2));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(a.readyState).toBe(1);
+    a.serverExit(0);
+    await expect(second).resolves.toMatchObject({ exitCode: 0 });
+  });
+
   it("opens a fresh socket after the proxy closed an idle one", async () => {
     const { sandbox, ws } = await pooledSandbox([shellToken("a")], {});
     const first = sandbox.exec("echo one");

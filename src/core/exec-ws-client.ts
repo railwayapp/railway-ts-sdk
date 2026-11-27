@@ -307,6 +307,7 @@ export function openExecSocket(args: {
           socket.send(JSON.stringify({ type: "signal", data: { signal: name } }));
         },
         close: () => {
+          if (exec.ended) return;
           if (exec.exited && reusable && !exec.broken && !closed && onIdle) {
             endExec(exec);
             onIdle(execSocket);
