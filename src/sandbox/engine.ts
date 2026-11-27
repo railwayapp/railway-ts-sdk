@@ -54,6 +54,7 @@ import {
   SandboxTemplateBuildError,
   SandboxTimeoutError,
 } from "./errors.js";
+import { ExecSocketPool } from "../core/exec-socket-pool.js";
 import { startExec, type ExecContext, type ExecHandle } from "./exec.js";
 import { ShellTokens } from "./shell-token.js";
 import { createSandboxFiles, type SandboxFiles } from "./files.js";
@@ -98,6 +99,7 @@ export interface SandboxOptions extends RailwayClientConfig {
 export class SandboxEngine {
   readonly #config: SandboxEngineConfig;
   readonly #shellTokens = new ShellTokens();
+  readonly #execSockets = new Map<string, ExecSocketPool>();
 
   constructor(config: SandboxEngineConfig) {
     this.#config = config;
@@ -445,8 +447,20 @@ export class SandboxEngine {
       environmentId: this.#config.environmentId,
       sandboxId: id,
       shellTokens: this.#shellTokens,
+      execSockets: this.#execSocketPool(id),
     };
     return startExec(context, target, options);
+  }
+
+  #execSocketPool(id: string): ExecSocketPool | undefined {
+    const options = this.#config.execSocketPool;
+    if (!options) return undefined;
+    let pool = this.#execSockets.get(id);
+    if (!pool) {
+      pool = new ExecSocketPool(this.#config, options);
+      this.#execSockets.set(id, pool);
+    }
+    return pool;
   }
 
   files(id: string): SandboxFiles {
@@ -463,6 +477,8 @@ export class SandboxEngine {
       id,
       environmentId: this.#config.environmentId,
     };
+    this.#execSockets.get(id)?.close();
+    this.#execSockets.delete(id);
     this.#config.log(`destroy sandbox ${id}`);
     await requestGraphQL<
       RailwaySandboxDestroyMutation,

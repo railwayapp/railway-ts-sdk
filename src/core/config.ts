@@ -47,6 +47,17 @@ export interface RailwayClientConfig {
    * Also enabled by `RAILWAY_VERBOSE`. Tokens and env values are never logged.
    */
   verbose?: boolean;
+  /**
+   * Reuse exec WebSockets per sandbox. Off when omitted (one socket per exec).
+   * Each open socket holds a sandbox tunnel slot; past the proxy's limit an exec
+   * fails with `ExecConnectionLimitError`. Idle sockets keep the process alive
+   * until `idleTimeoutMs`, `destroy()`, or the proxy closes them.
+   */
+  execSocketPool?: ExecSocketPoolOptions;
+}
+
+export interface ExecSocketPoolOptions {
+  idleTimeoutMs?: number;
 }
 
 /** Structural constructor type satisfied by native WebSocket and the `ws` package. */
@@ -62,6 +73,7 @@ export interface NormalizedRailwayClientConfig {
   fetch: typeof fetch;
   webSocketImpl?: WebSocketConstructor | undefined;
   tcpProxyWsEndpoint: string;
+  execSocketPool?: ExecSocketPoolOptions | undefined;
   log: Logger;
 }
 
@@ -105,12 +117,27 @@ export function normalizeRailwayClientConfig(
     fetch: fetchImpl,
     webSocketImpl: config.webSocketImpl,
     tcpProxyWsEndpoint,
+    execSocketPool: validExecSocketPool(config.execSocketPool),
     log: createLogger(verbose),
   };
   normalized.log(
     `config resolved: endpoint=${endpoint} authType=${normalized.authType}`,
   );
   return normalized;
+}
+
+function validExecSocketPool(
+  pool: ExecSocketPoolOptions | undefined,
+): ExecSocketPoolOptions | undefined {
+  if (pool === undefined) return undefined;
+  if (
+    pool.idleTimeoutMs !== undefined &&
+    (!Number.isFinite(pool.idleTimeoutMs) || pool.idleTimeoutMs <= 0 ||
+      pool.idleTimeoutMs > 2_147_483_647)
+  ) {
+    throw new TypeError("`execSocketPool.idleTimeoutMs` must be a positive number of milliseconds that fits in a JavaScript timer.");
+  }
+  return { ...pool };
 }
 
 /**

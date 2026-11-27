@@ -45,12 +45,19 @@ export class RailwayConnectionError extends RailwayError {
 export class ExecNotStartedError extends RailwayConnectionError {}
 
 /**
+ * The sandbox already has as many tcp-proxy connections as it allows. No
+ * command was sent; retry once another connection closes.
+ */
+export class ExecConnectionLimitError extends ExecNotStartedError {}
+
+/**
  * The tcp-proxy closed the exec socket in answer to `exec_hello` without
  * advertising capabilities: it predates exec control. No command was sent, but
  * retrying the same request cannot succeed, so this is not an
  * `ExecNotStartedError`.
  */
 export class ExecControlUnsupportedError extends RailwayConnectionError {}
+
 
 /**
  * Railway refused the request for rate limiting. Nothing ran; the SDK does not

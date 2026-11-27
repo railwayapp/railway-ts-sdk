@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { deriveTcpProxyWsEndpoint } from "../src/core/config.js";
 import {
+  ExecConnectionLimitError,
   ExecControlUnsupportedError,
   ExecNotStartedError,
   RailwayRateLimitError,
@@ -215,6 +216,16 @@ describe("exec", () => {
     expect(error.retryAfterMs).toBe(15_000);
     expect(ws.attempts()).toBe(1);
     expect(diagnosticsChannel.hasSubscribers("undici:request:headers")).toBe(false);
+  });
+
+  it("surfaces the proxy's tunnel limit as a typed error without retrying", async () => {
+    const { sandbox, ws } = await wsSandbox([shellToken("jwt_a"), shellToken("jwt_b")], { manualOpen: true });
+    const handle = sandbox.exec("echo hi");
+    const socket = await vi.waitFor(() => ws.sockets[0] ?? Promise.reject(new Error("no socket")));
+    socket.serverOpen();
+    socket.serverClose(4001, "max SSH connections (50) reached");
+    await expect(handle).rejects.toBeInstanceOf(ExecConnectionLimitError);
+    expect(ws.sockets).toHaveLength(1);
   });
 
   it("makes a single legacy attempt after an old proxy, with no retry stacked on it", async () => {

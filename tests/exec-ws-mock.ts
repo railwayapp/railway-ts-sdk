@@ -42,6 +42,8 @@ export function createExecWsMock(options: {
   manualCredits?: boolean;
   /** Behave like a proxy that predates exec control: a bare exec_hello closes the session. */
   legacyPeer?: boolean;
+  /** Grant socket reuse when the hello asks for it, like a proxy with exec control v3. */
+  reusePeer?: boolean;
   onSend?: (frame: { type: string }) => void;
 } = {}): ExecWsMock {
   const sockets: Socket[] = [];
@@ -92,7 +94,13 @@ export function createExecWsMock(options: {
           return;
         }
         if (frame.type === "exec_hello" && !options.manualCapabilities) {
-          this.serverFrame({ type: "exec_capabilities", data: { version: 2, stdin_chunks: 8, stdin_chunk_bytes: 16384 } });
+          const reuse = options.reusePeer === true && frame.data?.reuse === true;
+          this.serverFrame({
+            type: "exec_capabilities",
+            data: reuse
+              ? { version: 3, stdin_chunks: 8, stdin_chunk_bytes: 16384, reuse: true }
+              : { version: 2, stdin_chunks: 8, stdin_chunk_bytes: 16384 },
+          });
         }
         return;
       }

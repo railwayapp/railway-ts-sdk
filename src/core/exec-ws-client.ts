@@ -3,7 +3,12 @@ import {
   type NormalizedRailwayClientConfig,
   type WebSocketConstructor,
 } from "./config.js";
-import { ExecControlUnsupportedError, ExecNotStartedError, RailwayConnectionError } from "./errors.js";
+import {
+  ExecConnectionLimitError,
+  ExecControlUnsupportedError,
+  ExecNotStartedError,
+  RailwayConnectionError,
+} from "./errors.js";
 import { connectionProtocol, watchHandshake } from "./ws-handshake.js";
 import type { RailwayWsSocket } from "./ws-socket.js";
 
@@ -30,6 +35,8 @@ const MAX_STDIN_CHUNKS = 64;
  * restart, try again later.
  */
 const TRANSIENT_CLOSE_CODES: ReadonlySet<number> = new Set([1001, 1006, 1012, 1013]);
+/** tcp-proxy's private close code for the sandbox's tunnel limit. */
+const MAX_CONNECTIONS_CLOSE_CODE = 4001;
 /** What a proxy that predates exec control sends after rejecting the bare hello. */
 const LEGACY_REJECT_CLOSE_CODE = 1000;
 
@@ -74,6 +81,12 @@ export interface ExecWsHandlers {
    * handle. No-op by default.
    */
   onDurableSession?(id: string): void;
+  /**
+   * A reused socket was retired (idle timeout, expired token) before the proxy
+   * accepted this exec's init_exec, and nothing but stdin EOF was sent: safe to
+   * redial. Without it the failure reaches `onError`/`onClose`.
+   */
+  onNotStarted?(error: ExecNotStartedError): void;
 }
 
 export interface ExecWsConnection {
@@ -88,18 +101,11 @@ export interface ExecWsConnection {
   closeStdin(): void;
   /** Deliver a signal to the command's process group (e.g. "TERM", "KILL"). */
   signal(name: string): void;
+  /** Ends this exec's use of the socket: a reusable socket that saw a clean exit goes idle, anything else closes. */
   close(): void;
 }
 
-/**
- * Opens a tcp-proxy `/ws/exec` session for `command` and resolves once it is
- * live (socket open and the init frame sent). The JWT travels as the last
- * `Sec-WebSocket-Protocol` value, per the bridge's token-extraction contract;
- * a `shell`-scoped token authorizes `/ws/exec`.
- */
-export function connectExecWs(args: {
-  config: NormalizedRailwayClientConfig;
-  jwt: string;
+export interface ExecInit {
   command: string;
   /** Working directory for the command; omit for the sandbox default. */
   cwd?: string;
@@ -110,6 +116,33 @@ export function connectExecWs(args: {
   /** Resume from the server's last-read cursor. Note some loss if previous clients read didn't keep up */
   resumeFromLastRead?: boolean;
   ephemeral?: boolean;
+}
+
+/** A negotiated `/ws/exec` socket that runs one exec at a time. */
+export interface ExecSocket {
+  readonly jwt: string;
+  /** The proxy agreed to run further execs on this socket after a clean exit. */
+  readonly reusable: boolean;
+  readonly closed: boolean;
+  /** Sends init_exec. `signal` is checked first; an aborted fresh socket goes idle or closes. */
+  begin(init: ExecInit, handlers: ExecWsHandlers, signal?: AbortSignal): ExecWsConnection;
+  close(): void;
+}
+
+/** Close reasons the proxy sends when it retires a reused socket before reading init_exec. */
+const IDLE_CLOSE_REASON = "idle timeout";
+const TOKEN_EXPIRED = "token_expired";
+const POLICY_VIOLATION_CLOSE_CODE = 1008;
+
+/**
+ * Opens a tcp-proxy `/ws/exec` session for `command` and resolves once it is
+ * live (socket open and the init frame sent). The JWT travels as the last
+ * `Sec-WebSocket-Protocol` value, per the bridge's token-extraction contract;
+ * a `shell`-scoped token authorizes `/ws/exec`.
+ */
+export async function connectExecWs(args: ExecInit & {
+  config: NormalizedRailwayClientConfig;
+  jwt: string;
   /**
    * Skip `exec_hello` and send `init_exec` first, for a proxy that predates exec
    * control. Stdin is then bounded only by the local send buffer.
@@ -119,40 +152,41 @@ export function connectExecWs(args: {
   signal?: AbortSignal;
   handlers: ExecWsHandlers;
 }): Promise<ExecWsConnection> {
-  const {
-    config, jwt, command, cwd, env, sessionName, resumeFromLastRead,
-    ephemeral, legacy = false, signal, handlers,
-  } = args;
+  const { config, jwt, legacy, signal, handlers, ...init } = args;
+  const socket = await openExecSocket({ config, jwt, ...(legacy ? { legacy } : {}), ...(signal ? { signal } : {}) });
+  return socket.begin(init, handlers, signal);
+}
+
+/**
+ * Opens and negotiates a `/ws/exec` socket. With `reuse`, the hello asks the
+ * proxy to keep the socket after each clean exit; a proxy that does not answer
+ * `reuse: true` gets one exec per socket, as before.
+ */
+export function openExecSocket(args: {
+  config: NormalizedRailwayClientConfig;
+  jwt: string;
+  legacy?: boolean;
+  reuse?: boolean;
+  /** Cancels connection establishment only. */
+  signal?: AbortSignal;
+  /** A reusable socket finished an exec cleanly and is free for the next one. */
+  onIdle?: (socket: ExecSocket) => void;
+  /** The socket closed, from either side. */
+  onClose?: (socket: ExecSocket) => void;
+}): Promise<ExecSocket> {
+  const { config, jwt, legacy = false, reuse = false, signal, onIdle, onClose } = args;
   signal?.throwIfAborted();
   const WS: WebSocketConstructor = resolveWebSocketImpl(config);
 
-  return new Promise<ExecWsConnection>((resolve, reject) => {
-    let opened = false;
+  return new Promise<ExecSocket>((resolve, reject) => {
+    let ready = false;
     let closed = false;
+    let closeInfo = { code: 1000, reason: "" };
     let helloSent = false;
-    let credits = 0;
+    let reusable = false;
     let window = 0;
-    let creditWaiters: Array<() => void> = [];
-    const wakeCreditWaiters = () => {
-      const waiters = creditWaiters;
-      creditWaiters = [];
-      for (const wake of waiters) wake();
-    };
-    // Credits pace input to the remote command. A command that is slow to read
-    // stdin is legitimate, so this waits without a deadline; abort and close
-    // still end the wait.
-    const waitForCredit = (abort: AbortSignal) => new Promise<void>((resolve, rejectWait) => {
-      const onWaitAbort = () => {
-        creditWaiters = creditWaiters.filter(w => w !== wake);
-        rejectWait(abort.reason);
-      };
-      const wake = () => {
-        abort.removeEventListener("abort", onWaitAbort);
-        resolve();
-      };
-      creditWaiters.push(wake);
-      abort.addEventListener("abort", onWaitAbort, { once: true });
-    });
+    let execs = 0;
+    let current: ExecState | undefined;
     const protocol = connectionProtocol();
     const socket = new WS(config.tcpProxyWsEndpoint, [
       SHELL_SUBPROTOCOL,
@@ -163,61 +197,76 @@ export function connectExecWs(args: {
     // the response arrives asynchronously, so none can be missed.
     const handshake = watchHandshake(protocol, "exec");
     socket.binaryType = "arraybuffer";
-    const assertOpen = () => {
-      if (closed) {
-        throw new RailwayConnectionError({
-          message: "Exec connection is closed.",
-        });
-      }
-    };
-    const onAbort = () => {
-      handshake.dispose();
-      closed = true;
-      signal?.removeEventListener("abort", onAbort);
-      reject(signal?.reason);
-      socket.close(1000, "");
-    };
-    signal?.addEventListener("abort", onAbort, { once: true });
-    if (signal?.aborted) onAbort();
 
-    const start = () => {
-      if (closed || signal?.aborted) {
-        socket.close(1000, "");
-        return;
-      }
-      opened = true;
-      signal?.removeEventListener("abort", onAbort);
-      const data: {
-        command: string;
-        cwd?: string;
-        env?: Record<string, string>;
-        durable_session_name?: string;
-        resume_from_last_read?: boolean;
-        ephemeral?: boolean;
-      } = { command };
-      if (cwd) data.cwd = cwd;
-      if (env && Object.keys(env).length > 0) data.env = env;
-      if (sessionName) data.durable_session_name = sessionName;
-      if (resumeFromLastRead) data.resume_from_last_read = true;
-      if (ephemeral) data.ephemeral = true;
-      try {
-        socket.send(JSON.stringify({ type: "init_exec", data }));
-      } catch (error) {
+    let closeNotified = false;
+    const closeSocket = () => {
+      if (!closed) {
         closed = true;
-        reject(error);
         socket.close(1000, "");
-        return;
       }
-      resolve({
+      // The close event still reaches a running exec's onClose (detach settles there).
+      current?.wakeCreditWaiters();
+      if (ready && !closeNotified) {
+        closeNotified = true;
+        onClose?.(execSocket);
+      }
+    };
+    const endExec = (exec: ExecState) => {
+      exec.ended = true;
+      if (current === exec) current = undefined;
+      exec.wakeCreditWaiters();
+    };
+
+    const execSocket: ExecSocket = {
+      jwt,
+      get reusable() { return reusable; },
+      get closed() { return closed; },
+      close: closeSocket,
+      begin(init, handlers, beginSignal) {
+        if (closed) {
+          const detail = `code ${closeInfo.code}${closeInfo.reason ? `: ${closeInfo.reason}` : ""}`;
+          throw notStarted(
+            `tcp-proxy exec session closed before the command was sent (${detail}).`,
+            { retryable: execs > 0 || TRANSIENT_CLOSE_CODES.has(closeInfo.code), closeCode: closeInfo.code },
+          );
+        }
+        if (current) throw new RailwayConnectionError({ message: "Exec socket is already running a command." });
+        if (beginSignal?.aborted) {
+          if (reusable && onIdle) onIdle(execSocket);
+          else closeSocket();
+          throw beginSignal.reason;
+        }
+        const exec = new ExecState(handlers, window, execs > 0);
+        execs++;
+        current = exec;
+        try {
+          socket.send(JSON.stringify({ type: "init_exec", data: initFrameData(init) }));
+        } catch (error) {
+          closeSocket();
+          throw error;
+        }
+        return execConnection(exec);
+      },
+    };
+
+    const execConnection = (exec: ExecState): ExecWsConnection => {
+      const assertOpen = () => {
+        if (closed || exec.ended) {
+          throw new RailwayConnectionError({
+            message: "Exec connection is closed.",
+          });
+        }
+      };
+      return {
         negotiated: !legacy,
         async writeStdin(bytes, signal) {
           signal.throwIfAborted();
           assertOpen();
           for (let offset = 0; offset < bytes.length; offset += STDIN_CHUNK_BYTES) {
-            while (credits === 0) {
+            while (exec.credits === 0) {
               signal.throwIfAborted();
               assertOpen();
-              await waitForCredit(signal);
+              await exec.waitForCredit(signal);
             }
             const started = Date.now();
             while ((socket.bufferedAmount ?? 0) > SEND_HIGH_WATER_BYTES) {
@@ -236,7 +285,8 @@ export function connectExecWs(args: {
             const frame = new Uint8Array(chunk.length + 1);
             frame[0] = STDIN_FRAME;
             frame.set(chunk, 1);
-            credits--;
+            exec.credits--;
+            exec.inputSent = true;
             socket.send(frame);
           }
         },
@@ -246,14 +296,49 @@ export function connectExecWs(args: {
         },
         signal: name => {
           assertOpen();
+          exec.inputSent = true;
           socket.send(JSON.stringify({ type: "signal", data: { signal: name } }));
         },
         close: () => {
-          closed = true;
-          wakeCreditWaiters();
-          socket.close(1000, "");
+          if (exec.exited && reusable && !exec.broken && !closed && onIdle) {
+            endExec(exec);
+            onIdle(execSocket);
+          } else {
+            closeSocket();
+          }
         },
-      });
+      };
+    };
+
+    // A reused socket can be retired by the proxy just as init_exec is sent.
+    const retiredBeforeStart = (exec: ExecState, reason: string, closeCode: number): boolean => {
+      if (!exec.reused || exec.sawFrame || exec.inputSent || !exec.handlers.onNotStarted) return false;
+      endExec(exec);
+      exec.handlers.onNotStarted(notStarted(
+        `tcp-proxy retired the reused exec socket before the command started (${reason}).`,
+        { retryable: true, closeCode },
+      ));
+      return true;
+    };
+
+    const onAbort = () => {
+      handshake.dispose();
+      closed = true;
+      signal?.removeEventListener("abort", onAbort);
+      reject(signal?.reason);
+      socket.close(1000, "");
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+
+    const markReady = () => {
+      if (closed || signal?.aborted) {
+        socket.close(1000, "");
+        return;
+      }
+      ready = true;
+      signal?.removeEventListener("abort", onAbort);
+      resolve(execSocket);
     };
 
     socket.onopen = () => {
@@ -261,14 +346,14 @@ export function connectExecWs(args: {
       if (closed) return;
       if (legacy) {
         // No flow control to negotiate: stdin is paced by bufferedAmount alone.
-        credits = window = Number.POSITIVE_INFINITY;
-        start();
+        window = Number.POSITIVE_INFINITY;
+        markReady();
         return;
       }
       // Negotiate BEFORE transmitting a command. An old proxy rejects the
       // command-less hello, so unsupported peers cannot start an orphan exec.
       try {
-        socket.send(JSON.stringify({ type: "exec_hello" }));
+        socket.send(JSON.stringify(reuse ? { type: "exec_hello", data: { reuse: true } } : { type: "exec_hello" }));
         helloSent = true;
       } catch (error) {
         signal?.removeEventListener("abort", onAbort);
@@ -281,17 +366,21 @@ export function connectExecWs(args: {
     socket.onmessage = event => {
       if (closed) return;
       const { data } = event;
+      const exec = current;
       if (data instanceof ArrayBuffer) {
-        if (opened) handleBinaryFrame(data, handlers);
+        if (exec) {
+          exec.sawFrame = true;
+          handleBinaryFrame(data, exec.handlers);
+        }
         return;
       }
       if (typeof data !== "string") return;
       const frame = parseControlFrame(data);
       if (!frame) return;
-      if (!opened) {
+      if (!ready) {
         if (frame.type !== "exec_capabilities") return;
         try {
-          credits = window = negotiatedStdinWindow(frame.data);
+          window = negotiatedStdinWindow(frame.data);
         } catch (error) {
           signal?.removeEventListener("abort", onAbort);
           closed = true;
@@ -299,14 +388,23 @@ export function connectExecWs(args: {
           socket.close(1000, "");
           return;
         }
-        start();
+        reusable = reuse && frame.data?.reuse === true;
+        markReady();
         return;
       }
+      if (!exec) return;
+      const { handlers } = exec;
+      if (frame.type === "error" && frame.data?.code === TOKEN_EXPIRED &&
+        retiredBeforeStart(exec, TOKEN_EXPIRED, POLICY_VIOLATION_CLOSE_CODE)) {
+        closeSocket();
+        return;
+      }
+      exec.sawFrame = true;
       switch (frame.type) {
         case "stdin_credit":
-          if (validCreditGrant(frame.data?.chunks, window - credits)) {
-            credits += frame.data!.chunks!;
-            wakeCreditWaiters();
+          if (validCreditGrant(frame.data?.chunks, window - exec.credits)) {
+            exec.credits += frame.data!.chunks!;
+            exec.wakeCreditWaiters();
           } else {
             handlers.onError(new RailwayConnectionError({
               message: "Invalid exec stdin credit frame.",
@@ -319,11 +417,12 @@ export function connectExecWs(args: {
           }));
           break;
         case "exit":
-          emitExit(frame.data, handlers);
+          emitExit(frame.data, exec);
           break;
         // The proxy's typed failure (exit_unconfirmed, output_failed, ...),
         // sent just before it closes. The outcome is unknown, not an exit.
         case "error":
+          exec.broken = true;
           handlers.onError(new RailwayConnectionError({
             message: `tcp-proxy exec error (${
               typeof frame.data?.code === "string" ? frame.data.code : "unknown"
@@ -343,15 +442,24 @@ export function connectExecWs(args: {
     socket.onclose = event => {
       handshake.dispose();
       closed = true;
-      wakeCreditWaiters();
+      closeInfo = { code: event.code, reason: event.reason };
       signal?.removeEventListener("abort", onAbort);
-      if (!opened) {
+      if (!ready) {
         const rateLimited = handshake.rateLimitError();
         if (rateLimited) {
           reject(rateLimited);
           return;
         }
         const detail = `code ${event.code}${event.reason ? `: ${event.reason}` : ""}`;
+        if (event.code === MAX_CONNECTIONS_CLOSE_CODE) {
+          const limited = new ExecConnectionLimitError({
+            message: `tcp-proxy refused the exec connection at the sandbox's connection limit (${detail}); no command was sent.`,
+            closeCode: event.code,
+          });
+          notRetryable.add(limited);
+          reject(limited);
+          return;
+        }
         // The proxy routes the session after accepting the socket, so a close
         // here can be a denial, a routing failure, or a deploy, not only an old
         // proxy. An old proxy answers the bare hello with a normal closure.
@@ -368,11 +476,19 @@ export function connectExecWs(args: {
         ));
         return;
       }
-      handlers.onClose({ code: event.code, reason: event.reason });
+      const exec = current;
+      if (exec && !exec.ended) {
+        const retired = event.reason === IDLE_CLOSE_REASON || event.reason === TOKEN_EXPIRED;
+        if (!(retired && retiredBeforeStart(exec, event.reason, event.code))) {
+          endExec(exec);
+          exec.handlers.onClose({ code: event.code, reason: event.reason });
+        }
+      }
+      closeSocket();
     };
 
     socket.onerror = event => {
-      if (opened) return;
+      if (ready) return;
       handshake.dispose();
       closed = true;
       signal?.removeEventListener("abort", onAbort);
@@ -383,6 +499,66 @@ export function connectExecWs(args: {
       socket.close(1000, "");
     };
   });
+}
+
+/** Per-exec state on a socket; credits reset to the negotiated window for each exec. */
+class ExecState {
+  credits: number;
+  ended = false;
+  exited = false;
+  broken = false;
+  sawFrame = false;
+  inputSent = false;
+  #creditWaiters: Array<() => void> = [];
+
+  constructor(
+    readonly handlers: ExecWsHandlers,
+    window: number,
+    readonly reused: boolean,
+  ) {
+    this.credits = window;
+  }
+
+  wakeCreditWaiters(): void {
+    const waiters = this.#creditWaiters;
+    this.#creditWaiters = [];
+    for (const wake of waiters) wake();
+  }
+
+  // Credits pace input to the remote command. A command that is slow to read
+  // stdin is legitimate, so this waits without a deadline; abort and close
+  // still end the wait.
+  waitForCredit(abort: AbortSignal): Promise<void> {
+    return new Promise<void>((resolve, rejectWait) => {
+      const onWaitAbort = () => {
+        this.#creditWaiters = this.#creditWaiters.filter(w => w !== wake);
+        rejectWait(abort.reason);
+      };
+      const wake = () => {
+        abort.removeEventListener("abort", onWaitAbort);
+        resolve();
+      };
+      this.#creditWaiters.push(wake);
+      abort.addEventListener("abort", onWaitAbort, { once: true });
+    });
+  }
+}
+
+function initFrameData(init: ExecInit) {
+  const data: {
+    command: string;
+    cwd?: string;
+    env?: Record<string, string>;
+    durable_session_name?: string;
+    resume_from_last_read?: boolean;
+    ephemeral?: boolean;
+  } = { command: init.command };
+  if (init.cwd) data.cwd = init.cwd;
+  if (init.env && Object.keys(init.env).length > 0) data.env = init.env;
+  if (init.sessionName) data.durable_session_name = init.sessionName;
+  if (init.resumeFromLastRead) data.resume_from_last_read = true;
+  if (init.ephemeral) data.ephemeral = true;
+  return data;
 }
 
 /** Binary frame: a leading tag byte selects the stream, the rest is payload. */
@@ -403,6 +579,7 @@ interface ControlFrameData {
   durable_session_name?: string;
   code?: string;
   message?: string;
+  reuse?: boolean;
 }
 
 function parseControlFrame(text: string): { type?: string; data?: ControlFrameData } | undefined {
@@ -433,16 +610,15 @@ function negotiatedStdinWindow(data: ControlFrameData | undefined): number {
   return data.stdin_chunks;
 }
 
-function emitExit(
-  data: ControlFrameData | undefined,
-  handlers: ExecWsHandlers,
-): void {
+function emitExit(data: ControlFrameData | undefined, exec: ExecState): void {
   const code = data?.exit_code;
   if (typeof code !== "number" || !Number.isInteger(code) || code < -1 || code > 2_147_483_647) {
-    handlers.onError(new RailwayConnectionError({ message: "Exec exit frame has no valid remote exit code; the command's outcome is unknown." }));
+    exec.handlers.onError(new RailwayConnectionError({ message: "Exec exit frame has no valid remote exit code; the command's outcome is unknown." }));
     return;
   }
-  handlers.onExit(code, data?.reason ?? "");
+  // Before the handler: it may close the connection, which pools the socket only after an exit.
+  exec.exited = true;
+  exec.handlers.onExit(code, data?.reason ?? "");
 }
 
 function emitDurableSession(
