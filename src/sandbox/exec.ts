@@ -1,7 +1,6 @@
 import type { NormalizedRailwayClientConfig } from "../core/config.js";
 import {
   ExecControlUnsupportedError,
-  type ExecNotStartedError,
   RailwayConnectionError,
   RailwayError,
 } from "../core/errors.js";
@@ -12,6 +11,7 @@ import {
   type ExecInit,
   type ExecWsConnection,
   type ExecWsHandlers,
+  type RetiredBeforeStartError,
 } from "../core/exec-ws-client.js";
 import { ExecInterruptedError } from "./errors.js";
 import { loginShellCommand } from "./shell.js";
@@ -29,8 +29,6 @@ const decoder = () => new TextDecoder();
 const KILL_GRACE_MS = 5_000;
 /** How long termination may take to produce a confirmed exit before the outcome is unknown. */
 const TERMINATION_CONFIRM_MS = KILL_GRACE_MS * 2;
-/** The proxy closes with policy violation when a reused socket's token expired. */
-const TOKEN_EXPIRED_CLOSE_CODE = 1008;
 /** Pause before the single reconnect after a failure that sent no command. */
 const CONNECT_RETRY_DELAY_MS = 250;
 
@@ -477,9 +475,8 @@ async function runExec(
 
   let redialed = false;
   let connected = false;
-  // A pooled socket the proxy retired before reading init_exec ran nothing, so
-  // the exec moves to a fresh socket once. Stdin waits on control.ready meanwhile.
-  const redial = (error: ExecNotStartedError) => {
+  // Stdin waits on control.ready while the exec moves to a fresh socket.
+  const redial = (error: RetiredBeforeStartError) => {
     if (settled) return;
     if (control.detached || control.terminating) {
       settle({ error: failure?.reason ?? error });
@@ -495,7 +492,7 @@ async function runExec(
     control.ready.catch(() => {});
     context.config.log(`exec: ${error.message} Redialling in sandbox=${context.sandboxId}`);
     void (async () => {
-      if (error.closeCode === TOKEN_EXPIRED_CLOSE_CODE) context.shellTokens.evict(context.sandboxId, "shell", jwt);
+      if (error.tokenExpired) context.shellTokens.evict(context.sandboxId, "shell", jwt);
       jwt = await shellToken();
       const socket = await context.execSockets!.acquire({
         jwt,
@@ -517,49 +514,49 @@ async function runExec(
   };
 
   const handlers: ExecWsHandlers = {
-      onNotStarted: redial,
-      onError: error => settle({
+    onNotStarted: redial,
+    onError: error => settle({
+      error: new ExecInterruptedError({
+        reason: error.message,
+        stdout: stdout.finish(),
+        stderr: stderr.finish(),
+        cause: failure?.reason ?? error,
+      }),
+    }),
+    onStdinError: error => terminate({ reason: error }),
+    onDurableSession: name => resolveSessionNameOnce(name),
+    onStdout: bytes => {
+      if (settled) return;
+      stdout.append(bytes);
+      emit(options.onStdout, stdoutDecoder.decode(bytes, { stream: true }));
+    },
+    onStderr: bytes => {
+      if (settled) return;
+      stderr.append(bytes);
+      emit(options.onStderr, stderrDecoder.decode(bytes, { stream: true }));
+    },
+    onExit: code => {
+      if (settled) return;
+      exitCode = code;
+      emit(options.onStdout, stdoutDecoder.decode());
+      emit(options.onStderr, stderrDecoder.decode());
+      settle();
+    },
+    onClose: info => {
+      if (control.detached) {
+        settle();
+        return;
+      }
+      settle({
         error: new ExecInterruptedError({
-          reason: error.message,
+          closeCode: info.code,
+          reason: info.reason,
           stdout: stdout.finish(),
           stderr: stderr.finish(),
-          cause: failure?.reason ?? error,
+          cause: failure?.reason,
         }),
-      }),
-      onStdinError: error => terminate({ reason: error }),
-      onDurableSession: name => resolveSessionNameOnce(name),
-      onStdout: bytes => {
-        if (settled) return;
-        stdout.append(bytes);
-        emit(options.onStdout, stdoutDecoder.decode(bytes, { stream: true }));
-      },
-      onStderr: bytes => {
-        if (settled) return;
-        stderr.append(bytes);
-        emit(options.onStderr, stderrDecoder.decode(bytes, { stream: true }));
-      },
-      onExit: code => {
-        if (settled) return;
-        exitCode = code;
-        emit(options.onStdout, stdoutDecoder.decode());
-        emit(options.onStderr, stderrDecoder.decode());
-        settle();
-      },
-      onClose: info => {
-        if (control.detached) {
-          settle();
-          return;
-        }
-        settle({
-          error: new ExecInterruptedError({
-            closeCode: info.code,
-            reason: info.reason,
-            stdout: stdout.finish(),
-            stderr: stderr.finish(),
-            cause: failure?.reason,
-          }),
-        });
-      },
+      });
+    },
   };
   const dial = async (token: string, legacy = false): Promise<ExecWsConnection> => {
     if (!context.execSockets) {
@@ -616,7 +613,7 @@ async function runExec(
     jwt = await shellToken();
     connection = await dial(jwt, true);
   }
-  // A retired pooled socket can be redialled before this continuation runs.
+  // Only reachable when a socket fires close within the same task as init_exec.
   if (redialed) {
     try {
       connection = await control.ready;

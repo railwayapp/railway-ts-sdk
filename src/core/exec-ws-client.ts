@@ -82,13 +82,11 @@ export interface ExecWsHandlers {
    * handle. No-op by default.
    */
   onDurableSession?(id: string): void;
-  /**
-   * A reused socket was retired (idle timeout, expired token) before the proxy
-   * accepted this exec's init_exec, and nothing but stdin EOF was sent: safe to
-   * redial. Without it the failure reaches `onError`/`onClose`.
-   */
-  onNotStarted?(error: ExecNotStartedError): void;
+  /** The proxy retired a reused socket before reading init_exec, so nothing ran. */
+  onNotStarted?(error: RetiredBeforeStartError): void;
 }
+
+export type RetiredBeforeStartError = ExecNotStartedError & { readonly tokenExpired: boolean };
 
 export interface ExecWsConnection {
   /**
@@ -102,7 +100,6 @@ export interface ExecWsConnection {
   closeStdin(): void;
   /** Deliver a signal to the command's process group (e.g. "TERM", "KILL"). */
   signal(name: string): void;
-  /** Ends this exec's use of the socket: a reusable socket that saw a clean exit goes idle, anything else closes. */
   close(): void;
 }
 
@@ -122,10 +119,7 @@ export interface ExecInit {
 /** A negotiated `/ws/exec` socket that runs one exec at a time. */
 export interface ExecSocket {
   readonly jwt: string;
-  /** The proxy agreed to run further execs on this socket after a clean exit. */
-  readonly reusable: boolean;
   readonly closed: boolean;
-  /** Sends init_exec. `signal` is checked first; an aborted fresh socket goes idle or closes. */
   begin(init: ExecInit, handlers: ExecWsHandlers, signal?: AbortSignal): ExecWsConnection;
   close(): void;
 }
@@ -138,14 +132,8 @@ const RETIRE_REASONS: ReadonlySet<string> = new Set([
   "tunnel closed",
   TOKEN_EXPIRED,
 ]);
-const POLICY_VIOLATION_CLOSE_CODE = 1008;
 
-/**
- * Opens a tcp-proxy `/ws/exec` session for `command` and resolves once it is
- * live (socket open and the init frame sent). The JWT travels as the last
- * `Sec-WebSocket-Protocol` value, per the bridge's token-extraction contract;
- * a `shell`-scoped token authorizes `/ws/exec`.
- */
+/** Opens a one-exec socket and sends init_exec. */
 export async function connectExecWs(args: ExecInit & {
   config: NormalizedRailwayClientConfig;
   jwt: string;
@@ -163,11 +151,7 @@ export async function connectExecWs(args: ExecInit & {
   return socket.begin(init, handlers, signal);
 }
 
-/**
- * Opens and negotiates a `/ws/exec` socket. With `reuse`, the hello asks the
- * proxy to keep the socket after each clean exit; a proxy that does not answer
- * `reuse: true` gets one exec per socket, as before.
- */
+/** Opens and negotiates a socket; the JWT rides as the last `Sec-WebSocket-Protocol` value. */
 export function openExecSocket(args: {
   config: NormalizedRailwayClientConfig;
   jwt: string;
@@ -175,9 +159,7 @@ export function openExecSocket(args: {
   reuse?: boolean;
   /** Cancels connection establishment only. */
   signal?: AbortSignal;
-  /** A reusable socket finished an exec cleanly and is free for the next one. */
   onIdle?: (socket: ExecSocket) => void;
-  /** The socket closed, from either side. */
   onClose?: (socket: ExecSocket) => void;
 }): Promise<ExecSocket> {
   const { config, jwt, legacy = false, reuse = false, signal, onIdle, onClose } = args;
@@ -225,7 +207,6 @@ export function openExecSocket(args: {
 
     const execSocket: ExecSocket = {
       jwt,
-      get reusable() { return reusable; },
       get closed() { return closed; },
       close: closeSocket,
       begin(init, handlers, beginSignal) {
@@ -320,14 +301,14 @@ export function openExecSocket(args: {
       };
     };
 
-    // A reused socket can be retired by the proxy just as init_exec is sent.
-    const retiredBeforeStart = (exec: ExecState, reason: string, closeCode: number): boolean => {
+    const retiredBeforeStart = (exec: ExecState, reason: string, closeCode?: number): boolean => {
       if (!exec.reused || exec.sawFrame || exec.inputSent || !exec.handlers.onNotStarted) return false;
       endExec(exec);
-      exec.handlers.onNotStarted(notStarted(
+      const error = notStarted(
         `tcp-proxy retired the reused exec socket before the command started (${reason}).`,
-        { retryable: true, closeCode },
-      ));
+        { retryable: true, ...(closeCode !== undefined ? { closeCode } : {}) },
+      );
+      exec.handlers.onNotStarted(Object.assign(error, { tokenExpired: reason === TOKEN_EXPIRED }));
       return true;
     };
 
@@ -405,7 +386,7 @@ export function openExecSocket(args: {
       if (!exec) return;
       const { handlers } = exec;
       if (frame.type === "error" && frame.data?.code === TOKEN_EXPIRED &&
-        retiredBeforeStart(exec, TOKEN_EXPIRED, POLICY_VIOLATION_CLOSE_CODE)) {
+        retiredBeforeStart(exec, TOKEN_EXPIRED)) {
         closeSocket();
         return;
       }
