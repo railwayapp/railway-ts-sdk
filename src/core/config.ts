@@ -48,12 +48,12 @@ export interface RailwayClientConfig {
    */
   verbose?: boolean;
   /**
-   * Reuse exec WebSockets per sandbox. Off when omitted (one socket per exec).
+   * Reuse exec WebSockets per sandbox. On by default; `false` opens one socket per exec.
    * Each open socket holds one of the sandbox's connections; past the limit an exec
    * fails with `ExecConnectionLimitError`. Idle sockets keep the process alive
    * until they time out, `destroy()`, or the proxy closes them.
    */
-  execSocketPool?: ExecSocketPoolOptions;
+  execSocketPool?: ExecSocketPoolOptions | false;
 }
 
 export interface ExecSocketPoolOptions {
@@ -131,9 +131,10 @@ export function normalizeRailwayClientConfig(
 }
 
 function validExecSocketPool(
-  pool: ExecSocketPoolOptions | undefined,
+  pool: ExecSocketPoolOptions | false | undefined,
 ): ExecSocketPoolOptions | undefined {
-  if (pool === undefined) return undefined;
+  if (pool === false) return undefined;
+  if (pool === undefined) return {};
   if (
     pool.idleTimeoutMs !== undefined &&
     (!Number.isFinite(pool.idleTimeoutMs) || pool.idleTimeoutMs <= 0 ||
