@@ -7,12 +7,14 @@ import {
 import type { ExecSocketPool } from "../core/exec-socket-pool.js";
 import {
   connectExecWs,
+  shouldReattach,
   shouldRetryBeforeStart,
   type ExecInit,
   type ExecSocket,
   type ExecWsConnection,
   type ExecWsHandlers,
   type RetiredBeforeStartError,
+  type UnconfirmedStartError,
 } from "../core/exec-ws-client.js";
 import { ExecInterruptedError } from "./errors.js";
 import { loginShellCommand } from "./shell.js";
@@ -153,6 +155,8 @@ export interface ExecContext {
 
 interface ExecControl {
   connection?: ExecWsConnection;
+  /** Sent init_exec, not yet started. */
+  starting?: ExecWsConnection;
   /** The live connection; replaced when a retired pooled socket is redialled. */
   ready: Promise<ExecWsConnection>;
   pendingSignal?: ExecSignal;
@@ -233,6 +237,15 @@ export function startExec(
   const kill = async (signal: ExecSignal): Promise<boolean> => {
     if (control.finished || control.detached) return false;
     if (!control.connection) {
+      // A pipelining proxy cancels a command that has not started yet.
+      try {
+        if (control.starting) {
+          control.starting.signal(signal);
+          return true;
+        }
+      } catch {
+        // the retry, if any, sends it
+      }
       control.pendingSignal = signal; // delivered once the socket exists
       return true;
     }
@@ -334,7 +347,7 @@ async function runExec(
   onConnection: (connection: ExecWsConnection) => void,
 ): Promise<ExecResult> {
   options.signal?.throwIfAborted();
-  const init = execParameters(target, options);
+  const init = execParameters(target, options, context.execSockets !== undefined);
   const { signal: abortSignal, ...execInit } = init;
 
   // Never fabricate a durable id when the server did not assign one.
@@ -479,12 +492,15 @@ async function runExec(
   // through its close event instead.
   const begin = (socket: ExecSocket): Promise<ExecWsConnection> => {
     const connection = socket.begin(execInit, handlers, abortSignal);
-    if (control.stdinEnded) {
-      try {
-        connection.closeStdin();
-      } catch {
-        // ignore
+    control.starting = connection;
+    try {
+      if (control.stdinEnded) connection.closeStdin();
+      if (control.pendingSignal) {
+        connection.signal(control.pendingSignal);
+        delete control.pendingSignal;
       }
+    } catch {
+      // ignore
     }
     return Promise.race([connection.started, ended]).then(() => connection);
   };
@@ -531,7 +547,7 @@ async function runExec(
       control.connection = next;
       if (control.pendingSignal) signalRemote(control.pendingSignal);
       if (control.stdinEnded) next.closeStdin();
-    })().catch(err => settle({ error: err }));
+    })().catch(err => settle({ error: outcomeUnknown(err) }));
   };
 
   const handlers: ExecWsHandlers = {
@@ -597,11 +613,14 @@ async function runExec(
   // and aborts are not. The cached token is dropped first in case it was the
   // cause (a refused upgrade is a bare 1006). One attempt, unlike the files
   // client's three, because each one may wait out routing. A pooled socket the
-  // proxy retired is redialled at once, keeping the token unless it expired.
+  // proxy retired is redialled at once, keeping the token unless it expired. A
+  // drop that may have started a named durable exec resends the same name, so
+  // the retry reattaches instead of running it again.
   const connectWithRetry = async () => {
     try {
       return await dial(jwt);
     } catch (error) {
+      if (shouldReattach(error)) return reattach(error);
       if (!shouldRetryBeforeStart(error)) throw error;
       options.signal?.throwIfAborted();
       context.config.log(
@@ -611,7 +630,22 @@ async function runExec(
       if (tokenExpired !== false) context.shellTokens.evict(context.sandboxId, "shell", jwt);
       if (tokenExpired === undefined) await abortableDelay(CONNECT_RETRY_DELAY_MS, options.signal);
       jwt = await shellToken();
-      return dial(jwt, false, true);
+      return dial(jwt, false, true).catch(retryError => {
+        throw outcomeUnknown(retryError);
+      });
+    }
+  };
+  const reattach = async (dropped: UnconfirmedStartError) => {
+    try {
+      options.signal?.throwIfAborted();
+      context.config.log(`exec: ${dropped.message} Reattaching once in sandbox=${context.sandboxId}`);
+      context.shellTokens.evict(context.sandboxId, "shell", jwt);
+      await abortableDelay(CONNECT_RETRY_DELAY_MS, options.signal);
+      jwt = await shellToken();
+      return await dial(jwt, false, true);
+    } catch (error) {
+      if (options.signal?.aborted) throw options.signal.reason;
+      throw outcomeUnknown(dropped, error);
     }
   };
 
@@ -674,14 +708,32 @@ async function runExec(
   return done;
 }
 
+function outcomeUnknown(error: unknown, cause: unknown = error): unknown {
+  if (!shouldReattach(error)) return error;
+  return new ExecInterruptedError({
+    ...(error.closeCode !== undefined ? { closeCode: error.closeCode } : {}),
+    reason: error.closeReason,
+    stdout: "",
+    stderr: "",
+    cause,
+  });
+}
+
 /** Only fresh execs apply process settings; reattach uses the existing process. */
-function execParameters(target: ExecTarget, options: ExecOptions): ExecInit & { signal?: AbortSignal } {
+function execParameters(
+  target: ExecTarget,
+  options: ExecOptions,
+  named: boolean,
+): ExecInit & { signal?: AbortSignal } {
   return {
     ...(options.signal ? { signal: options.signal } : {}),
     ...(typeof target === "string"
       ? {
           command: loginShellCommand(target),
           ...(options.ephemeral ? { ephemeral: true } : {}),
+          // A retry resends the whole init: the first attempt creates the
+          // session if it never arrived, and a later one reattaches to it.
+          ...(named && !options.ephemeral ? { sessionName: `sdk-${crypto.randomUUID()}` } : {}),
           ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
           ...(options.env ? { env: options.env } : {}),
         }

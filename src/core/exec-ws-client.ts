@@ -39,11 +39,11 @@ const TRANSIENT_CLOSE_CODES: ReadonlySet<number> = new Set([1001, 1006, 1012, 10
 const MAX_CONNECTIONS_CLOSE_CODE = 4001;
 /** What a proxy that predates exec control sends after rejecting the bare hello. */
 const LEGACY_REJECT_CLOSE_CODE = 1000;
-const ABNORMAL_CLOSE_CODE = 1006;
 const UNSUPPORTED_CAPABILITIES = "Unsupported exec control capabilities";
 const WS_OPEN = 1;
 
 const notRetryable = new WeakSet<object>();
+const reattachable = new WeakSet<object>();
 
 /**
  * Whether a connection failure left nothing running AND is worth one more try.
@@ -51,6 +51,17 @@ const notRetryable = new WeakSet<object>();
  */
 export function shouldRetryBeforeStart(error: unknown): boolean {
   return error instanceof ExecNotStartedError && !notRetryable.has(error);
+}
+
+export type UnconfirmedStartError = RailwayConnectionError & { readonly closeReason: string };
+
+/**
+ * A transient close after init_exec and before the start, on an exec that names
+ * its durable session: the command may have started, and resending the same
+ * init_exec reattaches to it instead of running it twice.
+ */
+export function shouldReattach(error: unknown): error is UnconfirmedStartError {
+  return error instanceof RailwayConnectionError && reattachable.has(error);
 }
 
 function notStarted(
@@ -116,7 +127,7 @@ export interface ExecInit {
   cwd?: string;
   /** Extra environment variables for the command. */
   env?: Record<string, string>;
-  /** Resume an existing durable session by name; omit/empty to start fresh. */
+  /** Durable session name: reattaches if it exists, else starts the command under it. */
   sessionName?: string;
   /** Resume from the server's last-read cursor. Note some loss if previous clients read didn't keep up */
   resumeFromLastRead?: boolean;
@@ -164,7 +175,7 @@ export function openExecSocket(args: {
   jwt: string;
   legacy?: boolean;
   reuse?: boolean;
-  /** Send init_exec without waiting for capabilities; `exec_started` then marks the start. */
+  /** Ask the proxy to answer before routing; if it agrees, `exec_started` marks the start. */
   pipeline?: boolean;
   /** Cancels connection establishment only. */
   signal?: AbortSignal;
@@ -263,7 +274,7 @@ export function openExecSocket(args: {
           else closeSocket();
           throw beginSignal.reason;
         }
-        const exec = new ExecState(handlers, window, execs > 0);
+        const exec = new ExecState(handlers, window, execs > 0, Boolean(init.sessionName) && !init.ephemeral);
         execs++;
         current = exec;
         try {
@@ -272,9 +283,15 @@ export function openExecSocket(args: {
           closeSocket();
           throw error;
         }
-        if (!pipeline || (negotiated && !pipelined)) exec.commit();
+        if (!pipelined) exec.commit();
         else if (beginSignal) {
           exec.onStartAbort(beginSignal, () => {
+            // Cancels routing, or reaches the command if it has just started.
+            try {
+              socket.send(JSON.stringify({ type: "signal", data: { signal: "TERM" } }));
+            } catch {
+              // closing below is enough
+            }
             exec.failStart(beginSignal.reason);
             endExec(exec);
             closeSocket();
@@ -392,15 +409,14 @@ export function openExecSocket(args: {
         markReady();
         return;
       }
-      // Without pipelining, negotiate BEFORE transmitting a command. An old proxy
-      // rejects the command-less hello first, so it never reads a pipelined init_exec.
+      // Negotiate BEFORE transmitting a command: an old proxy rejects the
+      // command-less hello, and one without pipelining answers only after routing.
       const hello = reuse || pipeline
         ? { type: "exec_hello", data: { ...(reuse ? { reuse: true } : {}), ...(pipeline ? { pipeline: true } : {}) } }
         : { type: "exec_hello" };
       try {
         socket.send(JSON.stringify(hello));
         helloSent = true;
-        if (pipeline) markReady();
       } catch (error) {
         signal?.removeEventListener("abort", onAbort);
         closed = true;
@@ -427,33 +443,17 @@ export function openExecSocket(args: {
         if (frame.type !== "exec_capabilities") return;
         const negotiatedWindow = negotiatedStdinWindow(frame.data);
         if (negotiatedWindow === undefined) {
-          if (!ready) {
-            signal?.removeEventListener("abort", onAbort);
-            closed = true;
-            reject(new RailwayConnectionError({ message: `${UNSUPPORTED_CAPABILITIES}; no command was sent.` }));
-            socket.close(1000, "");
-            return;
-          }
-          if (exec) {
-            endExec(exec);
-            exec.handlers.onError(new RailwayConnectionError({
-              message: `${UNSUPPORTED_CAPABILITIES} after the command was sent.`,
-            }));
-          }
-          closeSocket();
+          signal?.removeEventListener("abort", onAbort);
+          closed = true;
+          reject(new RailwayConnectionError({ message: `${UNSUPPORTED_CAPABILITIES}; no command was sent.` }));
+          socket.close(1000, "");
           return;
         }
         negotiated = true;
         window = negotiatedWindow;
         pipelined = pipeline && frame.data?.pipeline === true;
         reusable = reuse && frame.data?.reuse === true;
-        if (exec) {
-          exec.credits = window;
-          exec.wakeCreditWaiters();
-          // A proxy without pipelining runs the queued init_exec as soon as it has sent these.
-          if (!pipelined) exec.commit();
-        }
-        if (!ready) markReady();
+        markReady();
         return;
       }
       if (!exec) return;
@@ -524,8 +524,19 @@ export function openExecSocket(args: {
       const exec = current;
       if (exec && !exec.ended &&
         !(RETIRE_REASONS.has(event.reason) && retiredBeforeStart(exec, event.reason, event.code))) {
-        // An abrupt drop may have lost exec_started, so the outcome is unknown.
-        if (!exec.committed && event.code !== ABNORMAL_CLOSE_CODE) {
+        // A transient close may have lost exec_started, so the outcome is unknown
+        // unless the exec named its durable session and a retry can reattach.
+        const ambiguous = TRANSIENT_CLOSE_CODES.has(event.code);
+        if (!exec.committed && ambiguous && exec.reattachable) {
+          const detail = `code ${event.code}${event.reason ? `: ${event.reason}` : ""}`;
+          const error = Object.assign(new RailwayConnectionError({
+            message: `tcp-proxy exec session closed before the command was confirmed started (${detail}).`,
+            closeCode: event.code,
+          }), { closeReason: event.reason });
+          reattachable.add(error);
+          exec.failStart(error);
+          endExec(exec);
+        } else if (!exec.committed && !ambiguous) {
           exec.failStart(closedBeforeStart(event.code, event.reason, true));
           endExec(exec);
         } else {
@@ -569,6 +580,7 @@ class ExecState {
     readonly handlers: ExecWsHandlers,
     window: number,
     readonly reused: boolean,
+    readonly reattachable: boolean,
   ) {
     this.credits = window;
     this.started = new Promise((resolve, reject) => {
