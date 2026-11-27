@@ -18,10 +18,10 @@ export class ExecSocketPool {
     for (const socket of [...this.#idle.keys()]) {
       if (socket.jwt !== args.jwt && !(tokenExpiry(socket.jwt) >= tokenExpiry(args.jwt))) socket.close();
     }
-    const idle = this.#idle.keys().next();
-    if (!args.fresh && !idle.done) {
-      this.#busy(idle.value);
-      return idle.value;
+    const idle = args.fresh ? undefined : [...this.#idle.keys()].at(-1);
+    if (idle) {
+      this.#busy(idle);
+      return idle;
     }
     const socket = await openExecSocket({
       config: this.#config,

@@ -95,6 +95,22 @@ describe("exec socket pool", () => {
     await expect(next).resolves.toMatchObject({ exitCode: 0 });
   });
 
+  it("reuses the most recently idle socket so surplus ones age out", async () => {
+    const { sandbox, ws } = await pooledSandbox([shellToken("a")], {});
+    const burst = [sandbox.exec("one"), sandbox.exec("two"), sandbox.exec("three")];
+    await vi.waitFor(() => expect(ws.sockets).toHaveLength(3));
+    for (const socket of ws.sockets) await runOn(socket, 1, "ok\n");
+    await Promise.all(burst);
+
+    const last = ws.sockets[2]!;
+    for (let i = 2; i <= 4; i++) {
+      const exec = sandbox.exec(`echo ${i}`);
+      await runOn(last, i, "ok\n");
+      await exec;
+    }
+    expect(ws.sockets.map(socket => inits(socket).length)).toEqual([1, 1, 4]);
+  });
+
   it("surfaces the proxy's tunnel limit as a typed error without retrying", async () => {
     const { sandbox, ws } = await pooledSandbox([shellToken("a"), shellToken("b")], {}, { reusePeer: true, manualOpen: true });
     const exec = sandbox.exec("echo hi");
