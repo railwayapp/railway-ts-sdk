@@ -45,14 +45,21 @@ function onHeaders(message: unknown): void {
   const { request, response } = (message ?? {}) as UndiciHeadersMessage;
   if (!Array.isArray(request?.headers) || typeof response?.statusCode !== "number") return;
   const protocols = headerValue(request.headers, "sec-websocket-protocol")?.split(",") ?? [];
-  const entry = protocols.map(p => pending.get(p.trim())).find(Boolean);
-  if (!entry) return;
-  entry.response = {
-    status: response.statusCode,
-    retryAfter: Array.isArray(response.headers)
-      ? headerValue(response.headers, "retry-after")
-      : undefined,
-  };
+  recordHandshakeResponse(
+    protocols.map(p => p.trim()),
+    response.statusCode,
+    Array.isArray(response.headers) ? headerValue(response.headers, "retry-after") : undefined,
+  );
+}
+
+/** Records a refused upgrade for the pending handshake that offered one of `protocols`. */
+export function recordHandshakeResponse(
+  protocols: readonly string[],
+  status: number,
+  retryAfter: string | undefined,
+): void {
+  const entry = protocols.map(p => pending.get(p)).find(Boolean);
+  if (entry) entry.response = { status, retryAfter };
 }
 
 /** Flat `[name, value, ...]` pairs; undici uses strings for requests, Buffers for responses. */

@@ -1,18 +1,23 @@
-import type { ExecSocketPoolOptions, NormalizedRailwayClientConfig } from "./config.js";
+import type { ExecSocketPoolOptions, NormalizedRailwayClientConfig, WebSocketConstructor } from "./config.js";
 import { openExecSocket, type ExecSocket } from "./exec-ws-client.js";
+import { nodeWebSocket } from "./node-websocket.js";
 
 const SURPLUS_IDLE_MS = 120_000;
+/** Idle lifetime of a socket that cannot be unref'd, so it holds the process open only briefly. */
+const PINNING_IDLE_MS = 5_000;
 
 /** One sandbox's `/ws/exec` sockets: an idle one is reused, otherwise a new one opens. */
 export class ExecSocketPool {
   readonly #config: NormalizedRailwayClientConfig;
   readonly #options: ExecSocketPoolOptions;
+  readonly #webSocketImpl: WebSocketConstructor | undefined;
   readonly #idle = new Map<ExecSocket, ReturnType<typeof setTimeout> | undefined>();
   #closed = false;
 
   constructor(config: NormalizedRailwayClientConfig, options: ExecSocketPoolOptions) {
     this.#config = config;
     this.#options = options;
+    this.#webSocketImpl = config.webSocketImpl ?? nodeWebSocket();
   }
 
   async acquire(args: { jwt: string; legacy?: boolean; fresh?: boolean; signal?: AbortSignal }): Promise<ExecSocket> {
@@ -23,11 +28,13 @@ export class ExecSocketPool {
     const idle = args.fresh ? undefined : [...this.#idle.keys()].at(-1);
     if (idle) {
       this.#busy(idle);
+      idle.ref();
       return idle;
     }
     const socket = await openExecSocket({
       config: this.#config,
       jwt: args.jwt,
+      webSocketImpl: this.#webSocketImpl,
       reuse: true,
       pipeline: true,
       ...(args.legacy ? { legacy: true } : {}),
@@ -53,6 +60,7 @@ export class ExecSocketPool {
     }
     this.#idle.delete(socket);
     this.#idle.set(socket, undefined);
+    socket.unref();
     this.#arm();
   }
 
@@ -62,16 +70,18 @@ export class ExecSocketPool {
     this.#arm();
   }
 
-  /** Without `idleTimeoutMs`, the most recently idle socket is exempt and the rest close after `SURPLUS_IDLE_MS`. */
+  /** Without `idleTimeoutMs`, the most recently idle socket is exempt if it can be unref'd, and the rest close after `SURPLUS_IDLE_MS`. */
   #arm(): void {
     const { idleTimeoutMs } = this.#options;
-    const kept = idleTimeoutMs === undefined ? [...this.#idle.keys()].at(-1) : undefined;
+    const kept = [...this.#idle.keys()].at(-1);
     for (const [socket, timer] of this.#idle) {
-      if (socket === kept) {
+      const ms = idleTimeoutMs ??
+        (!socket.canUnref ? PINNING_IDLE_MS : socket === kept ? undefined : SURPLUS_IDLE_MS);
+      if (ms === undefined) {
         clearTimeout(timer);
         this.#idle.set(socket, undefined);
       } else if (timer === undefined) {
-        const next = setTimeout(() => socket.close(), idleTimeoutMs ?? SURPLUS_IDLE_MS);
+        const next = setTimeout(() => socket.close(), ms);
         (next as { unref?: () => void }).unref?.();
         this.#idle.set(socket, next);
       }

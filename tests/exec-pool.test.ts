@@ -426,6 +426,36 @@ describe("exec socket pool", () => {
     expect(ws.sockets.map(s => s.readyState)).toEqual([3, 3, 3]);
   });
 
+  it("unrefs a socket while it is idle and refs it again for the next exec", async () => {
+    const { sandbox, ws } = await pooledSandbox([shellToken("a")], {}, { reusePeer: true, manualStart: true, pipelinePeer: true });
+    const first = sandbox.exec("echo one");
+    const socket = await ws.nextSocket();
+    expect(socket.refed).toBe(true);
+    await vi.waitFor(() => expect(inits(socket)).toHaveLength(1));
+    socket.serverStarted();
+    await runOn(socket, 1, "one\n");
+    await first;
+    expect(socket.refed).toBe(false);
+
+    const second = sandbox.exec("echo two");
+    await vi.waitFor(() => expect(inits(socket)).toHaveLength(2));
+    expect(socket.refed).toBe(true);
+    socket.serverStarted();
+    socket.serverExit(0);
+    await second;
+    expect(socket.refed).toBe(false);
+  });
+
+  it("closes every idle socket after 5 seconds where sockets cannot be unref'd", async () => {
+    const { sandbox, ws } = await pooledSandbox([shellToken("a")], {}, { reusePeer: true, noUnref: true });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    await burstToIdle(sandbox, ws);
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(ws.sockets.map(s => s.readyState)).toEqual([1, 1, 1]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(ws.sockets.map(s => s.readyState)).toEqual([3, 3, 3]);
+  });
+
   it("closes surplus idle sockets after two minutes and keeps the most recently idle one", async () => {
     const { sandbox, ws } = await pooledSandbox([shellToken("a")], {});
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });

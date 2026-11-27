@@ -14,4 +14,7 @@ export interface RailwayWsSocket {
   onerror: ((event: unknown) => void) | null;
   send(data: string | ArrayBufferView): void;
   close(code?: number, reason?: string): void;
+  /** Present when the transport can stop its socket keeping the process alive. */
+  ref?(): void;
+  unref?(): void;
 }

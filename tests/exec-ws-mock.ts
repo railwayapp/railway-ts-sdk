@@ -23,6 +23,8 @@ export interface MockExecSocket {
   /** 1 = OPEN, 3 = CLOSED (subset of the WebSocket readyState constants). */
   readyState: number;
   bufferedAmount: number;
+  /** False while the client has unref'd the socket. */
+  refed: boolean;
   /** JSON text frames the client sent (init_exec, stdin_close). */
   sentText: { type: string; data?: unknown }[];
   /** Raw stdin payloads (frame byte stripped) the client sent. */
@@ -49,6 +51,8 @@ export function createExecWsMock(options: {
   pipelinePeer?: boolean;
   /** With pipelinePeer, the test sends `exec_started` itself. A `signal` before it closes 1000 "cancelled before start". */
   manualStart?: boolean;
+  /** Without ref/unref, like a runtime that cannot stop a socket keeping the process alive. */
+  noUnref?: boolean;
   onSend?: (frame: { type: string }) => void;
 } = {}): ExecWsMock {
   const sockets: Socket[] = [];
@@ -70,6 +74,7 @@ export function createExecWsMock(options: {
     onerror: ((event: unknown) => void) | null = null;
     readyState = 0;
     bufferedAmount = 0;
+    refed = true;
     private pipelined = false;
     private awaitingStart = false;
 
@@ -78,6 +83,7 @@ export function createExecWsMock(options: {
       this.protocols =
         typeof protocols === "string" ? [protocols] : (protocols ?? []).slice();
       sockets.push(this);
+      if (options.noUnref) Object.assign(this, { ref: undefined, unref: undefined });
       if (!options.manualOpen) queueMicrotask(() => this.serverOpen());
     }
 
@@ -135,6 +141,14 @@ export function createExecWsMock(options: {
       // 0x02 == stdin frame; record the payload after the frame byte.
       this.sentStdin.push(bytes.subarray(1));
       if (!options.manualCredits) this.serverFrame({ type: "stdin_credit", data: { chunks: 1 } });
+    }
+
+    ref(): void {
+      this.refed = true;
+    }
+
+    unref(): void {
+      this.refed = false;
     }
 
     close(code = 1000, reason = ""): void {

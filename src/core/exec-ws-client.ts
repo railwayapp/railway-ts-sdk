@@ -138,6 +138,10 @@ export interface ExecInit {
 export interface ExecSocket {
   readonly jwt: string;
   readonly closed: boolean;
+  /** Whether `unref()` stops the socket keeping the process alive. */
+  readonly canUnref: boolean;
+  ref(): void;
+  unref(): void;
   begin(init: ExecInit, handlers: ExecWsHandlers, signal?: AbortSignal): ExecWsConnection;
   close(): void;
 }
@@ -173,6 +177,7 @@ export async function connectExecWs(args: ExecInit & {
 export function openExecSocket(args: {
   config: NormalizedRailwayClientConfig;
   jwt: string;
+  webSocketImpl?: WebSocketConstructor | undefined;
   legacy?: boolean;
   reuse?: boolean;
   /** Ask the proxy to answer before routing; if it agrees, `exec_started` marks the start. */
@@ -185,7 +190,7 @@ export function openExecSocket(args: {
   const { config, jwt, legacy = false, reuse = false, signal, onIdle, onClose } = args;
   const pipeline = args.pipeline === true && !legacy;
   signal?.throwIfAborted();
-  const WS: WebSocketConstructor = resolveWebSocketImpl(config);
+  const WS: WebSocketConstructor = args.webSocketImpl ?? resolveWebSocketImpl(config);
 
   return new Promise<ExecSocket>((resolve, reject) => {
     let ready = false;
@@ -258,6 +263,9 @@ export function openExecSocket(args: {
     const execSocket: ExecSocket = {
       jwt,
       get closed() { return closed; },
+      canUnref: typeof socket.unref === "function",
+      ref: () => socket.ref?.(),
+      unref: () => socket.unref?.(),
       close: closeSocket,
       begin(init, handlers, beginSignal) {
         if (!closed && socket.readyState !== undefined && socket.readyState !== WS_OPEN) closeSocket();
