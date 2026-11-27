@@ -97,11 +97,11 @@ describe("exec socket pool", () => {
     const exec = sandbox.exec("echo hi");
     const socket = await vi.waitFor(() => ws.sockets[0] ?? Promise.reject(new Error("no socket")));
     socket.serverOpen();
-    socket.serverClose(4001, "max SSH connections (50) reached");
+    socket.serverClose(4001, "max SSH connections reached");
     const error = (await exec.catch(e => e)) as ExecConnectionLimitError;
     expect(error).toBeInstanceOf(ExecConnectionLimitError);
     expect(error.closeCode).toBe(4001);
-    expect(error.message).toContain("max SSH connections (50) reached");
+    expect(error.message).toContain("max SSH connections reached");
     expect(ws.sockets).toHaveLength(1);
   });
 

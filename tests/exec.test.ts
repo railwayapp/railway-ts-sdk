@@ -223,7 +223,7 @@ describe("exec", () => {
     const handle = sandbox.exec("echo hi");
     const socket = await vi.waitFor(() => ws.sockets[0] ?? Promise.reject(new Error("no socket")));
     socket.serverOpen();
-    socket.serverClose(4001, "max SSH connections (50) reached");
+    socket.serverClose(4001, "max SSH connections reached");
     await expect(handle).rejects.toBeInstanceOf(ExecConnectionLimitError);
     expect(ws.sockets).toHaveLength(1);
   });
