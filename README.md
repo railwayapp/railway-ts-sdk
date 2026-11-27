@@ -579,11 +579,13 @@ other idle sockets close after 2 minutes, and the most recently idle one stays o
 Node.js running) until the server closes it or the sandbox is destroyed. Each open socket
 counts against the sandbox's connection limit.
 
-With the pool, a new socket sends the command without waiting for the sandbox to be
-routed. A connection that closes before the server reports the command started is
-retried once as above, except an abrupt drop (close code 1006), which rejects with
-`ExecInterruptedError` because the command may have started. Aborting before the
-start closes the socket without running anything.
+With the pool, a server that supports it accepts the command while it routes to the
+sandbox and reports when the command starts. Until then, `kill()` or an abort cancels it
+without running anything (after `kill()` the exec rejects with `ExecNotStartedError`). A
+durable exec carries a random session name chosen by the SDK, so a connection that drops
+before the start is retried once by reattaching to that name instead of running the
+command twice. An ephemeral exec has no name to reattach to and rejects with
+`ExecInterruptedError`, because the command may have started.
 
 ### Verbose logging
 
