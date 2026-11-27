@@ -546,6 +546,7 @@ then an environment variable, then a default. Pass explicit values to override.
 | `fetch` | n/a | `globalThis.fetch` |
 | `webSocketImpl` | n/a | `globalThis.WebSocket` (pass the `ws` package where none exists) |
 | `verbose` | `RAILWAY_VERBOSE` | `false` |
+| `execSocketPool` | n/a | off: one WebSocket per exec |
 
 A token read from `RAILWAY_TOKEN` is treated as a [project token](https://docs.railway.com/integrations/api#project-token)
 (`authType: "project-token"`), which scopes access to one project/environment and
@@ -569,6 +570,13 @@ const sandbox = await Sandbox.create({
 Environment variables are read only where a runtime exposes them, so the SDK is safe to
 import in the browser and edge runtimes; provide credentials explicitly there.
 
+### Exec socket reuse
+
+Pass `execSocketPool: {}` to run each sandbox's execs over idle WebSockets instead of
+opening one per exec. `idleTimeoutMs` closes a socket that stays idle that long; unset,
+idle sockets stay open (keeping Node.js running) until the server closes them or the
+sandbox is destroyed. Each open socket counts against the sandbox's connection limit.
+
 ### Verbose logging
 
 Set `verbose: true` (or `RAILWAY_VERBOSE=1`) to print human-readable progress to **stderr** —
@@ -585,6 +593,9 @@ All errors extend `RailwayError`:
   `RailwayConnectionError`.
 - `RailwayGraphQLError`: the Railway API returned an error. Carries `.status`,
   `.errors`, and `.responseBody`.
+- `ExecConnectionLimitError`: the sandbox already has as many exec connections as it
+  allows. No command was sent and the SDK does not retry it. A subclass of
+  `ExecNotStartedError`.
 - `RailwayRateLimitError`: Railway refused the request or exec/file connection for
   rate limiting. Nothing ran and the SDK does not retry it. Carries `.retryAfterMs`
   when the server says how long to wait.
