@@ -34,6 +34,12 @@ import {
 // runs the file with node and reads the default export). Plan/apply/diff
 // live in the CLI, not here.
 describe("Railway IaC authoring", () => {
+  it("keeps an explicit null build command so the CLI can clear it", () => {
+    expect(service("web", { build: { buildCommand: null } }).build).toEqual({ buildCommand: null });
+    expect(service("web", { build: "" }).build).toEqual({ buildCommand: null });
+    expect(service("web", { build: "npm test" }).build).toEqual({ buildCommand: "npm test" });
+  });
+
   it("builds a plain project definition the CLI evaluator can consume", async () => {
     const program = defineRailway(() =>
       project("app", {

@@ -439,8 +439,14 @@ function normalizeSource(source: ServiceConfigInput["source"], rootDirectory?: s
 }
 
 function normalizeBuild(config: ServiceConfigInput): BuildConfig | undefined {
-  if (typeof config.build === "string") return { buildCommand: config.build };
-  return pruneEmpty({ ...config.build });
+  if (typeof config.build === "string") {
+    return config.build === "" ? { buildCommand: null } : { buildCommand: config.build };
+  }
+  if (config.build == null) return undefined;
+  const clearCommand = config.build.buildCommand === null || config.build.buildCommand === "";
+  const pruned = pruneEmpty(config.build);
+  if (clearCommand) return { ...pruned, buildCommand: null };
+  return pruned;
 }
 
 function normalizeDeploy(config: ServiceConfigInput): DeployConfig | undefined {
