@@ -190,9 +190,10 @@ export function deriveTcpProxyWsEndpoint(endpoint: string): string {
  */
 export function deriveInternalGraphQLWsEndpoint(endpoint: string): string | undefined {
   const url = new URL(endpoint);
-  if (!url.pathname.endsWith("/graphql/v2")) return undefined;
+  const pathname = url.pathname.replace(/\/graphql\/v2$/, "/graphql/internal");
+  if (pathname === url.pathname) return undefined;
   url.protocol = url.protocol === "http:" ? "ws:" : "wss:";
-  url.pathname = `${url.pathname.slice(0, -"/graphql/v2".length)}/graphql/internal`;
+  url.pathname = pathname;
   return url.toString();
 }
 

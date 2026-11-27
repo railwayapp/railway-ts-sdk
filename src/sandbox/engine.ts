@@ -353,7 +353,6 @@ export class SandboxEngine {
 
     return this.#pollUntilReady({
       delays: BUILD_POLL,
-      sleep,
       poll: () => this.getTemplateBuild(build.id),
       isReady: build => build.status === "READY",
       isTerminal: build => build.status === "FAILED",
@@ -417,7 +416,7 @@ export class SandboxEngine {
 
   async #pollUntilReady<T>(args: {
     delays: { initialMs: number; maxMs: number };
-    sleep: (ms: number) => Promise<void>;
+    sleep?: (ms: number) => Promise<void>;
     poll: () => Promise<T>;
     isReady: (value: T) => boolean;
     isTerminal: (value: T) => boolean;
@@ -430,7 +429,7 @@ export class SandboxEngine {
     let delay = args.delays.initialMs;
     let last: T;
     do {
-      await args.sleep(delay);
+      await (args.sleep ?? sleep)(delay);
       last = await args.poll();
       const elapsedSec = ((Date.now() - start) / 1000).toFixed(1);
       if (args.isReady(last)) {

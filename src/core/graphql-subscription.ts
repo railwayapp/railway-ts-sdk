@@ -2,6 +2,7 @@ import {
   resolveWebSocketImpl,
   type NormalizedRailwayClientConfig,
 } from "./config.js";
+import { authHeader } from "./graphql-client.js";
 import type { RailwayWsSocket } from "./ws-socket.js";
 
 const PROTOCOL = "graphql-transport-ws";
@@ -12,7 +13,8 @@ export interface GraphQLSubscription {
 
 /**
  * Best-effort `graphql-transport-ws` subscription: every failure is logged and
- * ends it quietly, so callers must not depend on it for correctness.
+ * ends it quietly, so callers must not depend on it for correctness. Bearer
+ * tokens only: backboard lifts just `Authorization` from connection_init.
  */
 export function subscribeGraphQL(
   config: NormalizedRailwayClientConfig,
@@ -23,6 +25,7 @@ export function subscribeGraphQL(
     onNext: () => void;
   },
 ): GraphQLSubscription | undefined {
+  if (config.authType !== "bearer") return undefined;
   let socket: RailwayWsSocket;
   try {
     const WS = resolveWebSocketImpl(config);
@@ -47,7 +50,7 @@ export function subscribeGraphQL(
   socket.onopen = () => {
     send({
       type: "connection_init",
-      payload: { Authorization: `Bearer ${config.token}` },
+      payload: authHeader(config),
     });
   };
   socket.onmessage = event => {
@@ -79,9 +82,8 @@ export function subscribeGraphQL(
         return;
     }
   };
-  socket.onerror = () => {
-    if (!closed) config.log("subscription socket error");
-  };
+  // onclose logs the cause; the handler stops `ws` throwing on an unhandled error.
+  socket.onerror = () => {};
   socket.onclose = event => {
     if (!closed) config.log(`subscription closed: ${event.code} ${event.reason}`);
     closed = true;

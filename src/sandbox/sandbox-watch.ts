@@ -13,8 +13,6 @@ export interface SandboxWatch {
   close(): void;
 }
 
-// Project tokens are left to the poll: backboard lifts only `Authorization`
-// from connection_init, and they authenticate with a different header.
 export function watchSandboxes(
   config: NormalizedRailwayClientConfig,
   environmentId: string,
@@ -22,10 +20,7 @@ export function watchSandboxes(
   let wake: (() => void) | undefined;
   let pending = false;
 
-  const endpoint =
-    config.authType === "bearer"
-      ? deriveInternalGraphQLWsEndpoint(config.endpoint)
-      : undefined;
+  const endpoint = deriveInternalGraphQLWsEndpoint(config.endpoint);
   const subscription =
     endpoint === undefined
       ? undefined
