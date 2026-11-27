@@ -52,7 +52,7 @@ describe("exec socket pool", () => {
     const { sandbox, ws, mock } = await pooledSandbox([shellToken("a")], {});
     const first = sandbox.exec("echo one");
     const socket = await ws.nextSocket();
-    expect(socket.sentText[0]).toEqual({ type: "exec_hello", data: { reuse: true } });
+    expect(socket.sentText[0]).toEqual({ type: "exec_hello", data: { reuse: true, pipeline: true } });
     await runOn(socket, 1, "one\n");
     await expect(first).resolves.toMatchObject({ exitCode: 0, stdout: "one\n" });
     expect(socket.readyState).toBe(1);

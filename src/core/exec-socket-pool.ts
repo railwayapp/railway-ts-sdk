@@ -27,6 +27,7 @@ export class ExecSocketPool {
       config: this.#config,
       jwt: args.jwt,
       reuse: true,
+      pipeline: true,
       ...(args.legacy ? { legacy: true } : {}),
       ...(args.signal ? { signal: args.signal } : {}),
       onIdle: s => this.#release(s),

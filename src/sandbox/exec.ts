@@ -9,6 +9,7 @@ import {
   connectExecWs,
   shouldRetryBeforeStart,
   type ExecInit,
+  type ExecSocket,
   type ExecWsConnection,
   type ExecWsHandlers,
   type RetiredBeforeStartError,
@@ -375,6 +376,7 @@ async function runExec(
     rejectResult = reject;
   });
   done.catch(() => {});
+  const ended = done.then(() => {}, () => {});
 
   const settle = (outcome?: { error: unknown }) => {
     if (settled) return;
@@ -473,6 +475,20 @@ async function runExec(
     }
   };
 
+  // Stdin EOF may precede the start. A socket closing under the send reports
+  // through its close event instead.
+  const begin = (socket: ExecSocket): Promise<ExecWsConnection> => {
+    const connection = socket.begin(execInit, handlers, abortSignal);
+    if (control.stdinEnded) {
+      try {
+        connection.closeStdin();
+      } catch {
+        // ignore
+      }
+    }
+    return Promise.race([connection.started, ended]).then(() => connection);
+  };
+
   let redialed = false;
   let connected = false;
   // Stdin waits on control.ready while the exec moves to a fresh socket.
@@ -504,7 +520,12 @@ async function runExec(
         settle();
         return;
       }
-      const next = socket.begin(execInit, handlers, abortSignal);
+      const next = await begin(socket);
+      if (settled || control.detached) {
+        next.close();
+        settle();
+        return;
+      }
       resolveNext(next);
       if (!connected) return;
       control.connection = next;
@@ -558,23 +579,25 @@ async function runExec(
       });
     },
   };
-  const dial = async (token: string, legacy = false): Promise<ExecWsConnection> => {
+  const dial = async (token: string, legacy = false, fresh = false): Promise<ExecWsConnection> => {
     if (!context.execSockets) {
       return connectExecWs({ config: context.config, jwt: token, ...init, ...(legacy ? { legacy } : {}), handlers });
     }
     const socket = await context.execSockets.acquire({
       jwt: token,
       ...(legacy ? { legacy } : {}),
+      ...(fresh ? { fresh } : {}),
       ...(abortSignal ? { signal: abortSignal } : {}),
     });
-    return socket.begin(execInit, handlers, abortSignal);
+    return begin(socket);
   };
-  // A connection that fails before the command is sent left nothing running, so
+  // A connection that fails before the command starts left nothing running, so
   // one reconnect is safe. Only transient failures (a dropped socket, a deploy)
   // are retried; denials, routing failures, the readiness timeout, an old proxy,
   // and aborts are not. The cached token is dropped first in case it was the
   // cause (a refused upgrade is a bare 1006). One attempt, unlike the files
-  // client's three, because each one may wait out routing.
+  // client's three, because each one may wait out routing. A pooled socket the
+  // proxy retired is redialled at once, keeping the token unless it expired.
   const connectWithRetry = async () => {
     try {
       return await dial(jwt);
@@ -584,10 +607,11 @@ async function runExec(
       context.config.log(
         `exec: ${(error as Error).message} Retrying once in sandbox=${context.sandboxId}`,
       );
-      context.shellTokens.evict(context.sandboxId, "shell", jwt);
-      await abortableDelay(CONNECT_RETRY_DELAY_MS, options.signal);
+      const { tokenExpired } = error as Partial<RetiredBeforeStartError>;
+      if (tokenExpired !== false) context.shellTokens.evict(context.sandboxId, "shell", jwt);
+      if (tokenExpired === undefined) await abortableDelay(CONNECT_RETRY_DELAY_MS, options.signal);
       jwt = await shellToken();
-      return dial(jwt);
+      return dial(jwt, false, true);
     }
   };
 

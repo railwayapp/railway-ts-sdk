@@ -32,6 +32,7 @@ export interface MockExecSocket {
   serverStderr(data: string | Uint8Array): void;
   serverDurableSession(id: string): void;
   serverExit(exitCode: number, reason?: string): void;
+  serverStarted(): void;
   serverFrame(frame: unknown): void;
   serverClose(code: number, reason?: string): void;
 }
@@ -44,6 +45,10 @@ export function createExecWsMock(options: {
   legacyPeer?: boolean;
   /** Grant socket reuse when the hello asks for it, like a proxy with exec control v3. */
   reusePeer?: boolean;
+  /** Answer a pipelining hello with `pipeline: true` and send `exec_started` for each init_exec. */
+  pipelinePeer?: boolean;
+  /** With pipelinePeer, the test sends `exec_started` itself. */
+  manualStart?: boolean;
   onSend?: (frame: { type: string }) => void;
 } = {}): ExecWsMock {
   const sockets: Socket[] = [];
@@ -65,6 +70,7 @@ export function createExecWsMock(options: {
     onerror: ((event: unknown) => void) | null = null;
     readyState = 0;
     bufferedAmount = 0;
+    private pipelined = false;
 
     constructor(url: string, protocols?: string | string[]) {
       this.url = url;
@@ -93,15 +99,23 @@ export function createExecWsMock(options: {
           this.serverClose(1000, "session ended");
           return;
         }
+        if (frame.type === "exec_hello") {
+          this.pipelined = options.pipelinePeer === true && frame.data?.pipeline === true;
+        }
         if (frame.type === "exec_hello" && !options.manualCapabilities) {
           const reuse = options.reusePeer === true && frame.data?.reuse === true;
           this.serverFrame({
             type: "exec_capabilities",
-            data: reuse
-              ? { version: 3, stdin_chunks: 8, stdin_chunk_bytes: 16384, reuse: true }
-              : { version: 2, stdin_chunks: 8, stdin_chunk_bytes: 16384 },
+            data: {
+              ...(reuse || this.pipelined
+                ? { version: 3, stdin_chunks: 8, stdin_chunk_bytes: 16384 }
+                : { version: 2, stdin_chunks: 8, stdin_chunk_bytes: 16384 }),
+              ...(reuse ? { reuse: true } : {}),
+              ...(this.pipelined ? { pipeline: true } : {}),
+            },
           });
         }
+        if (frame.type === "init_exec" && this.pipelined && !options.manualStart) this.serverStarted();
         return;
       }
       const bytes =
@@ -149,6 +163,10 @@ export function createExecWsMock(options: {
       this.deliver(
         JSON.stringify({ type: "exit", data: { exit_code: exitCode, reason } }),
       );
+    }
+
+    serverStarted(): void {
+      this.serverFrame({ type: "exec_started" });
     }
 
     serverClose(code: number, reason = ""): void {

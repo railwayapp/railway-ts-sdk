@@ -39,6 +39,8 @@ const TRANSIENT_CLOSE_CODES: ReadonlySet<number> = new Set([1001, 1006, 1012, 10
 const MAX_CONNECTIONS_CLOSE_CODE = 4001;
 /** What a proxy that predates exec control sends after rejecting the bare hello. */
 const LEGACY_REJECT_CLOSE_CODE = 1000;
+const ABNORMAL_CLOSE_CODE = 1006;
+const UNSUPPORTED_CAPABILITIES = "Unsupported exec control capabilities";
 const WS_OPEN = 1;
 
 const notRetryable = new WeakSet<object>();
@@ -94,6 +96,11 @@ export interface ExecWsConnection {
    * errors, confirmed exits). False on a legacy connection.
    */
   readonly negotiated: boolean;
+  /**
+   * Resolves once the command started or the exec ended through a handler; rejects
+   * when the proxy closed before starting it, so nothing ran.
+   */
+  readonly started: Promise<void>;
   /** Send stdin with bounded frames and WebSocket send-buffer backpressure. */
   writeStdin(data: Uint8Array, signal: AbortSignal): Promise<void>;
   /** Half-close stdin (EOF) so commands that read stdin can finish. */
@@ -157,12 +164,15 @@ export function openExecSocket(args: {
   jwt: string;
   legacy?: boolean;
   reuse?: boolean;
+  /** Send init_exec without waiting for capabilities; `exec_started` then marks the start. */
+  pipeline?: boolean;
   /** Cancels connection establishment only. */
   signal?: AbortSignal;
   onIdle?: (socket: ExecSocket) => void;
   onClose?: (socket: ExecSocket) => void;
 }): Promise<ExecSocket> {
   const { config, jwt, legacy = false, reuse = false, signal, onIdle, onClose } = args;
+  const pipeline = args.pipeline === true && !legacy;
   signal?.throwIfAborted();
   const WS: WebSocketConstructor = resolveWebSocketImpl(config);
 
@@ -171,6 +181,8 @@ export function openExecSocket(args: {
     let closed = false;
     let closeInfo = { code: 1000, reason: "" };
     let helloSent = false;
+    let negotiated = false;
+    let pipelined = false;
     let reusable = false;
     let window = 0;
     let execs = 0;
@@ -203,6 +215,33 @@ export function openExecSocket(args: {
       exec.ended = true;
       if (current === exec) current = undefined;
       exec.wakeCreditWaiters();
+      exec.releaseStart();
+    };
+
+    const closedBeforeStart = (code: number, reason: string, sent: boolean): Error => {
+      const detail = `code ${code}${reason ? `: ${reason}` : ""}`;
+      const outcome = sent ? "the command did not start" : "no command was sent";
+      if (code === MAX_CONNECTIONS_CLOSE_CODE) {
+        const limited = new ExecConnectionLimitError({
+          message: `tcp-proxy refused the exec connection at the sandbox's connection limit (${detail}); ${outcome}.`,
+          closeCode: code,
+        });
+        notRetryable.add(limited);
+        return limited;
+      }
+      // The proxy routes the session after accepting the socket, so a close
+      // here can be a denial, a routing failure, or a deploy, not only an old
+      // proxy. An old proxy answers the bare hello with a normal closure.
+      if (helloSent && !negotiated && code === LEGACY_REJECT_CLOSE_CODE) {
+        return new ExecControlUnsupportedError({
+          message: `tcp-proxy does not support exec control (${detail}); ${outcome}.`,
+          closeCode: code,
+        });
+      }
+      return notStarted(
+        `tcp-proxy exec session closed before the command ${sent ? "started" : "was sent"} (${detail}).`,
+        { retryable: TRANSIENT_CLOSE_CODES.has(code), closeCode: code },
+      );
     };
 
     const execSocket: ExecSocket = {
@@ -233,6 +272,14 @@ export function openExecSocket(args: {
           closeSocket();
           throw error;
         }
+        if (!pipeline || (negotiated && !pipelined)) exec.commit();
+        else if (beginSignal) {
+          exec.onStartAbort(beginSignal, () => {
+            exec.failStart(beginSignal.reason);
+            endExec(exec);
+            closeSocket();
+          });
+        }
         return execConnection(exec);
       },
     };
@@ -247,6 +294,7 @@ export function openExecSocket(args: {
       };
       return {
         negotiated: !legacy,
+        started: exec.started,
         async writeStdin(bytes, signal) {
           signal.throwIfAborted();
           assertOpen();
@@ -302,13 +350,15 @@ export function openExecSocket(args: {
     };
 
     const retiredBeforeStart = (exec: ExecState, reason: string, closeCode?: number): boolean => {
-      if (!exec.reused || exec.sawFrame || exec.inputSent || !exec.handlers.onNotStarted) return false;
-      endExec(exec);
-      const error = notStarted(
+      if (!exec.reused || exec.sawFrame || exec.inputSent) return false;
+      if (exec.committed && !exec.handlers.onNotStarted) return false;
+      const error = Object.assign(notStarted(
         `tcp-proxy retired the reused exec socket before the command started (${reason}).`,
         { retryable: true, ...(closeCode !== undefined ? { closeCode } : {}) },
-      );
-      exec.handlers.onNotStarted(Object.assign(error, { tokenExpired: reason === TOKEN_EXPIRED }));
+      ), { tokenExpired: reason === TOKEN_EXPIRED });
+      if (!exec.committed) exec.failStart(error);
+      endExec(exec);
+      if (exec.committed) exec.handlers.onNotStarted!(error);
       return true;
     };
 
@@ -338,14 +388,19 @@ export function openExecSocket(args: {
       if (legacy) {
         // No flow control to negotiate: stdin is paced by bufferedAmount alone.
         window = Number.POSITIVE_INFINITY;
+        negotiated = true;
         markReady();
         return;
       }
-      // Negotiate BEFORE transmitting a command. An old proxy rejects the
-      // command-less hello, so unsupported peers cannot start an orphan exec.
+      // Without pipelining, negotiate BEFORE transmitting a command. An old proxy
+      // rejects the command-less hello first, so it never reads a pipelined init_exec.
+      const hello = reuse || pipeline
+        ? { type: "exec_hello", data: { ...(reuse ? { reuse: true } : {}), ...(pipeline ? { pipeline: true } : {}) } }
+        : { type: "exec_hello" };
       try {
-        socket.send(JSON.stringify(reuse ? { type: "exec_hello", data: { reuse: true } } : { type: "exec_hello" }));
+        socket.send(JSON.stringify(hello));
         helloSent = true;
+        if (pipeline) markReady();
       } catch (error) {
         signal?.removeEventListener("abort", onAbort);
         closed = true;
@@ -368,25 +423,53 @@ export function openExecSocket(args: {
       if (typeof data !== "string") return;
       const frame = parseControlFrame(data);
       if (!frame) return;
-      if (!ready) {
+      if (!negotiated) {
         if (frame.type !== "exec_capabilities") return;
-        try {
-          window = negotiatedStdinWindow(frame.data);
-        } catch (error) {
-          signal?.removeEventListener("abort", onAbort);
-          closed = true;
-          reject(error);
-          socket.close(1000, "");
+        const negotiatedWindow = negotiatedStdinWindow(frame.data);
+        if (negotiatedWindow === undefined) {
+          if (!ready) {
+            signal?.removeEventListener("abort", onAbort);
+            closed = true;
+            reject(new RailwayConnectionError({ message: `${UNSUPPORTED_CAPABILITIES}; no command was sent.` }));
+            socket.close(1000, "");
+            return;
+          }
+          if (exec) {
+            endExec(exec);
+            exec.handlers.onError(new RailwayConnectionError({
+              message: `${UNSUPPORTED_CAPABILITIES} after the command was sent.`,
+            }));
+          }
+          closeSocket();
           return;
         }
+        negotiated = true;
+        window = negotiatedWindow;
+        pipelined = pipeline && frame.data?.pipeline === true;
         reusable = reuse && frame.data?.reuse === true;
-        markReady();
+        if (exec) {
+          exec.credits = window;
+          exec.wakeCreditWaiters();
+          // A proxy without pipelining runs the queued init_exec as soon as it has sent these.
+          if (!pipelined) exec.commit();
+        }
+        if (!ready) markReady();
         return;
       }
       if (!exec) return;
       const { handlers } = exec;
       if (frame.type === "error" && frame.data?.code === TOKEN_EXPIRED &&
         retiredBeforeStart(exec, TOKEN_EXPIRED)) {
+        closeSocket();
+        return;
+      }
+      if (frame.type === "exec_started") {
+        exec.commit();
+        return;
+      }
+      if (frame.type === "error" && !exec.committed) {
+        exec.failStart(notStarted(`tcp-proxy did not start the command (${errorDetail(frame.data)}).`, { retryable: false }));
+        endExec(exec);
         closeSocket();
         return;
       }
@@ -415,13 +498,7 @@ export function openExecSocket(args: {
         case "error":
           exec.broken = true;
           handlers.onError(new RailwayConnectionError({
-            message: `tcp-proxy exec error (${
-              typeof frame.data?.code === "string" ? frame.data.code : "unknown"
-            })${
-              typeof frame.data?.message === "string" && frame.data.message
-                ? `: ${frame.data.message}`
-                : ""
-            }.`,
+            message: `tcp-proxy exec error (${errorDetail(frame.data)}).`,
           }));
           break;
         case "durable_session":
@@ -441,35 +518,17 @@ export function openExecSocket(args: {
           reject(rateLimited);
           return;
         }
-        const detail = `code ${event.code}${event.reason ? `: ${event.reason}` : ""}`;
-        if (event.code === MAX_CONNECTIONS_CLOSE_CODE) {
-          const limited = new ExecConnectionLimitError({
-            message: `tcp-proxy refused the exec connection at the sandbox's connection limit (${detail}); no command was sent.`,
-            closeCode: event.code,
-          });
-          notRetryable.add(limited);
-          reject(limited);
-          return;
-        }
-        // The proxy routes the session after accepting the socket, so a close
-        // here can be a denial, a routing failure, or a deploy, not only an old
-        // proxy. An old proxy answers the bare hello with a normal closure.
-        if (helloSent && event.code === LEGACY_REJECT_CLOSE_CODE) {
-          reject(new ExecControlUnsupportedError({
-            message: `tcp-proxy does not support exec control (${detail}); no command was sent.`,
-            closeCode: event.code,
-          }));
-          return;
-        }
-        reject(notStarted(
-          `tcp-proxy exec session closed before the command was sent (${detail}).`,
-          { retryable: TRANSIENT_CLOSE_CODES.has(event.code), closeCode: event.code },
-        ));
+        reject(closedBeforeStart(event.code, event.reason, false));
         return;
       }
       const exec = current;
-      if (exec && !exec.ended) {
-        if (!(RETIRE_REASONS.has(event.reason) && retiredBeforeStart(exec, event.reason, event.code))) {
+      if (exec && !exec.ended &&
+        !(RETIRE_REASONS.has(event.reason) && retiredBeforeStart(exec, event.reason, event.code))) {
+        // An abrupt drop may have lost exec_started, so the outcome is unknown.
+        if (!exec.committed && event.code !== ABNORMAL_CLOSE_CODE) {
+          exec.failStart(closedBeforeStart(event.code, event.reason, true));
+          endExec(exec);
+        } else {
           endExec(exec);
           exec.handlers.onClose({ code: event.code, reason: event.reason });
         }
@@ -500,6 +559,10 @@ class ExecState {
   sawFrame = false;
   inputSent = false;
   stdinClosed = false;
+  committed = false;
+  readonly started: Promise<void>;
+  #start!: { resolve: () => void; reject: (error: unknown) => void };
+  #stopWatchingAbort: (() => void) | undefined;
   #creditWaiters: Array<() => void> = [];
 
   constructor(
@@ -508,6 +571,30 @@ class ExecState {
     readonly reused: boolean,
   ) {
     this.credits = window;
+    this.started = new Promise((resolve, reject) => {
+      this.#start = { resolve, reject };
+    });
+    this.started.catch(() => {});
+  }
+
+  commit(): void {
+    this.committed = true;
+    this.releaseStart();
+  }
+
+  releaseStart(): void {
+    this.#stopWatchingAbort?.();
+    this.#start.resolve();
+  }
+
+  failStart(error: unknown): void {
+    this.#stopWatchingAbort?.();
+    this.#start.reject(error);
+  }
+
+  onStartAbort(signal: AbortSignal, onAbort: () => void): void {
+    signal.addEventListener("abort", onAbort, { once: true });
+    this.#stopWatchingAbort = () => signal.removeEventListener("abort", onAbort);
   }
 
   wakeCreditWaiters(): void {
@@ -571,6 +658,7 @@ interface ControlFrameData {
   code?: string;
   message?: string;
   reuse?: boolean;
+  pipeline?: boolean;
 }
 
 function parseControlFrame(text: string): { type?: string; data?: ControlFrameData } | undefined {
@@ -590,15 +678,18 @@ function validCreditGrant(chunks: unknown, available: number): chunks is number 
  * Accepts any later protocol version and any chunk limit at least as large as
  * the chunks this client sends, so a newer proxy does not break deployed SDKs.
  */
-function negotiatedStdinWindow(data: ControlFrameData | undefined): number {
+function negotiatedStdinWindow(data: ControlFrameData | undefined): number | undefined {
   if (typeof data?.version !== "number" || data.version < MIN_EXEC_CONTROL_VERSION ||
     typeof data.stdin_chunk_bytes !== "number" || data.stdin_chunk_bytes < STDIN_CHUNK_BYTES ||
     !validCreditGrant(data.stdin_chunks, MAX_STDIN_CHUNKS)) {
-    throw new RailwayConnectionError({
-      message: "Unsupported exec control capabilities; no command was sent.",
-    });
+    return undefined;
   }
   return data.stdin_chunks;
+}
+
+function errorDetail(data: ControlFrameData | undefined): string {
+  const code = typeof data?.code === "string" ? data.code : "unknown";
+  return typeof data?.message === "string" && data.message ? `${code}: ${data.message}` : code;
 }
 
 function emitExit(data: ControlFrameData | undefined, exec: ExecState): void {
