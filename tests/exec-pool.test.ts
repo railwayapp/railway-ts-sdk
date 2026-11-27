@@ -176,6 +176,24 @@ describe("exec socket pool", () => {
     await expect(second).resolves.toMatchObject({ exitCode: 0, stdout: "two\n" });
   });
 
+  it("redials on a fresh socket, not another idle one", async () => {
+    const { sandbox, ws } = await pooledSandbox([shellToken("a")], {});
+    const burst = [sandbox.exec("one"), sandbox.exec("two")];
+    await vi.waitFor(() => expect(ws.sockets).toHaveLength(2));
+    for (const socket of ws.sockets) await runOn(socket, 1, "ok\n");
+    await Promise.all(burst);
+
+    const next = sandbox.exec("three");
+    await vi.waitFor(() => expect(ws.sockets.flatMap(inits)).toHaveLength(3));
+    const picked = ws.sockets.find(socket => inits(socket).length === 2)!;
+    const other = ws.sockets.find(socket => socket !== picked)!;
+    picked.serverClose(1000, "idle timeout");
+    const fresh = await ws.nextSocket();
+    await runOn(fresh, 1, "three\n");
+    await expect(next).resolves.toMatchObject({ exitCode: 0, stdout: "three\n" });
+    expect(inits(other)).toHaveLength(1);
+  });
+
   it("redials when the reused socket is retired before the exec has a connection", async () => {
     let inits_ = 0;
     let first: MockExecSocket | undefined;

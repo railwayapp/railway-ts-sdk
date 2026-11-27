@@ -336,6 +336,7 @@ async function runExec(
 ): Promise<ExecResult> {
   options.signal?.throwIfAborted();
   const init = execParameters(target, options);
+  const { signal: abortSignal, ...execInit } = init;
 
   // Never fabricate a durable id when the server did not assign one.
   let sessionNameResolved = options.ephemeral === true;
@@ -478,16 +479,8 @@ async function runExec(
   // the exec moves to a fresh socket once. Stdin waits on control.ready meanwhile.
   const redial = (error: ExecNotStartedError) => {
     if (settled) return;
-    if (redialed || control.detached || control.terminating) {
-      settle({
-        error: new ExecInterruptedError({
-          ...(error.closeCode !== undefined ? { closeCode: error.closeCode } : {}),
-          reason: error.message,
-          stdout: stdout.finish(),
-          stderr: stderr.finish(),
-          cause: failure?.reason ?? error,
-        }),
-      });
+    if (control.detached || control.terminating) {
+      settle({ error: failure?.reason ?? error });
       return;
     }
     redialed = true;
@@ -503,7 +496,12 @@ async function runExec(
     void (async () => {
       if (error.closeCode === TOKEN_EXPIRED_CLOSE_CODE) context.shellTokens.evict(context.sandboxId, "shell", jwt);
       jwt = await shellToken();
-      const next = await dial(jwt);
+      const socket = await context.execSockets!.acquire({
+        jwt,
+        fresh: true,
+        ...(abortSignal ? { signal: abortSignal } : {}),
+      });
+      const next = socket.begin(execInit, handlers, abortSignal);
       if (settled || control.detached) {
         next.close();
         return;
@@ -568,13 +566,12 @@ async function runExec(
     if (!context.execSockets) {
       return connectExecWs({ config: context.config, jwt: token, ...init, ...(legacy ? { legacy } : {}), handlers });
     }
-    const { signal, ...execInit } = init;
     const socket = await context.execSockets.acquire({
       jwt: token,
       ...(legacy ? { legacy } : {}),
-      ...(signal ? { signal } : {}),
+      ...(abortSignal ? { signal: abortSignal } : {}),
     });
-    return socket.begin(execInit, handlers, signal);
+    return socket.begin(execInit, handlers, abortSignal);
   };
   // A connection that fails before the command is sent left nothing running, so
   // one reconnect is safe. Only transient failures (a dropped socket, a deploy)

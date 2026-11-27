@@ -13,14 +13,14 @@ export class ExecSocketPool {
     this.#options = options;
   }
 
-  async acquire(args: { jwt: string; legacy?: boolean; signal?: AbortSignal }): Promise<ExecSocket> {
+  async acquire(args: { jwt: string; legacy?: boolean; fresh?: boolean; signal?: AbortSignal }): Promise<ExecSocket> {
     // The token cache stops handing out a token a minute before it expires, so
     // a socket on an older token would soon be refused at init_exec.
     for (const socket of [...this.#idle.keys()]) {
       if (socket.jwt !== args.jwt) socket.close();
     }
     const idle = this.#idle.keys().next();
-    if (!idle.done) {
+    if (!args.fresh && !idle.done) {
       this.#busy(idle.value);
       return idle.value;
     }
