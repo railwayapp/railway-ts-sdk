@@ -56,6 +56,7 @@ import {
 } from "./errors.js";
 import { ExecSocketPool } from "../core/exec-socket-pool.js";
 import { startExec, type ExecContext, type ExecHandle } from "./exec.js";
+import { watchSandboxes } from "./sandbox-watch.js";
 import { ShellTokens } from "./shell-token.js";
 import { createSandboxFiles, type SandboxFiles } from "./files.js";
 import type {
@@ -79,8 +80,10 @@ import type {
 const READINESS_TIMEOUT_MS = 5 * 60_000;
 /** Upper bound on `sessions()` paging; a sandbox holds far fewer sessions. */
 const MAX_SESSION_PAGES = 20;
-const POLL_INITIAL_DELAY_MS = 500;
-const POLL_MAX_DELAY_MS = 5_000;
+const BUILD_POLL = { initialMs: 500, maxMs: 5_000 };
+// The subscription is the fast path; this poll bounds the wait when a push is
+// missed, throttled, or the subscription never connected.
+const RUNNING_POLL = { initialMs: 250, maxMs: 1_000 };
 
 const sleep = (ms: number): Promise<void> =>
   new Promise(resolve => setTimeout(resolve, ms));
@@ -349,6 +352,7 @@ export class SandboxEngine {
     }
 
     return this.#pollUntilReady({
+      delays: BUILD_POLL,
       poll: () => this.getTemplateBuild(build.id),
       isReady: build => build.status === "READY",
       isTerminal: build => build.status === "FAILED",
@@ -376,23 +380,30 @@ export class SandboxEngine {
       throw new SandboxFailedError({ id: created.id, status: created.status });
     }
 
-    return this.#pollUntilReady({
-      poll: () => this.#getOrThrow(created.id),
-      isReady: info => info.status === "RUNNING",
-      isTerminal: info => isSandboxTerminal(info.status),
-      describe: info => `sandbox ${info.id} status=${info.status}`,
-      onTerminal: info => {
-        throw new SandboxFailedError({ id: info.id, status: info.status });
-      },
-      onTimeout: info => {
-        throw new SandboxTimeoutError({
-          resource: "sandbox",
-          id: info.id,
-          lastStatus: info.status,
-          timeoutMs: READINESS_TIMEOUT_MS,
-        });
-      },
-    });
+    const watch = watchSandboxes(this.#config, this.environmentId);
+    try {
+      return await this.#pollUntilReady({
+        delays: RUNNING_POLL,
+        sleep: watch.sleep,
+        poll: () => this.#getOrThrow(created.id),
+        isReady: info => info.status === "RUNNING",
+        isTerminal: info => isSandboxTerminal(info.status),
+        describe: info => `sandbox ${info.id} status=${info.status}`,
+        onTerminal: info => {
+          throw new SandboxFailedError({ id: info.id, status: info.status });
+        },
+        onTimeout: info => {
+          throw new SandboxTimeoutError({
+            resource: "sandbox",
+            id: info.id,
+            lastStatus: info.status,
+            timeoutMs: READINESS_TIMEOUT_MS,
+          });
+        },
+      });
+    } finally {
+      watch.close();
+    }
   }
 
   async #getOrThrow(id: string): Promise<SandboxInfo> {
@@ -404,6 +415,8 @@ export class SandboxEngine {
   }
 
   async #pollUntilReady<T>(args: {
+    delays: { initialMs: number; maxMs: number };
+    sleep?: (ms: number) => Promise<void>;
     poll: () => Promise<T>;
     isReady: (value: T) => boolean;
     isTerminal: (value: T) => boolean;
@@ -413,10 +426,10 @@ export class SandboxEngine {
   }): Promise<T> {
     const start = Date.now();
     const describe = args.describe;
-    let delay = POLL_INITIAL_DELAY_MS;
+    let delay = args.delays.initialMs;
     let last: T;
     do {
-      await sleep(delay);
+      await (args.sleep ?? sleep)(delay);
       last = await args.poll();
       const elapsedSec = ((Date.now() - start) / 1000).toFixed(1);
       if (args.isReady(last)) {
@@ -427,7 +440,7 @@ export class SandboxEngine {
         if (describe) this.#config.log(`${describe(last)} hit terminal state`);
         return args.onTerminal(last);
       }
-      delay = Math.min(delay * 2, POLL_MAX_DELAY_MS);
+      delay = Math.min(delay * 2, args.delays.maxMs);
       if (describe) {
         this.#config.log(
           `waiting on ${describe(last)}, retry in ${delay}ms (elapsed ${elapsedSec}s)`,

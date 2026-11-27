@@ -184,6 +184,20 @@ export function deriveTcpProxyWsEndpoint(endpoint: string): string {
 }
 
 /**
+ * The internal graph's WebSocket endpoint for a `…/graphql/v2` endpoint, or
+ * undefined for any other path. It serves backboard's invalidation
+ * subscriptions and accepts the same bearer tokens as the public graph.
+ */
+export function deriveInternalGraphQLWsEndpoint(endpoint: string): string | undefined {
+  const url = new URL(endpoint);
+  const pathname = url.pathname.replace(/\/graphql\/v2$/, "/graphql/internal");
+  if (pathname === url.pathname) return undefined;
+  url.protocol = url.protocol === "http:" ? "ws:" : "wss:";
+  url.pathname = pathname;
+  return url.toString();
+}
+
+/**
  * Derives the tcp-proxy files WebSocket endpoint from the exec endpoint by
  * swapping the bridge path: `wss://ssh.<host>:2226/ws/exec` →
  * `wss://ssh.<host>:2226/ws/files`. Custom `tcpProxyWsEndpoint` overrides are

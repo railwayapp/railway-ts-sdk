@@ -90,7 +90,7 @@ function operationName(document: DocumentNode): string {
   return "operation";
 }
 
-function authHeader(config: NormalizedRailwayClientConfig): Record<string, string> {
+export function authHeader(config: NormalizedRailwayClientConfig): Record<string, string> {
   if (config.authType === "project-token") return { "project-access-token": config.token };
   return { Authorization: `Bearer ${config.token}` };
 }

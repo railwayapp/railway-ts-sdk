@@ -10,6 +10,7 @@ import {
 } from "../src/index.js";
 import { compileSandboxTemplate } from "../src/sandbox/template.js";
 import { createExecWsMock } from "./exec-ws-mock.js";
+import { createGraphQLWsMock } from "./graphql-ws-mock.js";
 import {
   buildInfo,
   checkpointInfo,
@@ -22,9 +23,14 @@ import {
 
 const auth = { token: "token_123", environmentId: "environment_123" };
 
-beforeEach(clearRailwayEnv);
+beforeEach(() => {
+  clearRailwayEnv();
+  // Node's global WebSocket would open a real sandbox subscription.
+  vi.stubGlobal("WebSocket", undefined);
+});
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
 });
 
 async function createThenQueue(
@@ -484,7 +490,7 @@ describe("Sandbox.create readiness", () => {
   it("throws SandboxTimeoutError after the readiness timeout", async () => {
     const mock = createFetchMock([
       { data: { sandboxCreate: sandboxInfo({ status: "CREATING" }) } },
-      ...manyResponses(200, { data: { sandbox: sandboxInfo({ status: "CREATING" }) } }),
+      ...manyResponses(400, { data: { sandbox: sandboxInfo({ status: "CREATING" }) } }),
     ]);
 
     const promise = silenceExpectedRejection(
@@ -493,6 +499,81 @@ describe("Sandbox.create readiness", () => {
     await vi.advanceTimersByTimeAsync(6 * 60_000);
 
     await expect(promise).rejects.toBeInstanceOf(SandboxTimeoutError);
+  });
+
+  it("polls at 250ms, doubling to at most 1s between polls", async () => {
+    const mock = createFetchMock([
+      { data: { sandboxCreate: sandboxInfo({ status: "CREATING" }) } },
+      ...manyResponses(4, { data: { sandbox: sandboxInfo({ status: "CREATING" }) } }),
+      { data: { sandbox: sandboxInfo({ status: "RUNNING" }) } },
+    ]);
+
+    const promise = Sandbox.create({ ...auth, fetch: mock.fetch });
+    const pollsAt = async (ms: number): Promise<number> => {
+      await vi.advanceTimersByTimeAsync(ms);
+      return mock.calls.length - 1;
+    };
+
+    expect(await pollsAt(249)).toBe(0);
+    expect(await pollsAt(1)).toBe(1);
+    expect(await pollsAt(500)).toBe(2);
+    expect(await pollsAt(1_000)).toBe(3);
+    expect(await pollsAt(1_000)).toBe(4);
+    expect(await pollsAt(1_000)).toBe(5);
+    expect((await promise).status).toBe("RUNNING");
+  });
+
+  it("polls as soon as the sandbox invalidation subscription pushes", async () => {
+    const ws = createGraphQLWsMock();
+    const mock = createFetchMock([
+      { data: { sandboxCreate: sandboxInfo({ status: "CREATING" }) } },
+      { data: { sandbox: sandboxInfo({ status: "RUNNING" }) } },
+    ]);
+
+    const promise = Sandbox.create({
+      ...auth,
+      fetch: mock.fetch,
+      webSocketImpl: ws.webSocketImpl,
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    const [socket] = ws.sockets;
+    expect(socket?.url).toBe("wss://backboard.railway.com/graphql/internal");
+    expect(socket?.protocols).toEqual(["graphql-transport-ws"]);
+    expect(socket?.sent[0]).toEqual({
+      type: "connection_init",
+      payload: { Authorization: "Bearer token_123" },
+    });
+    expect(socket?.sent[1]).toMatchObject({
+      type: "subscribe",
+      payload: { variables: { environmentId: "environment_123" } },
+    });
+    expect(mock.calls).toHaveLength(1);
+
+    socket?.serverNext();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect((await promise).status).toBe("RUNNING");
+    expect(mock.calls).toHaveLength(2);
+    expect(socket?.closed).toBe(true);
+  });
+
+  it("leaves project tokens to the poll", async () => {
+    const ws = createGraphQLWsMock();
+    const mock = createFetchMock([
+      { data: { sandboxCreate: sandboxInfo({ status: "CREATING" }) } },
+      { data: { sandbox: sandboxInfo({ status: "RUNNING" }) } },
+    ]);
+
+    const promise = Sandbox.create({
+      ...auth,
+      authType: "project-token",
+      fetch: mock.fetch,
+      webSocketImpl: ws.webSocketImpl,
+    });
+    await vi.advanceTimersByTimeAsync(250);
+
+    expect((await promise).status).toBe("RUNNING");
+    expect(ws.sockets).toHaveLength(0);
   });
 });
 
