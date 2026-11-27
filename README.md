@@ -574,9 +574,10 @@ import in the browser and edge runtimes; provide credentials explicitly there.
 ### Exec socket reuse
 
 Pass `execSocketPool: {}` to run each sandbox's execs over idle WebSockets instead of
-opening one per exec. `idleTimeoutMs` closes a socket that stays idle that long; unset,
-idle sockets stay open (keeping Node.js running) until the server closes them or the
-sandbox is destroyed. Each open socket counts against the sandbox's connection limit.
+opening one per exec. `idleTimeoutMs` closes every socket that stays idle that long. Unset,
+other idle sockets close after 2 minutes, and the most recently idle one stays open (keeping
+Node.js running) until the server closes it or the sandbox is destroyed. Each open socket
+counts against the sandbox's connection limit.
 
 With the pool, a new socket sends the command without waiting for the sandbox to be
 routed. A connection that closes before the server reports the command started is

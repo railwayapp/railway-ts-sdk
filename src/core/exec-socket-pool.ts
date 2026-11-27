@@ -1,6 +1,8 @@
 import type { ExecSocketPoolOptions, NormalizedRailwayClientConfig } from "./config.js";
 import { openExecSocket, type ExecSocket } from "./exec-ws-client.js";
 
+const SURPLUS_IDLE_MS = 120_000;
+
 /** One sandbox's `/ws/exec` sockets: an idle one is reused, otherwise a new one opens. */
 export class ExecSocketPool {
   readonly #config: NormalizedRailwayClientConfig;
@@ -49,15 +51,31 @@ export class ExecSocketPool {
       socket.close();
       return;
     }
-    const { idleTimeoutMs } = this.#options;
-    const timer = idleTimeoutMs === undefined ? undefined : setTimeout(() => socket.close(), idleTimeoutMs);
-    (timer as { unref?: () => void } | undefined)?.unref?.();
-    this.#idle.set(socket, timer);
+    this.#idle.delete(socket);
+    this.#idle.set(socket, undefined);
+    this.#arm();
   }
 
   #busy(socket: ExecSocket): void {
     clearTimeout(this.#idle.get(socket));
     this.#idle.delete(socket);
+    this.#arm();
+  }
+
+  /** Without `idleTimeoutMs`, the most recently idle socket is exempt and the rest close after `SURPLUS_IDLE_MS`. */
+  #arm(): void {
+    const { idleTimeoutMs } = this.#options;
+    const kept = idleTimeoutMs === undefined ? [...this.#idle.keys()].at(-1) : undefined;
+    for (const [socket, timer] of this.#idle) {
+      if (socket === kept) {
+        clearTimeout(timer);
+        this.#idle.set(socket, undefined);
+      } else if (timer === undefined) {
+        const next = setTimeout(() => socket.close(), idleTimeoutMs ?? SURPLUS_IDLE_MS);
+        (next as { unref?: () => void }).unref?.();
+        this.#idle.set(socket, next);
+      }
+    }
   }
 }
 

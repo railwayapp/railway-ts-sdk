@@ -41,6 +41,13 @@ async function pooledSandbox(
 
 const inits = (socket: MockExecSocket) => socket.sentText.filter(f => f.type === "init_exec");
 
+async function burstToIdle(sandbox: Sandbox, ws: ReturnType<typeof createExecWsMock>) {
+  const burst = [sandbox.exec("one"), sandbox.exec("two"), sandbox.exec("three")];
+  await vi.waitFor(() => expect(ws.sockets.flatMap(inits)).toHaveLength(3));
+  for (const socket of ws.sockets) socket.serverExit(0);
+  await Promise.all(burst);
+}
+
 async function runOn(socket: MockExecSocket, initCount: number, stdout: string, code = 0) {
   await vi.waitFor(() => expect(inits(socket)).toHaveLength(initCount));
   socket.serverStdout(stdout);
@@ -409,16 +416,48 @@ describe("exec socket pool", () => {
     expect(newer.closed).toBe(true);
   });
 
-  it("closes idle sockets after the configured idle time", async () => {
-    const { sandbox, ws } = await pooledSandbox([shellToken("a")], { idleTimeoutMs: 1_000 });
+  it("closes every idle socket, the most recent too, after the configured idle time", async () => {
+    const { sandbox, ws } = await pooledSandbox([shellToken("a")], { idleTimeoutMs: 300_000 });
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    const first = sandbox.exec("echo one");
-    const a = await ws.nextSocket();
-    await runOn(a, 1, "one\n");
-    await first;
-    expect(a.readyState).toBe(1);
-    await vi.advanceTimersByTimeAsync(1_000);
-    expect(a.readyState).toBe(3);
+    await burstToIdle(sandbox, ws);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(ws.sockets.map(s => s.readyState)).toEqual([1, 1, 1]);
+    await vi.advanceTimersByTimeAsync(180_000);
+    expect(ws.sockets.map(s => s.readyState)).toEqual([3, 3, 3]);
+  });
+
+  it("closes surplus idle sockets after two minutes and keeps the most recently idle one", async () => {
+    const { sandbox, ws } = await pooledSandbox([shellToken("a")], {});
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    await burstToIdle(sandbox, ws);
+    await vi.advanceTimersByTimeAsync(119_999);
+    expect(ws.sockets.map(s => s.readyState)).toEqual([1, 1, 1]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(ws.sockets.map(s => s.readyState)).toEqual([3, 3, 1]);
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(ws.sockets[2]!.readyState).toBe(1);
+  });
+
+  it("keeps the next most recently idle socket while the kept one runs an exec", async () => {
+    const { sandbox, ws } = await pooledSandbox([shellToken("a")], {});
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    await burstToIdle(sandbox, ws);
+    const [a, b, c] = ws.sockets as [MockExecSocket, MockExecSocket, MockExecSocket];
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    const running = sandbox.exec("sleep 300");
+    await vi.waitFor(() => expect(inits(c)).toHaveLength(2));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect([a, b, c].map(s => s.readyState)).toEqual([3, 1, 1]);
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(b.readyState).toBe(1);
+
+    c.serverExit(0);
+    await running;
+    await vi.advanceTimersByTimeAsync(119_999);
+    expect(b.readyState).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect([b, c].map(s => s.readyState)).toEqual([3, 1]);
   });
 
   it("closes pooled sockets when the sandbox is destroyed", async () => {
