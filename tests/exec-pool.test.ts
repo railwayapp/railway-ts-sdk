@@ -194,6 +194,48 @@ describe("exec socket pool", () => {
     expect(inits(other)).toHaveLength(1);
   });
 
+  it("sends no command on the redialled socket once the exec settled", async () => {
+    const { sandbox, ws } = await pooledSandbox([shellToken("a")], {}, { reusePeer: true, manualOpen: true });
+    const first = sandbox.exec("echo one");
+    const a = await vi.waitFor(() => ws.sockets[0] ?? Promise.reject(new Error("no socket")));
+    a.serverOpen();
+    await runOn(a, 1, "one\n");
+    await first;
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const second = sandbox.exec("sleep 100", { timeoutSec: 1 });
+    await vi.waitFor(() => expect(inits(a)).toHaveLength(2));
+    a.serverClose(1000, "idle timeout");
+    const b = await vi.waitFor(() => ws.sockets[1] ?? Promise.reject(new Error("no socket")));
+    await vi.advanceTimersByTimeAsync(11_000);
+    await expect(second).resolves.toMatchObject({ timedOut: true, exitCode: null });
+
+    b.serverOpen();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(inits(b)).toHaveLength(0);
+    expect(b.readyState).toBe(3);
+  });
+
+  it("rejects a queued stdin write when the exec settles during a redial", async () => {
+    const { sandbox, ws } = await pooledSandbox([shellToken("a")], {}, { reusePeer: true, manualOpen: true });
+    const first = sandbox.exec("echo one");
+    const a = await vi.waitFor(() => ws.sockets[0] ?? Promise.reject(new Error("no socket")));
+    a.serverOpen();
+    await runOn(a, 1, "one\n");
+    await first;
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const second = sandbox.exec("cat", { stdin: true, timeoutSec: 1 });
+    await vi.waitFor(() => expect(inits(a)).toHaveLength(2));
+    a.serverClose(1000, "idle timeout");
+    await vi.waitFor(() => expect(ws.sockets).toHaveLength(2));
+    const write = second.stdin.write("data");
+    write.catch(() => {});
+    await vi.advanceTimersByTimeAsync(11_000);
+    await expect(second).resolves.toMatchObject({ timedOut: true });
+    await expect(write).rejects.toThrow("no longer writable");
+  });
+
   it("redials when the reused socket is retired before the exec has a connection", async () => {
     let inits_ = 0;
     let first: MockExecSocket | undefined;

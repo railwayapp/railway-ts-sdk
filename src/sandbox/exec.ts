@@ -366,6 +366,7 @@ async function runExec(
   let terminationDeadline: ReturnType<typeof setTimeout> | undefined;
   let failure: { reason: unknown } | undefined;
   let callbackFailed = false;
+  let rejectRedial: ((error: unknown) => void) | undefined;
   const stdoutDecoder = decoder();
   const stderrDecoder = decoder();
 
@@ -384,6 +385,7 @@ async function runExec(
     control.stdinController.abort(
       new RailwayError("Exec stdin connection is closed."),
     );
+    rejectRedial?.(new RailwayError("Exec stdin is no longer writable."));
     // Durable sessions assign a name up front; if none arrived by the time the
     // exec settles, the server can't do durable — fail `sessionName` rather than
     // hand back a fabricated id that can never reattach.
@@ -486,10 +488,9 @@ async function runExec(
     redialed = true;
     delete control.connection;
     let resolveNext!: (connection: ExecWsConnection) => void;
-    let rejectNext!: (error: unknown) => void;
     control.ready = new Promise((resolve, reject) => {
       resolveNext = resolve;
-      rejectNext = reject;
+      rejectRedial = reject;
     });
     control.ready.catch(() => {});
     context.config.log(`exec: ${error.message} Redialling in sandbox=${context.sandboxId}`);
@@ -501,20 +502,18 @@ async function runExec(
         fresh: true,
         ...(abortSignal ? { signal: abortSignal } : {}),
       });
-      const next = socket.begin(execInit, handlers, abortSignal);
       if (settled || control.detached) {
-        next.close();
+        socket.close();
+        settle();
         return;
       }
+      const next = socket.begin(execInit, handlers, abortSignal);
       resolveNext(next);
       if (!connected) return;
       control.connection = next;
       if (control.pendingSignal) signalRemote(control.pendingSignal);
       if (control.stdinEnded) next.closeStdin();
-    })().catch(err => {
-      rejectNext(err);
-      settle({ error: err });
-    });
+    })().catch(err => settle({ error: err }));
   };
 
   const handlers: ExecWsHandlers = {
@@ -618,7 +617,13 @@ async function runExec(
     connection = await dial(jwt, true);
   }
   // A retired pooled socket can be redialled before this continuation runs.
-  if (redialed) connection = await control.ready;
+  if (redialed) {
+    try {
+      connection = await control.ready;
+    } catch {
+      return done;
+    }
+  }
   control.connection = connection;
   connected = true;
   onConnection(connection);
