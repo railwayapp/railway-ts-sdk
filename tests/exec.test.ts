@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { deriveTcpProxyWsEndpoint } from "../src/core/config.js";
 import {
+  ExecConnectionLimitError,
   ExecControlUnsupportedError,
   ExecNotStartedError,
   RailwayRateLimitError,
@@ -44,6 +45,7 @@ async function wsSandbox(responses: unknown[] = [], wsOptions: Parameters<typeof
     ...auth,
     fetch: mock.fetch,
     webSocketImpl: ws.webSocketImpl,
+    execSocketPool: false,
   });
   return { sandbox, ws, mock };
 }
@@ -209,12 +211,25 @@ describe("exec", () => {
       shellToken("jwt_a"),
       shellToken("jwt_b"),
     ]);
-    const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch, webSocketImpl: ws.webSocketImpl });
+    const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch, webSocketImpl: ws.webSocketImpl, execSocketPool: false });
     const error = (await sandbox.exec("echo hi").catch(e => e)) as RailwayRateLimitError;
     expect(error).toBeInstanceOf(RailwayRateLimitError);
     expect(error.retryAfterMs).toBe(15_000);
     expect(ws.attempts()).toBe(1);
     expect(diagnosticsChannel.hasSubscribers("undici:request:headers")).toBe(false);
+  });
+
+  it("surfaces the proxy's connection limit as a typed error without retrying", async () => {
+    const { sandbox, ws } = await wsSandbox([shellToken("jwt_a"), shellToken("jwt_b")], { manualOpen: true });
+    const handle = sandbox.exec("echo hi");
+    const socket = await vi.waitFor(() => ws.sockets[0] ?? Promise.reject(new Error("no socket")));
+    socket.serverOpen();
+    socket.serverClose(4001, "max SSH connections reached");
+    const error = (await handle.catch(e => e)) as ExecConnectionLimitError;
+    expect(error).toBeInstanceOf(ExecConnectionLimitError);
+    expect(error.closeCode).toBe(4001);
+    expect(error.message).toContain("max SSH connections reached");
+    expect(ws.sockets).toHaveLength(1);
   });
 
   it("makes a single legacy attempt after an old proxy, with no retry stacked on it", async () => {
@@ -618,7 +633,7 @@ describe("exec", () => {
     const mock = createFetchMock([
       { data: { sandboxCreate: sandboxInfo() } }, shellToken("jwt"),
     ]);
-    const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch, webSocketImpl: ws.webSocketImpl });
+    const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch, webSocketImpl: ws.webSocketImpl, execSocketPool: false });
     const controller = new AbortController();
     const handle = sandbox.exec("agent", { signal: controller.signal });
     await tick();
@@ -641,7 +656,7 @@ describe("exec", () => {
         init.signal!.addEventListener("abort", () => reject(init.signal!.reason), { once: true });
       });
     };
-    const sandbox = await Sandbox.create({ ...auth, fetch: fetchMock, webSocketImpl: ws.webSocketImpl });
+    const sandbox = await Sandbox.create({ ...auth, fetch: fetchMock, webSocketImpl: ws.webSocketImpl, execSocketPool: false });
     const handle = sandbox.exec("agent", { signal: controller.signal, stdin: true });
     const write = handle.stdin.write("hello");
     controller.abort();
@@ -659,7 +674,7 @@ describe("exec", () => {
     const mock = createFetchMock([
       { data: { sandboxCreate: sandboxInfo() } }, shellToken("jwt"),
     ]);
-    const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch, webSocketImpl: ws.webSocketImpl });
+    const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch, webSocketImpl: ws.webSocketImpl, execSocketPool: false });
     const handle = sandbox.exec("agent", { signal: controller.signal });
     await tick();
     const socket = ws.sockets[0]!;

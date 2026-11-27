@@ -1,9 +1,11 @@
 export * as iac from "./iac/index.js";
 export {
   DEFAULT_RAILWAY_GRAPHQL_ENDPOINT,
+  type ExecSocketPoolOptions,
   type RailwayClientConfig,
 } from "./core/config.js";
 export {
+  ExecConnectionLimitError,
   ExecControlUnsupportedError,
   ExecNotStartedError,
   RailwayAuthError,

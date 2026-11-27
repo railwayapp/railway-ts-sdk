@@ -154,7 +154,8 @@ and wait for the remote exit. Timeout resolves with `timedOut: true` and `exitCo
 once the kill is confirmed, or `exitCode: null` if no exit arrives within 10 seconds.
 Abort rejects with the signal's reason, or with `RailwayConnectionError` if the exit is
 not confirmed in time. A dropped connection rejects with `ExecInterruptedError`. The
-`timeoutSec` clock starts once the command has been sent; pass `signal` to bound the
+`timeoutSec` clock starts once the command has started (with `execSocketPool: false`, once
+it has been sent); pass `signal` to bound the
 wait for a sandbox that is still starting.
 
 ### Ephemeral and durable sessions
@@ -546,6 +547,7 @@ then an environment variable, then a default. Pass explicit values to override.
 | `fetch` | n/a | `globalThis.fetch` |
 | `webSocketImpl` | n/a | `globalThis.WebSocket` (pass the `ws` package where none exists) |
 | `verbose` | `RAILWAY_VERBOSE` | `false` |
+| `execSocketPool` | n/a | on: idle exec WebSockets are reused; `false` opens one per exec |
 
 A token read from `RAILWAY_TOKEN` is treated as a [project token](https://docs.railway.com/integrations/api#project-token)
 (`authType: "project-token"`), which scopes access to one project/environment and
@@ -569,6 +571,24 @@ const sandbox = await Sandbox.create({
 Environment variables are read only where a runtime exposes them, so the SDK is safe to
 import in the browser and edge runtimes; provide credentials explicitly there.
 
+### Exec socket reuse
+
+Each sandbox's execs run over idle WebSockets instead of opening one per exec. Pass
+`execSocketPool: false` to turn this off. `execSocketPool: { idleTimeoutMs }` closes every
+socket that stays idle that long. Unset, other idle sockets close after 2 minutes, and the
+most recently idle one stays open until the server closes it or the sandbox is destroyed.
+On Node.js an idle socket does not keep the process running. Where it would (other runtimes,
+or a custom `webSocketImpl`), idle sockets close after 5 seconds unless `idleTimeoutMs` is
+set. Each open socket counts against the sandbox's connection limit.
+
+With the pool, a server that supports it accepts the command while it routes to the
+sandbox and reports when the command starts. Until then, `kill()` or an abort cancels it
+without running anything (after `kill()` the exec rejects with `ExecNotStartedError`). A
+durable exec carries a random session name chosen by the SDK, so a connection that drops
+before the start is retried once by reattaching to that name instead of running the
+command twice. An ephemeral exec has no name to reattach to and rejects with
+`ExecInterruptedError`, because the command may have started.
+
 ### Verbose logging
 
 Set `verbose: true` (or `RAILWAY_VERBOSE=1`) to print human-readable progress to **stderr** —
@@ -585,6 +605,9 @@ All errors extend `RailwayError`:
   `RailwayConnectionError`.
 - `RailwayGraphQLError`: the Railway API returned an error. Carries `.status`,
   `.errors`, and `.responseBody`.
+- `ExecConnectionLimitError`: the sandbox already has as many exec connections as it
+  allows. No command ran and the SDK does not retry it. A subclass of
+  `ExecNotStartedError`.
 - `RailwayRateLimitError`: Railway refused the request or exec/file connection for
   rate limiting. Nothing ran and the SDK does not retry it. Carries `.retryAfterMs`
   when the server says how long to wait.

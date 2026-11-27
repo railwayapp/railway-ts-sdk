@@ -202,6 +202,7 @@ describe("sandbox instance", () => {
       ...auth,
       fetch: mock.fetch,
       webSocketImpl: ws.webSocketImpl,
+      execSocketPool: false,
     });
     const handle = sandbox.exec("pwd");
     const socket = await ws.nextSocket();

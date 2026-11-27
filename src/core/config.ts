@@ -47,6 +47,22 @@ export interface RailwayClientConfig {
    * Also enabled by `RAILWAY_VERBOSE`. Tokens and env values are never logged.
    */
   verbose?: boolean;
+  /**
+   * Reuse exec WebSockets per sandbox. On by default; `false` opens one socket per exec.
+   * Each open socket holds one of the sandbox's connections; past the limit an exec
+   * fails with `ExecConnectionLimitError`. On Node.js idle sockets do not keep the
+   * process alive; elsewhere, or with a custom `webSocketImpl`, they close after 5 seconds
+   * unless `idleTimeoutMs` is set.
+   */
+  execSocketPool?: ExecSocketPoolOptions | false;
+}
+
+export interface ExecSocketPoolOptions {
+  /**
+   * Milliseconds any idle socket stays open. Unset, idle sockets close after 2 minutes except the
+   * most recently idle one, which stays until the server closes it or the sandbox is destroyed.
+   */
+  idleTimeoutMs?: number;
 }
 
 /** Structural constructor type satisfied by native WebSocket and the `ws` package. */
@@ -62,6 +78,7 @@ export interface NormalizedRailwayClientConfig {
   fetch: typeof fetch;
   webSocketImpl?: WebSocketConstructor | undefined;
   tcpProxyWsEndpoint: string;
+  execSocketPool?: ExecSocketPoolOptions | undefined;
   log: Logger;
 }
 
@@ -105,12 +122,27 @@ export function normalizeRailwayClientConfig(
     fetch: fetchImpl,
     webSocketImpl: config.webSocketImpl,
     tcpProxyWsEndpoint,
+    execSocketPool: validExecSocketPool(config.execSocketPool),
     log: createLogger(verbose),
   };
   normalized.log(
     `config resolved: endpoint=${endpoint} authType=${normalized.authType}`,
   );
   return normalized;
+}
+
+function validExecSocketPool(pool: unknown): ExecSocketPoolOptions | undefined {
+  if (pool === false) return undefined;
+  if (pool === undefined) return {};
+  if (typeof pool !== "object" || pool === null || Array.isArray(pool)) {
+    throw new TypeError("`execSocketPool` must be `false` or an options object.");
+  }
+  const { idleTimeoutMs } = pool as ExecSocketPoolOptions;
+  if (idleTimeoutMs !== undefined && (typeof idleTimeoutMs !== "number" ||
+    !Number.isFinite(idleTimeoutMs) || idleTimeoutMs <= 0 || idleTimeoutMs > 2_147_483_647)) {
+    throw new TypeError("`execSocketPool.idleTimeoutMs` must be a positive number of milliseconds that fits in a JavaScript timer.");
+  }
+  return { ...pool };
 }
 
 /**

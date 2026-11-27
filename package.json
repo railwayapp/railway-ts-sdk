@@ -79,12 +79,14 @@
     "@graphql-codegen/typescript": "^4.1.6",
     "@graphql-codegen/typescript-operations": "^4.6.0",
     "@types/node": "^22.15.0",
+    "@types/ws": "^8.18.1",
     "dotenv": "^16.5.0",
     "fallow": "^2.67.0",
     "publint": "^0.3.21",
     "tsup": "^8.5.0",
     "tsx": "^4.20.0",
     "typescript": "^5.8.3",
-    "vitest": "^3.1.4"
+    "vitest": "^3.1.4",
+    "ws": "^8.20.1"
   }
 }

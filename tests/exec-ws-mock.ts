@@ -23,6 +23,8 @@ export interface MockExecSocket {
   /** 1 = OPEN, 3 = CLOSED (subset of the WebSocket readyState constants). */
   readyState: number;
   bufferedAmount: number;
+  /** False while the client has unref'd the socket. */
+  refed: boolean;
   /** JSON text frames the client sent (init_exec, stdin_close). */
   sentText: { type: string; data?: unknown }[];
   /** Raw stdin payloads (frame byte stripped) the client sent. */
@@ -32,6 +34,7 @@ export interface MockExecSocket {
   serverStderr(data: string | Uint8Array): void;
   serverDurableSession(id: string): void;
   serverExit(exitCode: number, reason?: string): void;
+  serverStarted(): void;
   serverFrame(frame: unknown): void;
   serverClose(code: number, reason?: string): void;
 }
@@ -42,6 +45,14 @@ export function createExecWsMock(options: {
   manualCredits?: boolean;
   /** Behave like a proxy that predates exec control: a bare exec_hello closes the session. */
   legacyPeer?: boolean;
+  /** Grant socket reuse when the hello asks for it, like a proxy with exec control v3. */
+  reusePeer?: boolean;
+  /** Answer a pipelining hello with `pipeline: true` and send `exec_started` for each init_exec. */
+  pipelinePeer?: boolean;
+  /** With pipelinePeer, the test sends `exec_started` itself. A `signal` before it closes 1000 "cancelled before start". */
+  manualStart?: boolean;
+  /** Without ref/unref, like a runtime that cannot stop a socket keeping the process alive. */
+  noUnref?: boolean;
   onSend?: (frame: { type: string }) => void;
 } = {}): ExecWsMock {
   const sockets: Socket[] = [];
@@ -63,12 +74,16 @@ export function createExecWsMock(options: {
     onerror: ((event: unknown) => void) | null = null;
     readyState = 0;
     bufferedAmount = 0;
+    refed = true;
+    private pipelined = false;
+    private awaitingStart = false;
 
     constructor(url: string, protocols?: string | string[]) {
       this.url = url;
       this.protocols =
         typeof protocols === "string" ? [protocols] : (protocols ?? []).slice();
       sockets.push(this);
+      if (options.noUnref) Object.assign(this, { ref: undefined, unref: undefined });
       if (!options.manualOpen) queueMicrotask(() => this.serverOpen());
     }
 
@@ -91,9 +106,27 @@ export function createExecWsMock(options: {
           this.serverClose(1000, "session ended");
           return;
         }
-        if (frame.type === "exec_hello" && !options.manualCapabilities) {
-          this.serverFrame({ type: "exec_capabilities", data: { version: 2, stdin_chunks: 8, stdin_chunk_bytes: 16384 } });
+        if (frame.type === "exec_hello") {
+          this.pipelined = options.pipelinePeer === true && frame.data?.pipeline === true;
         }
+        if (frame.type === "exec_hello" && !options.manualCapabilities) {
+          const reuse = options.reusePeer === true && frame.data?.reuse === true;
+          this.serverFrame({
+            type: "exec_capabilities",
+            data: {
+              ...(reuse || this.pipelined
+                ? { version: 3, stdin_chunks: 8, stdin_chunk_bytes: 16384 }
+                : { version: 2, stdin_chunks: 8, stdin_chunk_bytes: 16384 }),
+              ...(reuse ? { reuse: true } : {}),
+              ...(this.pipelined ? { pipeline: true } : {}),
+            },
+          });
+        }
+        if (frame.type === "init_exec" && this.pipelined) {
+          this.awaitingStart = true;
+          if (!options.manualStart) this.serverStarted();
+        }
+        if (frame.type === "signal" && this.awaitingStart) this.serverClose(1000, "cancelled before start");
         return;
       }
       const bytes =
@@ -108,6 +141,14 @@ export function createExecWsMock(options: {
       // 0x02 == stdin frame; record the payload after the frame byte.
       this.sentStdin.push(bytes.subarray(1));
       if (!options.manualCredits) this.serverFrame({ type: "stdin_credit", data: { chunks: 1 } });
+    }
+
+    ref(): void {
+      this.refed = true;
+    }
+
+    unref(): void {
+      this.refed = false;
     }
 
     close(code = 1000, reason = ""): void {
@@ -141,6 +182,11 @@ export function createExecWsMock(options: {
       this.deliver(
         JSON.stringify({ type: "exit", data: { exit_code: exitCode, reason } }),
       );
+    }
+
+    serverStarted(): void {
+      this.awaitingStart = false;
+      this.serverFrame({ type: "exec_started" });
     }
 
     serverClose(code: number, reason = ""): void {
