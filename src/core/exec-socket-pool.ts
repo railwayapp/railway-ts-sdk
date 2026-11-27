@@ -14,10 +14,9 @@ export class ExecSocketPool {
   }
 
   async acquire(args: { jwt: string; legacy?: boolean; fresh?: boolean; signal?: AbortSignal }): Promise<ExecSocket> {
-    // The token cache stops handing out a token a minute before it expires, so
-    // a socket on an older token would soon be refused at init_exec.
+    // A socket on a token that expires sooner would soon be refused at init_exec.
     for (const socket of [...this.#idle.keys()]) {
-      if (socket.jwt !== args.jwt) socket.close();
+      if (socket.jwt !== args.jwt && !(tokenExpiry(socket.jwt) >= tokenExpiry(args.jwt))) socket.close();
     }
     const idle = this.#idle.keys().next();
     if (!args.fresh && !idle.done) {
@@ -57,5 +56,16 @@ export class ExecSocketPool {
   #busy(socket: ExecSocket): void {
     clearTimeout(this.#idle.get(socket));
     this.#idle.delete(socket);
+  }
+}
+
+/** The JWT's `exp`, or NaN when it cannot be read. */
+function tokenExpiry(jwt: string): number {
+  try {
+    const payload = jwt.split(".")[1]!.replaceAll("-", "+").replaceAll("_", "/");
+    const { exp } = JSON.parse(atob(payload)) as { exp?: unknown };
+    return typeof exp === "number" ? exp : Number.NaN;
+  } catch {
+    return Number.NaN;
   }
 }

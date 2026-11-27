@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { normalizeRailwayClientConfig } from "../src/core/config.js";
 import { ExecConnectionLimitError, RailwayRateLimitError } from "../src/core/errors.js";
+import { ExecSocketPool } from "../src/core/exec-socket-pool.js";
+import type { ExecSocket } from "../src/core/exec-ws-client.js";
 import { ExecInterruptedError, Sandbox } from "../src/index.js";
 import { clearRailwayEnv, createFetchMock, refusedUpgradeWebSocket, sandboxInfo } from "./test-helpers.js";
 import { createExecWsMock, type MockExecSocket } from "./exec-ws-mock.js";
@@ -321,6 +324,32 @@ describe("exec socket pool", () => {
     expect(a.sentStdin).toHaveLength(16);
     a.serverExit(0);
     await second;
+  });
+
+  it("keeps an idle socket whose token outlives the caller's and closes one that does not", async () => {
+    const ws = createExecWsMock({ reusePeer: true });
+    const config = normalizeRailwayClientConfig({ ...auth, fetch: createFetchMock([]).fetch, webSocketImpl: ws.webSocketImpl });
+    const pool = new ExecSocketPool(config, {});
+    const runToIdle = async (socket: ExecSocket) => {
+      const exit = new Promise<void>(resolve => {
+        const connection = socket.begin({ command: "true" }, {
+          onError() {}, onStdinError() {}, onStdout() {}, onStderr() {}, onClose() {},
+          onExit: () => { connection.close(); resolve(); },
+        });
+      });
+      ws.sockets.at(-1)!.serverExit(0);
+      await exit;
+    };
+    const newer = await pool.acquire({ jwt: jwt("b", 600) });
+    await runToIdle(newer);
+
+    const reused = await pool.acquire({ jwt: jwt("a", 300) });
+    expect(reused).toBe(newer);
+    expect(ws.sockets).toHaveLength(1);
+    await runToIdle(reused);
+
+    await expect(pool.acquire({ jwt: jwt("c", 900) })).resolves.not.toBe(newer);
+    expect(newer.closed).toBe(true);
   });
 
   it("closes idle sockets after the configured idle time", async () => {
