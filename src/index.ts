@@ -5,9 +5,9 @@ export {
   type RailwayClientConfig,
 } from "./core/config.js";
 export {
+  ExecConnectionLimitError,
   ExecControlUnsupportedError,
   ExecNotStartedError,
-  ExecConnectionLimitError,
   RailwayAuthError,
   RailwayConnectionError,
   RailwayError,

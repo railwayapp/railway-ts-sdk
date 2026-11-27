@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { normalizeRailwayClientConfig } from "../src/core/config.js";
-import { ExecConnectionLimitError, RailwayRateLimitError } from "../src/core/errors.js";
+import { RailwayRateLimitError } from "../src/core/errors.js";
 import { ExecSocketPool } from "../src/core/exec-socket-pool.js";
 import type { ExecSocket } from "../src/core/exec-ws-client.js";
 import { ExecInterruptedError, Sandbox } from "../src/index.js";
@@ -109,19 +109,6 @@ describe("exec socket pool", () => {
       await exec;
     }
     expect(ws.sockets.map(socket => inits(socket).length)).toEqual([1, 1, 4]);
-  });
-
-  it("surfaces the proxy's tunnel limit as a typed error without retrying", async () => {
-    const { sandbox, ws } = await pooledSandbox([shellToken("a"), shellToken("b")], {}, { reusePeer: true, manualOpen: true });
-    const exec = sandbox.exec("echo hi");
-    const socket = await vi.waitFor(() => ws.sockets[0] ?? Promise.reject(new Error("no socket")));
-    socket.serverOpen();
-    socket.serverClose(4001, "max SSH connections reached");
-    const error = (await exec.catch(e => e)) as ExecConnectionLimitError;
-    expect(error).toBeInstanceOf(ExecConnectionLimitError);
-    expect(error.closeCode).toBe(4001);
-    expect(error.message).toContain("max SSH connections reached");
-    expect(ws.sockets).toHaveLength(1);
   });
 
   it("surfaces a rate-limited upgrade on the pooled path without retrying", async () => {
@@ -310,12 +297,12 @@ describe("exec socket pool", () => {
   });
 
   it("redials when the reused socket is retired before the exec has a connection", async () => {
-    let inits_ = 0;
+    let initCount = 0;
     let first: MockExecSocket | undefined;
     const { sandbox, ws } = await pooledSandbox([shellToken("a")], {}, {
       reusePeer: true,
       onSend: frame => {
-        if (frame.type === "init_exec" && ++inits_ === 2) first!.serverClose(1000, "idle timeout");
+        if (frame.type === "init_exec" && ++initCount === 2) first!.serverClose(1000, "idle timeout");
       },
     });
     const one = sandbox.exec("echo one");

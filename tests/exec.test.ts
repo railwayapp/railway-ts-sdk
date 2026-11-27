@@ -218,13 +218,16 @@ describe("exec", () => {
     expect(diagnosticsChannel.hasSubscribers("undici:request:headers")).toBe(false);
   });
 
-  it("surfaces the proxy's tunnel limit as a typed error without retrying", async () => {
+  it("surfaces the proxy's connection limit as a typed error without retrying", async () => {
     const { sandbox, ws } = await wsSandbox([shellToken("jwt_a"), shellToken("jwt_b")], { manualOpen: true });
     const handle = sandbox.exec("echo hi");
     const socket = await vi.waitFor(() => ws.sockets[0] ?? Promise.reject(new Error("no socket")));
     socket.serverOpen();
     socket.serverClose(4001, "max SSH connections reached");
-    await expect(handle).rejects.toBeInstanceOf(ExecConnectionLimitError);
+    const error = (await handle.catch(e => e)) as ExecConnectionLimitError;
+    expect(error).toBeInstanceOf(ExecConnectionLimitError);
+    expect(error.closeCode).toBe(4001);
+    expect(error.message).toContain("max SSH connections reached");
     expect(ws.sockets).toHaveLength(1);
   });
 
