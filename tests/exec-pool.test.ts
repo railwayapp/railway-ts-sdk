@@ -54,6 +54,51 @@ async function runOn(socket: MockExecSocket, initCount: number, stdout: string, 
   socket.serverExit(code);
 }
 
+describe("execSocketPool default", () => {
+  async function sandboxWith(execSocketPool?: unknown) {
+    const ws = createExecWsMock({ reusePeer: true, pipelinePeer: true });
+    const mock = createFetchMock([{ data: { sandboxCreate: sandboxInfo() } }, shellToken("a")]);
+    const sandbox = await Sandbox.create({
+      ...auth,
+      fetch: mock.fetch,
+      webSocketImpl: ws.webSocketImpl,
+      ...(execSocketPool === undefined ? {} : { execSocketPool: execSocketPool as false }),
+    });
+    return { sandbox, ws };
+  }
+
+  it("reuses a socket for the next exec when execSocketPool is unset", async () => {
+    const { sandbox, ws } = await sandboxWith();
+    const first = sandbox.exec("echo one");
+    const socket = await ws.nextSocket();
+    expect(socket.sentText[0]).toEqual({ type: "exec_hello", data: { reuse: true, pipeline: true } });
+    await runOn(socket, 1, "one\n");
+    await first;
+    const second = sandbox.exec("echo two");
+    await runOn(socket, 2, "two\n");
+    await expect(second).resolves.toMatchObject({ stdout: "two\n" });
+    expect(ws.sockets).toHaveLength(1);
+  });
+
+  it("opens one socket per exec with a plain exec_hello when execSocketPool is false", async () => {
+    const { sandbox, ws } = await sandboxWith(false);
+    for (const [i, command] of ["echo one", "echo two"].entries()) {
+      const exec = sandbox.exec(command);
+      await vi.waitFor(() => expect(ws.sockets).toHaveLength(i + 1));
+      const socket = ws.sockets[i]!;
+      await runOn(socket, 1, "ok\n");
+      await expect(exec).resolves.toMatchObject({ exitCode: 0 });
+      expect(socket.sentText[0]).toEqual({ type: "exec_hello" });
+      expect(inits(socket)[0]!.data).not.toHaveProperty("durable_session_name");
+      await vi.waitFor(() => expect(socket.readyState).toBe(3));
+    }
+  });
+
+  it.each([true, null, 0, "on", []])("rejects execSocketPool: %j", async value => {
+    await expect(sandboxWith(value)).rejects.toThrow(TypeError);
+  });
+});
+
 describe("exec socket pool", () => {
   it("runs consecutive execs on one socket when the proxy grants reuse", async () => {
     const { sandbox, ws, mock } = await pooledSandbox([shellToken("a")], {});

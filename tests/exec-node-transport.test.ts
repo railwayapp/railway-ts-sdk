@@ -57,7 +57,7 @@ async function runChild(endpoint: string, pool: string, commands: string[]) {
 describe("exec socket pool on Node.js sockets", () => {
   it("lets the process exit while a pooled socket sits idle", async () => {
     server = await startExecWsServer();
-    const run = await runChild(server.endpoint, "{}", ["echo one"]);
+    const run = await runChild(server.endpoint, "default", ["echo one"]);
     expect(run.lines, run.stderr).toEqual([JSON.stringify({ exitCode: 0, stdout: "ran 1\n" }), "done"]);
     expect(run).toMatchObject({ code: 0, signal: null });
     expect(run.idleMs).toBeLessThan(2_000);
@@ -66,7 +66,7 @@ describe("exec socket pool on Node.js sockets", () => {
 
   it("keeps the process alive while an exec runs, including on a reused socket", async () => {
     server = await startExecWsServer({ exitDelaysMs: [0, 1_500] });
-    const run = await runChild(server.endpoint, "{}", ["echo one", "sleep"]);
+    const run = await runChild(server.endpoint, "default", ["echo one", "sleep"]);
     expect(run, run.stderr).toMatchObject({ code: 0, signal: null });
     expect(run.lines).toEqual([
       JSON.stringify({ exitCode: 0, stdout: "ran 1\n" }),

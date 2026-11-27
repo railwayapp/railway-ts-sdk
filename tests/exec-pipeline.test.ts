@@ -33,7 +33,7 @@ async function sandboxWith(
     ...auth,
     fetch: mock.fetch,
     webSocketImpl: ws.webSocketImpl,
-    ...(pooled ? { execSocketPool: {} } : {}),
+    execSocketPool: pooled ? {} : false,
   });
   return { sandbox, ws, mock };
 }
@@ -433,7 +433,7 @@ describe("pooled exec on a pipelining proxy", () => {
   });
 });
 
-describe("exec without execSocketPool", () => {
+describe("exec with execSocketPool: false", () => {
   it("leaves the wire unchanged", async () => {
     const { sandbox, ws } = await sandboxWith([shellToken("a")], { manualCapabilities: true, pipelinePeer: true }, false);
     const exec = sandbox.exec("echo hi");

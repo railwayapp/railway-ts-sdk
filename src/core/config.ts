@@ -50,8 +50,9 @@ export interface RailwayClientConfig {
   /**
    * Reuse exec WebSockets per sandbox. On by default; `false` opens one socket per exec.
    * Each open socket holds one of the sandbox's connections; past the limit an exec
-   * fails with `ExecConnectionLimitError`. Idle sockets keep the process alive
-   * until they time out, `destroy()`, or the proxy closes them.
+   * fails with `ExecConnectionLimitError`. On Node.js idle sockets do not keep the
+   * process alive; elsewhere, or with a custom `webSocketImpl`, they close after 5 seconds
+   * unless `idleTimeoutMs` is set.
    */
   execSocketPool?: ExecSocketPoolOptions | false;
 }
@@ -130,16 +131,15 @@ export function normalizeRailwayClientConfig(
   return normalized;
 }
 
-function validExecSocketPool(
-  pool: ExecSocketPoolOptions | false | undefined,
-): ExecSocketPoolOptions | undefined {
+function validExecSocketPool(pool: unknown): ExecSocketPoolOptions | undefined {
   if (pool === false) return undefined;
   if (pool === undefined) return {};
-  if (
-    pool.idleTimeoutMs !== undefined &&
-    (!Number.isFinite(pool.idleTimeoutMs) || pool.idleTimeoutMs <= 0 ||
-      pool.idleTimeoutMs > 2_147_483_647)
-  ) {
+  if (typeof pool !== "object" || pool === null || Array.isArray(pool)) {
+    throw new TypeError("`execSocketPool` must be `false` or an options object.");
+  }
+  const { idleTimeoutMs } = pool as ExecSocketPoolOptions;
+  if (idleTimeoutMs !== undefined && (typeof idleTimeoutMs !== "number" ||
+    !Number.isFinite(idleTimeoutMs) || idleTimeoutMs <= 0 || idleTimeoutMs > 2_147_483_647)) {
     throw new TypeError("`execSocketPool.idleTimeoutMs` must be a positive number of milliseconds that fits in a JavaScript timer.");
   }
   return { ...pool };

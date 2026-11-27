@@ -45,6 +45,7 @@ async function wsSandbox(responses: unknown[] = [], wsOptions: Parameters<typeof
     ...auth,
     fetch: mock.fetch,
     webSocketImpl: ws.webSocketImpl,
+    execSocketPool: false,
   });
   return { sandbox, ws, mock };
 }
@@ -210,7 +211,7 @@ describe("exec", () => {
       shellToken("jwt_a"),
       shellToken("jwt_b"),
     ]);
-    const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch, webSocketImpl: ws.webSocketImpl });
+    const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch, webSocketImpl: ws.webSocketImpl, execSocketPool: false });
     const error = (await sandbox.exec("echo hi").catch(e => e)) as RailwayRateLimitError;
     expect(error).toBeInstanceOf(RailwayRateLimitError);
     expect(error.retryAfterMs).toBe(15_000);
@@ -632,7 +633,7 @@ describe("exec", () => {
     const mock = createFetchMock([
       { data: { sandboxCreate: sandboxInfo() } }, shellToken("jwt"),
     ]);
-    const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch, webSocketImpl: ws.webSocketImpl });
+    const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch, webSocketImpl: ws.webSocketImpl, execSocketPool: false });
     const controller = new AbortController();
     const handle = sandbox.exec("agent", { signal: controller.signal });
     await tick();
@@ -655,7 +656,7 @@ describe("exec", () => {
         init.signal!.addEventListener("abort", () => reject(init.signal!.reason), { once: true });
       });
     };
-    const sandbox = await Sandbox.create({ ...auth, fetch: fetchMock, webSocketImpl: ws.webSocketImpl });
+    const sandbox = await Sandbox.create({ ...auth, fetch: fetchMock, webSocketImpl: ws.webSocketImpl, execSocketPool: false });
     const handle = sandbox.exec("agent", { signal: controller.signal, stdin: true });
     const write = handle.stdin.write("hello");
     controller.abort();
@@ -673,7 +674,7 @@ describe("exec", () => {
     const mock = createFetchMock([
       { data: { sandboxCreate: sandboxInfo() } }, shellToken("jwt"),
     ]);
-    const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch, webSocketImpl: ws.webSocketImpl });
+    const sandbox = await Sandbox.create({ ...auth, fetch: mock.fetch, webSocketImpl: ws.webSocketImpl, execSocketPool: false });
     const handle = sandbox.exec("agent", { signal: controller.signal });
     await tick();
     const socket = ws.sockets[0]!;
