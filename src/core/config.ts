@@ -51,13 +51,16 @@ export interface RailwayClientConfig {
    * Reuse exec WebSockets per sandbox. Off when omitted (one socket per exec).
    * Each open socket holds one of the sandbox's connections; past the limit an exec
    * fails with `ExecConnectionLimitError`. Idle sockets keep the process alive
-   * until `idleTimeoutMs`, `destroy()`, or the proxy closes them.
+   * until they time out, `destroy()`, or the proxy closes them.
    */
   execSocketPool?: ExecSocketPoolOptions;
 }
 
 export interface ExecSocketPoolOptions {
-  /** Milliseconds an idle socket stays open. Unset, it stays until the server closes it or the sandbox is destroyed. */
+  /**
+   * Milliseconds any idle socket stays open. Unset, idle sockets close after 2 minutes except the
+   * most recently idle one, which stays until the server closes it or the sandbox is destroyed.
+   */
   idleTimeoutMs?: number;
 }
 
