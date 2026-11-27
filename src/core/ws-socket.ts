@@ -5,6 +5,7 @@
  */
 export interface RailwayWsSocket {
   binaryType: string;
+  readyState?: number;
   /** Bytes queued but not yet transmitted; drives upload backpressure. */
   bufferedAmount?: number;
   onopen: (() => void) | null;

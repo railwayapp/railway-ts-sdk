@@ -39,6 +39,7 @@ const TRANSIENT_CLOSE_CODES: ReadonlySet<number> = new Set([1001, 1006, 1012, 10
 const MAX_CONNECTIONS_CLOSE_CODE = 4001;
 /** What a proxy that predates exec control sends after rejecting the bare hello. */
 const LEGACY_REJECT_CLOSE_CODE = 1000;
+const WS_OPEN = 1;
 
 const notRetryable = new WeakSet<object>();
 
@@ -228,6 +229,7 @@ export function openExecSocket(args: {
       get closed() { return closed; },
       close: closeSocket,
       begin(init, handlers, beginSignal) {
+        if (!closed && socket.readyState !== undefined && socket.readyState !== WS_OPEN) closeSocket();
         if (closed) {
           const detail = `code ${closeInfo.code}${closeInfo.reason ? `: ${closeInfo.reason}` : ""}`;
           throw notStarted(

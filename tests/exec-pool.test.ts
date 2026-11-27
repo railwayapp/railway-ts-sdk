@@ -203,6 +203,21 @@ describe("exec socket pool", () => {
     await expect(second).resolves.toMatchObject({ exitCode: 0 });
   });
 
+  it("sends no command on an idle socket that is closing", async () => {
+    const { sandbox, ws } = await pooledSandbox([shellToken("a"), shellToken("b")], {});
+    const first = sandbox.exec("echo one");
+    const a = await ws.nextSocket();
+    await runOn(a, 1, "one\n");
+    await first;
+    a.readyState = 2;
+
+    const second = sandbox.exec("echo two");
+    const b = await ws.nextSocket();
+    await runOn(b, 1, "two\n");
+    await expect(second).resolves.toMatchObject({ stdout: "two\n" });
+    expect(inits(a)).toHaveLength(1);
+  });
+
   it("opens a fresh socket after the proxy closed an idle one", async () => {
     const { sandbox, ws } = await pooledSandbox([shellToken("a")], {});
     const first = sandbox.exec("echo one");
